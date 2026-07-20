@@ -53,9 +53,20 @@ if [ -d src/lib ]; then
   forbid "from 'node:|require\('node:" 'no Node-only APIs in the library core' src/lib --no-tests
 fi
 
-step "tests"
-if compgen -G 'src/**/*.test.ts' > /dev/null 2>&1 || find src -name '*.test.ts' -print -quit | grep -q .; then
-  node --import tsx --test 'src/**/*.test.ts' || fail "tests failed"
+step "tests and coverage"
+# Thresholds ratchet up, never down. Raise them whenever coverage improves.
+# Branches sit below 100 because a few are unreachable by construction rather
+# than untested; raise this as those get removed or covered.
+if find src -name '*.test.ts' -print -quit | grep -q .; then
+  node --import tsx --test \
+    --experimental-test-coverage \
+    --test-coverage-include='src/lib/**' \
+    --test-coverage-exclude='**/*.test.ts' \
+    --test-coverage-functions=100 \
+    --test-coverage-lines=100 \
+    --test-coverage-branches=95 \
+    --test-reporter=spec \
+    'src/**/*.test.ts' || fail "tests or coverage thresholds failed"
 else
   printf 'NO TESTS FOUND. Rule 10 says behaviour needs a test that failed first.\n'
   failures=$((failures + 1))
