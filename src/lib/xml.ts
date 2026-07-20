@@ -1,9 +1,20 @@
 import { XlsxError } from './errors.js'
 
+/** Byte range the event occupies in the source, so it can be spliced exactly. */
+interface Span {
+  readonly start: number
+  readonly end: number
+}
+
 export type XmlEvent =
-  | { kind: 'open'; name: string; attributes: ReadonlyMap<string, string>; selfClosing: boolean }
-  | { kind: 'text'; text: string }
-  | { kind: 'close'; name: string }
+  | (Span & {
+      kind: 'open'
+      name: string
+      attributes: ReadonlyMap<string, string>
+      selfClosing: boolean
+    })
+  | (Span & { kind: 'text'; text: string })
+  | (Span & { kind: 'close'; name: string })
 
 const ENTITY = /&(?:#x([0-9a-fA-F]+)|#(\d+)|([a-zA-Z][a-zA-Z0-9]*));/g
 
@@ -101,18 +112,28 @@ export function* readXml(source: string): Generator<XmlEvent> {
     const tagStart = source.indexOf('<', position)
 
     if (tagStart === -1) {
-      yield { kind: 'text', text: decodeEntities(source.slice(position)) }
+      yield {
+        kind: 'text',
+        text: decodeEntities(source.slice(position)),
+        start: position,
+        end: source.length,
+      }
       return
     }
     if (tagStart > position) {
-      yield { kind: 'text', text: decodeEntities(source.slice(position, tagStart)) }
+      yield {
+        kind: 'text',
+        text: decodeEntities(source.slice(position, tagStart)),
+        start: position,
+        end: tagStart,
+      }
     }
     position = tagStart
 
     if (source.startsWith('<![CDATA[', position)) {
       const end = source.indexOf(']]>', position)
       if (end === -1) throw new XlsxError(`Unterminated CDATA at offset ${position}`)
-      yield { kind: 'text', text: source.slice(position + 9, end) }
+      yield { kind: 'text', text: source.slice(position + 9, end), start: position, end: end + 3 }
       position = end + 3
       continue
     }
@@ -143,7 +164,7 @@ export function* readXml(source: string): Generator<XmlEvent> {
     position = tagEnd + 1
 
     if (inner.startsWith('/')) {
-      yield { kind: 'close', name: inner.slice(1).trim() }
+      yield { kind: 'close', name: inner.slice(1).trim(), start: tagStart, end: position }
       continue
     }
 
@@ -158,6 +179,8 @@ export function* readXml(source: string): Generator<XmlEvent> {
       name: body.slice(0, nameEnd),
       attributes: parseAttributes(body.slice(nameEnd), tagStart),
       selfClosing,
+      start: tagStart,
+      end: position,
     }
   }
 }

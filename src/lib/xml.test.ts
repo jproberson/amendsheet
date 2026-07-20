@@ -6,10 +6,19 @@ import { type XmlEvent, readXml } from './xml.js'
 
 const events = (source: string): XmlEvent[] => [...readXml(source)]
 
+/** Offsets are asserted separately; this keeps shape assertions readable. */
+function withoutSpan(event: XmlEvent | undefined) {
+  if (event === undefined) return undefined
+  const { start: _start, end: _end, ...rest } = event
+  return rest
+}
+
+const shapes = (source: string) => events(source).map(withoutSpan)
+
 test('reads an element with attributes', () => {
   const [first] = events('<c r="A1" t="s">')
 
-  assert.deepEqual(first, {
+  assert.deepEqual(withoutSpan(first), {
     kind: 'open',
     name: 'c',
     attributes: new Map([
@@ -28,7 +37,7 @@ test('marks self closing elements', () => {
 })
 
 test('reads text between elements', () => {
-  assert.deepEqual(events('<t>hello</t>'), [
+  assert.deepEqual(shapes('<t>hello</t>'), [
     { kind: 'open', name: 't', attributes: new Map(), selfClosing: false },
     { kind: 'text', text: 'hello' },
     { kind: 'close', name: 't' },
@@ -38,13 +47,13 @@ test('reads text between elements', () => {
 test('decodes the predefined entities', () => {
   const [, text] = events('<t>a &amp; b &lt;c&gt; &quot;d&quot; &apos;e&apos;</t>')
 
-  assert.deepEqual(text, { kind: 'text', text: `a & b <c> "d" 'e'` })
+  assert.deepEqual(withoutSpan(text), { kind: 'text', text: `a & b <c> "d" 'e'` })
 })
 
 test('decodes numeric character references', () => {
   const [, text] = events('<t>&#65;&#x42;&#128512;</t>')
 
-  assert.deepEqual(text, { kind: 'text', text: 'AB\u{1F600}' })
+  assert.deepEqual(withoutSpan(text), { kind: 'text', text: 'AB\u{1F600}' })
 })
 
 test('decodes entities inside attribute values', () => {
@@ -56,7 +65,7 @@ test('decodes entities inside attribute values', () => {
 test('skips the xml declaration, comments and processing instructions', () => {
   const source = '<?xml version="1.0"?><!-- note --><a/>'
 
-  assert.deepEqual(events(source), [
+  assert.deepEqual(shapes(source), [
     { kind: 'open', name: 'a', attributes: new Map(), selfClosing: true },
   ])
 })
@@ -64,7 +73,7 @@ test('skips the xml declaration, comments and processing instructions', () => {
 test('keeps CDATA content verbatim', () => {
   const [, text] = events('<t><![CDATA[a & <b>]]></t>')
 
-  assert.deepEqual(text, { kind: 'text', text: 'a & <b>' })
+  assert.deepEqual(withoutSpan(text), { kind: 'text', text: 'a & <b>' })
 })
 
 test('reports where an unclosed tag started', () => {
@@ -108,11 +117,11 @@ test('ignores an attribute with no name', () => {
 test('reads text that follows the last element', () => {
   const [, , , tail] = events('<a>x</a>tail')
 
-  assert.deepEqual(tail, { kind: 'text', text: 'tail' })
+  assert.deepEqual(withoutSpan(tail), { kind: 'text', text: 'tail' })
 })
 
 test('reads a document with no elements', () => {
-  assert.deepEqual(events('plain'), [{ kind: 'text', text: 'plain' }])
+  assert.deepEqual(shapes('plain'), [{ kind: 'text', text: 'plain' }])
 })
 
 test('rejects an attribute with no value', () => {
@@ -139,13 +148,13 @@ test('reads single quoted attribute values', () => {
 test('ignores whitespace in a closing tag', () => {
   const [, close] = events('<a></a >')
 
-  assert.deepEqual(close, { kind: 'close', name: 'a' })
+  assert.deepEqual(withoutSpan(close), { kind: 'close', name: 'a' })
 })
 
 test('leaves an unknown entity alone', () => {
   const [, text] = events('<t>&nbsp; &amp;</t>')
 
-  assert.deepEqual(text, { kind: 'text', text: '&nbsp; &' })
+  assert.deepEqual(withoutSpan(text), { kind: 'text', text: '&nbsp; &' })
 })
 
 test('treats tabs and newlines inside a tag as whitespace', () => {
@@ -154,4 +163,40 @@ test('treats tabs and newlines inside a tag as whitespace', () => {
   assert.equal(first?.kind === 'open' && first.name, 'c')
   assert.equal(first?.kind === 'open' && first.attributes.get('r'), 'A1')
   assert.equal(first?.kind === 'open' && first.attributes.get('s'), '2')
+})
+
+test('reports where each event was found', () => {
+  const source = '<a><b>hi</b></a>'
+
+  assert.deepEqual(
+    events(source).map((event) => [event.start, event.end]),
+    [
+      [0, 3],
+      [3, 6],
+      [6, 8],
+      [8, 12],
+      [12, 16],
+    ],
+  )
+})
+
+test('offsets cover the exact bytes of an element', () => {
+  const source = '<row r="1"><c r="A1" t="s"><v>3</v></c></row>'
+  const [, open] = events(source)
+
+  assert.equal(source.slice(open?.start, open?.end), '<c r="A1" t="s">')
+})
+
+test('offsets skip over comments and declarations', () => {
+  const source = '<?xml version="1.0"?><a/>'
+  const [first] = events(source)
+
+  assert.equal(source.slice(first?.start, first?.end), '<a/>')
+})
+
+test('offsets cover cdata including its wrapper', () => {
+  const source = '<t><![CDATA[x]]></t>'
+  const [, text] = events(source)
+
+  assert.equal(source.slice(text?.start, text?.end), '<![CDATA[x]]>')
 })
