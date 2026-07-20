@@ -1,4 +1,5 @@
 export { readWorkbook } from './lib/document.js'
+export type { CellInput } from './lib/patch.js'
 export type { Cell, CellValue, Workbook, Worksheet } from './lib/document.js'
 export type { CellAddress } from './lib/reference.js'
 export type { SheetState } from './lib/workbook.js'

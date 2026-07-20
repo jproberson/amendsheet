@@ -188,3 +188,56 @@ test('reads cells from every corpus file', async () => {
   assert.ok(cells > 25000, `expected many cells, got ${cells}`)
   assert.ok(dates > 0, `expected some dates, got ${dates}`)
 })
+
+test('reads back a value that was set', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.set('A1', 42)
+
+  const [cell] = [...(workbook.sheets[0]?.cells() ?? [])]
+
+  assert.deepEqual(cell?.value, { kind: 'number', value: 42 })
+})
+
+test('writes a value that was set', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.set('A1', 'changed')
+
+  const reopened = readWorkbook(workbook.toBytes())
+  const [cell] = [...(reopened.sheets[0]?.cells() ?? [])]
+
+  assert.deepEqual(cell?.value, { kind: 'text', value: 'changed' })
+})
+
+test('leaves parts it does not touch alone when a value is set', () => {
+  const original = build('<row r="1"><c r="A1"><v>1</v></c></row>')
+  const workbook = readWorkbook(original)
+  workbook.sheets[0]?.set('A1', 2)
+
+  const before = readContainer(original)
+  const after = readContainer(workbook.toBytes())
+
+  for (const [path, bytes] of before.parts) {
+    if (path === 'xl/worksheets/sheet1.xml') continue
+    assert.deepEqual(after.parts.get(path), bytes, `${path} changed`)
+  }
+})
+
+test('rejects a reference that is not a cell', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+
+  assert.throws(() => workbook.sheets[0]?.set('nonsense', 1), /not a cell reference/)
+})
+
+test('writes a date into a cell that already has a date format', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1" s="1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.set('A1', new Date('2024-01-01T00:00:00Z'))
+
+  const reopened = readWorkbook(workbook.toBytes())
+  const [cell] = [...(reopened.sheets[0]?.cells() ?? [])]
+
+  assert.equal(cell?.value.kind, 'date')
+  assert.equal(
+    cell?.value.kind === 'date' && cell.value.value.toISOString(),
+    '2024-01-01T00:00:00.000Z',
+  )
+})

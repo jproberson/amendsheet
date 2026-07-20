@@ -1,6 +1,7 @@
 import { type Container, writeContainer } from './container.js'
 import { serialToDate } from './date.js'
-import type { CellAddress } from './reference.js'
+import { type CellInput, patchSheet } from './patch.js'
+import { type CellAddress, parseReference } from './reference.js'
 import { type RawCell, readSheet } from './sheet.js'
 import { readSharedStrings } from './shared-strings.js'
 import { type Styles, isDateFormat, numberFormatOf, readStyles } from './styles.js'
@@ -29,6 +30,11 @@ export interface Worksheet {
   readonly state: SheetState
   /** Streams the cells that carry content; empty cells are not visited. */
   cells(): Generator<Cell>
+  /**
+   * Records a new value for a cell. The change is visible to `cells()` and is
+   * written by `toBytes()`; the rest of the sheet is left byte for byte alone.
+   */
+  set(reference: string, value: CellInput): void
 }
 
 export interface Workbook {
@@ -75,24 +81,47 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   const stringsXml = partText(container, 'xl/sharedStrings.xml')
   const sharedStrings = stringsXml === undefined ? [] : readSharedStrings(stringsXml)
 
+  const edits = new Map<string, Map<string, CellInput>>()
+
   const sheets = part.sheets.map((reference): Worksheet => {
     const sheetXml = partText(container, reference.path)
+
+    const patched = () => {
+      if (sheetXml === undefined) return undefined
+      const pending = edits.get(reference.path)
+      return pending === undefined ? sheetXml : patchSheet(sheetXml, pending, date1904)
+    }
 
     return {
       name: reference.name,
       state: reference.state,
       *cells(): Generator<Cell> {
-        if (sheetXml === undefined) return
-        for (const raw of readSheet(sheetXml, sharedStrings)) {
+        const xml = patched()
+        if (xml === undefined) return
+        for (const raw of readSheet(xml, sharedStrings)) {
           yield toCell(raw, styles, date1904)
         }
+      },
+      set(cellReference: string, value: CellInput): void {
+        parseReference(cellReference)
+        const pending = edits.get(reference.path) ?? new Map<string, CellInput>()
+        pending.set(cellReference, value)
+        edits.set(reference.path, pending)
       },
     }
   })
 
-  return {
-    sheets,
-    date1904,
-    toBytes: () => writeContainer(container),
+  const toBytes = (): Uint8Array => {
+    if (edits.size === 0) return writeContainer(container)
+
+    const parts = new Map(container.parts)
+    for (const [path, pending] of edits) {
+      const xml = partText(container, path)
+      if (xml === undefined) continue
+      parts.set(path, new TextEncoder().encode(patchSheet(xml, pending, date1904)))
+    }
+    return writeContainer({ parts })
   }
+
+  return { sheets, date1904, toBytes }
 }
