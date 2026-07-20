@@ -64,7 +64,7 @@ if find src -name '*.test.ts' -print -quit | grep -q .; then
     --test-coverage-exclude='**/*.test.ts' \
     --test-coverage-functions=100 \
     --test-coverage-lines=100 \
-    --test-coverage-branches=95 \
+    --test-coverage-branches=97 \
     --test-reporter=spec \
     'src/**/*.test.ts' || fail "tests or coverage thresholds failed"
 else
