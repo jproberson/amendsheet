@@ -1,9 +1,9 @@
 {
-  "name": "xlsx-corpus-harness",
+  "name": "xlsxdoc",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Round-trip fidelity harness for XLSX libraries: does read->write preserve the document?",
+  "description": "Read and write .xlsx files without damaging what you did not touch.",
   "scripts": {
     "corpus": "tsx src/corpus/generate.ts",
     "corpus:real": "tsx src/corpus/fetch.ts",
