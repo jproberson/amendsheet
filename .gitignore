@@ -2,7 +2,6 @@ node_modules/
 dist/
 corpus/generated/
 corpus/quirks/
-corpus/real/
 corpus/manual/*
 !corpus/manual/README.md
 CLAUDE.md
