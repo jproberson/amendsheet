@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { serialToDate } from './date.js'
+import { dateToSerial, serialToDate } from './date.js'
 
 const iso = (serial: number, date1904 = false) => serialToDate(serial, date1904).toISOString()
 
@@ -52,4 +52,24 @@ test('rejects a negative serial', () => {
 
 test('rejects a serial that is not a number', () => {
   assert.throws(() => serialToDate(Number.NaN, false), /NaN is not a date/)
+})
+
+test('writes a date back as the serial it came from', () => {
+  for (const serial of [1, 59, 61, 45292, 45292.25]) {
+    assert.equal(dateToSerial(serialToDate(serial, false), false), serial)
+  }
+})
+
+test('writes a date back under the 1904 epoch', () => {
+  for (const serial of [0, 1, 59, 40000]) {
+    assert.equal(dateToSerial(serialToDate(serial, true), true), serial)
+  }
+})
+
+test('writes the phantom leap day as the day it maps onto', () => {
+  assert.equal(dateToSerial(serialToDate(60, false), false), 61)
+})
+
+test('rejects writing an invalid date', () => {
+  assert.throws(() => dateToSerial(new Date('nonsense'), false), /Invalid date/)
 })

@@ -29,3 +29,14 @@ export function serialToDate(serial: number, date1904: boolean): Date {
   const corrected = serial > PHANTOM_LEAP_DAY ? serial - 1 : serial
   return new Date(EPOCH_1900 + corrected * MILLISECONDS_PER_DAY)
 }
+
+/** Inverse of `serialToDate`, for writing a date back into a cell. */
+export function dateToSerial(date: Date, date1904: boolean): number {
+  const time = date.getTime()
+  if (Number.isNaN(time)) throw new XlsxError('Invalid date cannot be written')
+
+  if (date1904) return (time - EPOCH_1904) / MILLISECONDS_PER_DAY
+
+  const days = (time - EPOCH_1900) / MILLISECONDS_PER_DAY
+  return days >= PHANTOM_LEAP_DAY ? days + 1 : days
+}
