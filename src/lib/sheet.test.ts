@@ -4,7 +4,7 @@ import { test } from 'node:test'
 import { readContainer } from './container.js'
 import { readSheet } from './sheet.js'
 import { readSharedStrings } from './shared-strings.js'
-import { openWorkbook } from './workbook.js'
+import { readWorkbookPart } from './workbook.js'
 
 const sheet = (body: string, dimension = 'A1:Z100') =>
   `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="${dimension}"/><sheetData>${body}</sheetData></worksheet>`
@@ -128,7 +128,7 @@ test('reads every sheet in the corpus', async () => {
 
   for (const file of files) {
     const bytes = new Uint8Array(await readFile(`corpus/real/${file}`))
-    const workbook = openWorkbook(bytes)
+    const workbook = readWorkbookPart(bytes)
 
     const stringsPart = workbook.container.parts.get('xl/sharedStrings.xml')
     const strings =

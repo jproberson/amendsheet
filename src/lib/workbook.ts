@@ -10,7 +10,7 @@ const ROOT_RELATIONSHIPS = '_rels/.rels'
 
 export type SheetState = 'visible' | 'hidden' | 'veryHidden'
 
-export interface Sheet {
+export interface SheetRef {
   readonly name: string
   readonly sheetId: string
   /** Package path of the worksheet part, already resolved. */
@@ -18,8 +18,8 @@ export interface Sheet {
   readonly state: SheetState
 }
 
-export interface Workbook {
-  readonly sheets: readonly Sheet[]
+export interface WorkbookPart {
+  readonly sheets: readonly SheetRef[]
   /** Excel's alternate epoch, where serial dates count from 1904 rather than 1900. */
   readonly date1904: boolean
   /** Every part of the original file, including the ones nothing here reads. */
@@ -66,7 +66,7 @@ function relationshipId(attributes: ReadonlyMap<string, string>): string | undef
   return undefined
 }
 
-export function openWorkbook(bytes: Uint8Array): Workbook {
+export function readWorkbookPart(bytes: Uint8Array): WorkbookPart {
   const container = readContainer(bytes)
   const workbookPath = findWorkbookPath(container)
   const workbookXml = partText(container, workbookPath)
@@ -76,7 +76,7 @@ export function openWorkbook(bytes: Uint8Array): Workbook {
     ? readRelationships(partText(container, relationshipsPath))
     : new Map()
 
-  const sheets: Sheet[] = []
+  const sheets: SheetRef[] = []
   let date1904 = false
 
   for (const event of readXml(workbookXml)) {
