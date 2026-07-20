@@ -1,0 +1,56 @@
+import type { CellValue as DocumentValue } from '../lib/document.js'
+import { readWorkbook } from '../lib/document.js'
+import type { Adapter, CellValue, SheetValues } from '../harness/types.js'
+
+function toHarnessValue(value: DocumentValue): CellValue | null {
+  switch (value.kind) {
+    case 'empty':
+      return null
+    case 'date':
+      return { type: 'date', value: value.value.toISOString() }
+    case 'number':
+      return { type: 'number', value: value.value }
+    case 'text':
+      return value.value === '' ? null : { type: 'text', value: value.value }
+    case 'boolean':
+      return { type: 'boolean', value: value.value }
+    case 'error':
+      return { type: 'error', value: value.value }
+  }
+}
+
+/**
+ * Measures this library with the same rig used on the incumbents, so the
+ * comparison runs over identical files and identical assertions.
+ */
+export const xlsxdocAdapter: Adapter = {
+  name: 'xlsxdoc (this library)',
+
+  async roundTrip(bytes) {
+    return readWorkbook(bytes).toBytes()
+  },
+
+  async values(bytes) {
+    const workbook = readWorkbook(bytes)
+    const sheets: SheetValues[] = []
+
+    for (const worksheet of workbook.sheets) {
+      const cells = new Map<string, CellValue>()
+
+      for (const cell of worksheet.cells()) {
+        const value = toHarnessValue(cell.value)
+        if (value === null) continue
+
+        cells.set(cell.reference, {
+          ...value,
+          ...(cell.formula === undefined ? {} : { formula: cell.formula }),
+          ...(cell.numberFormat === undefined ? {} : { style: `format=${cell.numberFormat}` }),
+        })
+      }
+
+      sheets.push({ name: worksheet.name, cells })
+    }
+
+    return sheets
+  },
+}

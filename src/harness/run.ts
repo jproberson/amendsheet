@@ -3,12 +3,13 @@ import { join, relative } from 'node:path'
 import { measureRoundTrip } from './compare.js'
 import { printReport } from './report.js'
 import { exceljsAdapter } from '../adapters/exceljs.js'
+import { xlsxdocAdapter } from '../adapters/xlsxdoc.js'
 import type { Adapter, RoundTripResult } from './types.js'
 
 const CORPUS_DIR = join(process.cwd(), 'corpus')
 
 /** Register additional libraries here to benchmark them side by side. */
-const ADAPTERS: Adapter[] = [exceljsAdapter]
+const ADAPTERS: Adapter[] = [xlsxdocAdapter, exceljsAdapter]
 
 async function findFiles(dir: string): Promise<string[]> {
   const found: string[] = []

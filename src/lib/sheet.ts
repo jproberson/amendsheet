@@ -2,17 +2,17 @@ import { XlsxError } from './errors.js'
 import { type CellAddress, formatReference, parseReference } from './reference.js'
 import { readXml } from './xml.js'
 
-export type CellValue =
+export type RawCellValue =
   | { readonly kind: 'number'; readonly value: number }
   | { readonly kind: 'text'; readonly value: string }
   | { readonly kind: 'boolean'; readonly value: boolean }
   | { readonly kind: 'error'; readonly value: string }
   | { readonly kind: 'empty' }
 
-export interface Cell {
+export interface RawCell {
   readonly address: CellAddress
   readonly reference: string
-  readonly value: CellValue
+  readonly value: RawCellValue
   /** Formula source, without the leading `=`. Absent when the cell holds a literal. */
   readonly formula?: string
   /** Index into the style table. Resolving it to a format needs styles.xml. */
@@ -24,7 +24,7 @@ export interface Cell {
  * number format, so telling them apart needs the style table; this reader
  * reports what the cell actually stores.
  */
-export function* readSheet(xml: string, sharedStrings: readonly string[]): Generator<Cell> {
+export function* readSheet(xml: string, sharedStrings: readonly string[]): Generator<RawCell> {
   let row = 0
   let column = 0
 
@@ -40,7 +40,7 @@ export function* readSheet(xml: string, sharedStrings: readonly string[]): Gener
   let inFormula = false
   let inInlineText = false
 
-  const finishCell = (): Cell => {
+  const finishCell = (): RawCell => {
     const address = reference === undefined ? { row, column } : parseReference(reference)
     const written = reference ?? formatReference(address)
     column = address.column
@@ -122,7 +122,7 @@ function toValue(
   inlineText: string[] | null,
   sharedStrings: readonly string[],
   reference: string,
-): CellValue {
+): RawCellValue {
   if (type === 'inlineStr') {
     return { kind: 'text', value: inlineText === null ? '' : inlineText.join('') }
   }

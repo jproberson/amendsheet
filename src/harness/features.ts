@@ -52,6 +52,9 @@ export function scanFeatures(parts: Parts): FeatureCounts {
   const bump = (key: string, by = 1) => counts.set(key, (counts.get(key) ?? 0) + by)
 
   for (const [path, bytes] of parts) {
+    // Directory entries carry no content, and not every writer emits them.
+    if (path.endsWith('/')) continue
+
     for (const [feature, pattern] of PART_FEATURES) {
       if (pattern.test(path)) bump(feature)
     }

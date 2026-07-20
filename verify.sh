@@ -13,11 +13,11 @@ fail() {
   failures=$((failures + 1))
 }
 
-# forbid <pattern> <explanation> [scope] [--no-tests]
+# forbid <pattern> <explanation> [scope] [--no-tests] [ignore-pattern]
 # Reports a failure if the pattern matches. Comment lines are ignored so that
 # documenting a banned construct does not trip the check.
 forbid() {
-  local pattern="$1" explanation="$2" scope="${3:-src}" tests="${4:-}"
+  local pattern="$1" explanation="$2" scope="${3:-src}" tests="${4:-}" ignore="${5:-}"
   local hits
   if [ "$tests" = "--no-tests" ]; then
     hits=$(grep -rnE "$pattern" "$scope" --include='*.ts' --exclude='*.test.ts' || true)
@@ -25,6 +25,9 @@ forbid() {
     hits=$(grep -rnE "$pattern" "$scope" --include='*.ts' || true)
   fi
   hits=$(printf '%s' "$hits" | grep -vE '^\S+:[0-9]+: *(\*|//)' || true)
+  if [ -n "$ignore" ]; then
+    hits=$(printf '%s' "$hits" | grep -vE "$ignore" || true)
+  fi
   if [ -n "$hits" ]; then
     fail "$explanation"
     printf '%s\n' "$hits" | sed 's/^/    /'
@@ -43,7 +46,8 @@ step "typecheck"
 npx tsc --noEmit || fail "typecheck failed"
 
 step "house rules"
-forbid '\bas [A-Z][A-Za-z]*\b|\bas unknown\b' 'type assertions are banned; validate at the boundary instead'
+# `import { X as Y }` is an alias, not an assertion, so import lines are exempt.
+forbid '\bas [A-Z][A-Za-z]*\b|\bas unknown\b' 'type assertions are banned; validate at the boundary instead' src '' '^\S+:[0-9]+: *import '
 forbid ':\s*any\b|<any>' 'any is banned'
 forbid '\w!\.' 'non-null assertions are banned'
 forbid '^export default|export default ' 'default exports are banned'
