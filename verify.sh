@@ -13,11 +13,18 @@ fail() {
   failures=$((failures + 1))
 }
 
-# Reports a failure if the pattern matches anywhere under src/.
+# forbid <pattern> <explanation> [scope] [--no-tests]
+# Reports a failure if the pattern matches. Comment lines are ignored so that
+# documenting a banned construct does not trip the check.
 forbid() {
-  local pattern="$1" explanation="$2"
+  local pattern="$1" explanation="$2" scope="${3:-src}" tests="${4:-}"
   local hits
-  hits=$(grep -rnE "$pattern" src --include='*.ts' | grep -vE '^\S+:[0-9]+: *(\*|//)' || true)
+  if [ "$tests" = "--no-tests" ]; then
+    hits=$(grep -rnE "$pattern" "$scope" --include='*.ts' --exclude='*.test.ts' || true)
+  else
+    hits=$(grep -rnE "$pattern" "$scope" --include='*.ts' || true)
+  fi
+  hits=$(printf '%s' "$hits" | grep -vE '^\S+:[0-9]+: *(\*|//)' || true)
   if [ -n "$hits" ]; then
     fail "$explanation"
     printf '%s\n' "$hits" | sed 's/^/    /'
@@ -42,8 +49,8 @@ forbid '\w!\.' 'non-null assertions are banned'
 forbid '^export default|export default ' 'default exports are banned'
 forbid '\brequire\(' 'this package is ESM only'
 if [ -d src/lib ]; then
-  forbid 'console\.' 'no console in library code (scripts and harness may)'
-  forbid "from 'node:|require\('node:" 'no Node-only APIs in the library core'
+  forbid 'console\.' 'no console in library code (scripts and harness may)' src/lib --no-tests
+  forbid "from 'node:|require\('node:" 'no Node-only APIs in the library core' src/lib --no-tests
 fi
 
 step "tests"
