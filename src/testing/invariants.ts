@@ -54,10 +54,23 @@ export function assertReferencesAreSane(xml: string, what: string): void {
   }
 }
 
+/** Two rows with the same index make Excel repair the file. */
+export function assertRowsAreUnique(xml: string, what: string): void {
+  const seen = new Set<string>()
+  for (const event of readXml(xml)) {
+    if (event.kind !== 'open' || event.localName !== 'row') continue
+    const index = event.attributes.get('r')
+    if (index === undefined) continue
+    assert.ok(!seen.has(index), `${what}: row ${index} appears more than once`)
+    seen.add(index)
+  }
+}
+
 export function assertPatchedSheet(xml: string, what: string): void {
   assertWellFormed(xml, what)
   assertSheetShape(xml, what)
   assertReferencesAreSane(xml, what)
+  assertRowsAreUnique(xml, what)
 }
 
 /** Parts other than these must survive an edit byte for byte. */

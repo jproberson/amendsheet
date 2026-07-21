@@ -141,3 +141,40 @@ test('clones a style that has children without breaking the table', () => {
   assertWellFormed(result.xml, 'styles with children')
   assert.match(result.xml, /<alignment horizontal="center"\/><\/xf><\/cellXfs>/)
 })
+
+test('writes into a prefixed style table without breaking it', () => {
+  const source =
+    '<x:styleSheet><x:cellXfs count="1"><x:xf numFmtId="0"/></x:cellXfs></x:styleSheet>'
+
+  const result = ensureDateStyle(source, undefined)
+
+  assertWellFormed(result.xml, 'prefixed cellXfs')
+  assert.equal(isDateFormat(readStyles(result.xml), result.index), true)
+})
+
+test('opens a prefixed self closing style table correctly', () => {
+  const source = '<x:styleSheet><x:cellXfs count="0"/></x:styleSheet>'
+
+  const result = ensureDateStyle(source, undefined)
+
+  assertWellFormed(result.xml, 'prefixed self closing cellXfs')
+  assert.match(result.xml, /<\/x:cellXfs>/)
+})
+
+test('adds a style table to a prefixed document that has none', () => {
+  const source = '<x:styleSheet><x:fonts count="1"><x:font/></x:fonts></x:styleSheet>'
+
+  const result = ensureDateStyle(source, undefined)
+
+  assertWellFormed(result.xml, 'prefixed root with no cellXfs')
+  assert.equal(isDateFormat(readStyles(result.xml), result.index), true)
+})
+
+test('turns on number formatting written as a word', () => {
+  const source = styles('<xf numFmtId="0" fontId="2" applyNumberFormat="false"/>')
+
+  const result = ensureDateStyle(source, 0)
+
+  assert.equal(isDateFormat(readStyles(result.xml), result.index), true)
+  assert.match(result.xml, /applyNumberFormat="1"/)
+})

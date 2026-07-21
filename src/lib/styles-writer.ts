@@ -1,3 +1,4 @@
+import { XlsxError } from './errors.js'
 import { isDateFormat, readStyles } from './styles.js'
 import { readXml } from './xml.js'
 
@@ -14,6 +15,8 @@ export interface DateStyle {
 
 interface CellFormats {
   readonly elements: string[]
+  /** Namespace prefix the file writes its elements with, `x:` or empty. */
+  readonly prefix: string
   readonly openTag: string
   readonly openStart: number
   readonly openEnd: number
@@ -28,11 +31,14 @@ function readCellFormats(xml: string): CellFormats | undefined {
   let insertAt = -1
   let selfClosing = false
   let inside = false
+  let prefix = ''
   let openElement = -1
   const elements: string[] = []
 
   for (const event of readXml(xml)) {
     if (event.kind === 'open' && event.localName === 'cellXfs') {
+      const colon = event.name.indexOf(':')
+      prefix = colon === -1 ? '' : event.name.slice(0, colon + 1)
       openTag = xml.slice(event.start, event.end)
       openStart = event.start
       openEnd = event.end
@@ -60,7 +66,7 @@ function readCellFormats(xml: string): CellFormats | undefined {
   }
 
   if (openStart === -1) return undefined
-  return { elements, openTag, openStart, openEnd, insertAt, selfClosing }
+  return { elements, prefix, openTag, openStart, openEnd, insertAt, selfClosing }
 }
 
 function asDateFormat(element: string): string {
@@ -73,7 +79,7 @@ function asDateFormat(element: string): string {
     : openTag.replace(/^<xf/, `<xf numFmtId="${SHORT_DATE_FORMAT_ID}"`)
 
   const applied = withFormat.includes('applyNumberFormat=')
-    ? withFormat.replace(/applyNumberFormat="\d+"/, 'applyNumberFormat="1"')
+    ? withFormat.replace(/applyNumberFormat="(?:\d+|true|false)"/, 'applyNumberFormat="1"')
     : withFormat.replace(/\/?>$/, (tag) =>
         tag === '/>' ? ' applyNumberFormat="1"/>' : ' applyNumberFormat="1">',
       )
@@ -106,15 +112,31 @@ export function ensureDateStyle(stylesXml: string, basedOn: number | undefined):
       : asDateFormat(formats?.elements[basedOn] ?? DEFAULT_DATE_XF)
 
   if (formats === undefined) {
-    const closing = stylesXml.lastIndexOf('</styleSheet>')
-    const table = `<cellXfs count="1">${wanted}</cellXfs>`
+    let closeStart = -1
+    let rootPrefix = ''
+    for (const event of readXml(stylesXml)) {
+      if (event.kind === 'close' && event.localName === 'styleSheet') {
+        closeStart = event.start
+        const colon = event.name.indexOf(':')
+        rootPrefix = colon === -1 ? '' : event.name.slice(0, colon + 1)
+      }
+    }
+    if (closeStart === -1) {
+      throw new XlsxError('malformed-xml', 'Style table has no styleSheet element', {
+        part: 'xl/styles.xml',
+      })
+    }
+
+    const element = wanted.replace(/^<xf/, `<${rootPrefix}xf`)
+    const table = `<${rootPrefix}cellXfs count="1">${element}</${rootPrefix}cellXfs>`
     return {
-      xml: `${stylesXml.slice(0, closing)}${table}${stylesXml.slice(closing)}`,
+      xml: `${stylesXml.slice(0, closeStart)}${table}${stylesXml.slice(closeStart)}`,
       index: 0,
     }
   }
 
-  const existing = formats.elements.indexOf(wanted)
+  const prefixed = wanted.replace(/^<xf/, `<${formats.prefix}xf`)
+  const existing = formats.elements.indexOf(prefixed)
   if (existing !== -1) return { xml: stylesXml, index: existing }
 
   const index = formats.elements.length
@@ -125,7 +147,7 @@ export function ensureDateStyle(stylesXml: string, basedOn: number | undefined):
     return {
       xml:
         stylesXml.slice(0, formats.openStart) +
-        `${opened}${wanted}</cellXfs>` +
+        `${opened}${prefixed}</${formats.prefix}cellXfs>` +
         stylesXml.slice(formats.openEnd),
       index,
     }
@@ -133,5 +155,5 @@ export function ensureDateStyle(stylesXml: string, basedOn: number | undefined):
 
   const head = stylesXml.slice(0, formats.openStart) + openTag
   const body = stylesXml.slice(formats.openEnd, formats.insertAt)
-  return { xml: `${head}${body}${wanted}${stylesXml.slice(formats.insertAt)}`, index }
+  return { xml: `${head}${body}${prefixed}${stylesXml.slice(formats.insertAt)}`, index }
 }

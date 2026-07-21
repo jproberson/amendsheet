@@ -7,6 +7,7 @@ import {
   assertWellFormed,
 } from '../testing/invariants.js'
 import { readWorkbook } from './document.js'
+import { XlsxError } from './errors.js'
 import type { CellInput } from './patch.js'
 import { indexToColumn } from './reference.js'
 
@@ -61,6 +62,14 @@ function makeEdits(next: () => number, count: number): Edit[] {
   }
 
   return edits
+}
+
+/**
+ * The library refuses a few edits on purpose. Only those may be skipped; any
+ * other throw is a failure, or a property becomes a no-op that reports green.
+ */
+function isRefusal(error: unknown): boolean {
+  return error instanceof XlsxError && error.code === 'unwritable-value'
 }
 
 function applyEdits(bytes: Uint8Array, edits: readonly Edit[]): Uint8Array {
@@ -139,7 +148,8 @@ test('every edited cell reads back as it was written', async () => {
     let written: Uint8Array
     try {
       written = applyEdits(bytes, edits)
-    } catch {
+    } catch (error) {
+      if (!isRefusal(error)) throw error
       continue
     }
     const sheet = readWorkbook(written).sheets[0]
@@ -195,19 +205,20 @@ test('cells nobody edited are left alone', async () => {
     let written: Uint8Array
     try {
       written = applyEdits(bytes, edits)
-    } catch {
+    } catch (error) {
+      if (!isRefusal(error)) throw error
       // An edit the library refuses cannot have disturbed anything.
       continue
     }
 
-    let checked = 0
-    for (const cell of readWorkbook(written).sheets[0]?.cells() ?? []) {
-      if (checked >= sample) break
-      checked++
-      if (touched.has(cell.reference)) continue
-      const was = original.get(cell.reference)
-      if (was === undefined) continue
-      assert.equal(JSON.stringify(cell.value), was, `${file} ${cell.reference} changed`)
+    // Looked up by reference rather than by position, since inserting a cell
+    // shifts what the first N of the sheet are.
+    const edited = readWorkbook(written).sheets[0]
+    for (const [reference, was] of original) {
+      if (touched.has(reference)) continue
+      const now = edited?.cell(reference)
+      assert.ok(now !== undefined, `${file} ${reference} disappeared`)
+      assert.equal(JSON.stringify(now.value), was, `${file} ${reference} changed`)
     }
   }
 })
@@ -223,7 +234,8 @@ test('no edit disturbs a part it has no business touching', async () => {
     let written: Uint8Array
     try {
       written = applyEdits(bytes, edits)
-    } catch {
+    } catch (error) {
+      if (!isRefusal(error)) throw error
       continue
     }
     assertOnlyTheSheetChanged(bytes, written, file)
@@ -246,8 +258,9 @@ test('the order edits are applied in does not change what the sheet holds', asyn
     try {
       forwards = applyEdits(bytes, edits)
       backwards = applyEdits(bytes, [...edits].reverse())
-    } catch {
-      // Some edits are refused, and refusing them is order independent too.
+    } catch (error) {
+      if (!isRefusal(error)) throw error
+      // Refusing an edit is order independent too.
       continue
     }
 
@@ -280,7 +293,8 @@ test('every patched sheet keeps its structure and its references', async () => {
     let written: Uint8Array
     try {
       written = applyEdits(bytes, makeEdits(next, 10))
-    } catch {
+    } catch (error) {
+      if (!isRefusal(error)) throw error
       continue
     }
 

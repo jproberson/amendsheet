@@ -3,48 +3,14 @@ import { readFile, readdir } from 'node:fs/promises'
 import { test } from 'node:test'
 import { readWorkbook } from './document.js'
 import { type CellInput, patchSheet } from './patch.js'
-import { readXml } from './xml.js'
-
-/**
- * Splicing can produce output that contains the expected substring and is still
- * broken, so every patch result is checked for structure rather than fragments.
- */
-function assertWellFormed(xml: string, what: string): void {
-  const open: string[] = []
-  for (const event of readXml(xml)) {
-    if (event.kind === 'open' && !event.selfClosing) open.push(event.name)
-    if (event.kind === 'close') assert.equal(open.pop(), event.name, `${what}: mismatched close`)
-  }
-  assert.deepEqual(open, [], `${what}: unclosed elements`)
-}
-
-/** Every cell must sit inside a row, and every row inside sheetData. */
-function assertCellsAreInRows(xml: string, what: string): void {
-  let inRow = false
-  let inData = false
-  for (const event of readXml(xml)) {
-    if (event.kind === 'open') {
-      if (event.name === 'sheetData') inData = !event.selfClosing
-      if (event.name === 'row') {
-        assert.ok(inData, `${what}: row outside sheetData`)
-        inRow = !event.selfClosing
-      }
-      if (event.name === 'c') assert.ok(inRow, `${what}: cell outside a row`)
-    }
-    if (event.kind === 'close') {
-      if (event.name === 'row') inRow = false
-      if (event.name === 'sheetData') inData = false
-    }
-  }
-}
+import { assertPatchedSheet } from '../testing/invariants.js'
 
 const sheet = (rows: string) => `<worksheet><sheetData>${rows}</sheetData></worksheet>`
 
 test('a cell added to a self closing row lands inside that row', () => {
   const patched = patchSheet(sheet('<row r="1"/>'), new Map<string, CellInput>([['A1', 1]]), false)
 
-  assertWellFormed(patched, 'self closing row')
-  assertCellsAreInRows(patched, 'self closing row')
+  assertPatchedSheet(patched, 'self closing row')
   assert.match(patched, /<row r="1"><c r="A1"><v>1<\/v><\/c><\/row>/)
 })
 
@@ -53,7 +19,7 @@ test('setting a cell in a row whose cells omit references keeps the others', () 
 
   const patched = patchSheet(source, new Map<string, CellInput>([['B2', 99]]), false)
 
-  assertWellFormed(patched, 'reference-less cells')
+  assertPatchedSheet(patched, 'reference-less cells')
   assert.match(patched, /<v>20<\/v>/, 'the existing A2 value was destroyed')
   assert.match(patched, /<c r="B2"><v>99<\/v><\/c>/)
 })
@@ -151,20 +117,34 @@ const PREFIXED =
 test('an edit to a prefixed document keeps the prefix', () => {
   const patched = patchSheet(PREFIXED, new Map<string, CellInput>([['A1', 2]]), false)
 
-  assertWellFormed(patched, 'prefixed replace')
+  assertPatchedSheet(patched, 'prefixed replace')
   assert.match(patched, /<x:c r="A1"><x:v>2<\/x:v><\/x:c>/)
 })
 
 test('a cell added to a prefixed document keeps the prefix', () => {
   const patched = patchSheet(PREFIXED, new Map<string, CellInput>([['B1', 5]]), false)
 
-  assertWellFormed(patched, 'prefixed insert')
+  assertPatchedSheet(patched, 'prefixed insert')
   assert.match(patched, /<x:c r="B1"><x:v>5<\/x:v><\/x:c>/)
 })
 
 test('a row added to a prefixed document keeps the prefix', () => {
   const patched = patchSheet(PREFIXED, new Map<string, CellInput>([['A3', 7]]), false)
 
-  assertWellFormed(patched, 'prefixed new row')
+  assertPatchedSheet(patched, 'prefixed new row')
   assert.match(patched, /<x:row r="3"><x:c r="A3"><x:v>7<\/x:v><\/x:c><\/x:row>/)
+})
+
+test('two cells added to one self closing row stay in a single row', () => {
+  const patched = patchSheet(
+    sheet('<row r="1"/>'),
+    new Map<string, CellInput>([
+      ['A1', 1],
+      ['B1', 2],
+    ]),
+    false,
+  )
+
+  assertPatchedSheet(patched, 'two cells, one self closing row')
+  assert.match(patched, /<row r="1"><c r="A1"><v>1<\/v><\/c><c r="B1"><v>2<\/v><\/c><\/row>/)
 })

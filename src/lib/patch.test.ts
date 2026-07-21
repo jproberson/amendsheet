@@ -161,3 +161,34 @@ test('writes over an ordinary formula cell', () => {
 
   assert.match(patched, /<c r="A1"><v>9<\/v><\/c>/)
 })
+
+test('recognises a shared formula master written self closing', () => {
+  const source = sheet('<row r="1"><c r="A1"><f t="shared" ref="A1:A3" si="0"/><v>2</v></c></row>')
+
+  assert.throws(
+    () => patchSheet(source, new Map<string, CellInput>([['A1', 9]]), false),
+    /shared formula/i,
+  )
+})
+
+test('writes over a dependent written with a closing tag', () => {
+  const source = sheet(
+    '<row r="1"><c r="A1"><f t="shared" ref="A1:A2" si="0">B1*2</f><v>2</v></c></row>' +
+      '<row r="2"><c r="A2"><f t="shared" si="0"></f><v>4</v></c></row>',
+  )
+
+  const patched = patchSheet(source, new Map<string, CellInput>([['A2', 9]]), false)
+
+  assert.match(patched, /<c r="A2"><v>9<\/v><\/c>/)
+})
+
+test('widens a dimension written with a closing tag', () => {
+  const source =
+    '<worksheet><dimension ref="A1:B2"></dimension><sheetData>' +
+    '<row r="1"><c r="A1"><v>1</v></c></row></sheetData></worksheet>'
+
+  const patched = patchSheet(source, new Map<string, CellInput>([['D5', 4]]), false)
+
+  assert.equal(patched.includes('</dimension>'), false, 'a dangling close tag was left behind')
+  assert.match(patched, /<dimension ref="A1:D5"\/>/)
+})

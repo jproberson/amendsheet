@@ -13,6 +13,9 @@ const EPOCH_1904 = Date.UTC(1904, 0, 1)
  */
 const PHANTOM_LEAP_DAY = 60
 
+/** 9999-12-31, the last day a sheet can hold. */
+const LAST_SERIAL = 2_958_465
+
 /**
  * A spreadsheet date is a calendar date rather than an instant, so a serial
  * means the same wall clock day wherever it is read, and `new Date(2024, 0, 1)`
@@ -23,7 +26,7 @@ const PHANTOM_LEAP_DAY = 60
  * the epoch sit on opposite sides of a daylight saving change.
  */
 export function serialToDate(serial: number, date1904: boolean): Date {
-  if (!Number.isFinite(serial) || serial < 0) {
+  if (!Number.isFinite(serial) || serial < 0 || serial > LAST_SERIAL) {
     throw new XlsxError('unwritable-value', `Serial ${serial} is not a date`)
   }
 

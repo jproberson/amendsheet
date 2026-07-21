@@ -127,3 +127,12 @@ test('refuses a date the workbook epoch cannot represent', () => {
 test('writes the first day the 1904 system can hold', () => {
   assert.equal(dateToSerial(new Date(1904, 0, 1), true), 0)
 })
+
+test('refuses a serial beyond the last day a sheet can hold', () => {
+  assert.throws(() => serialToDate(1e12, false), /not a date/)
+  assert.throws(() => serialToDate(2958466, false), /not a date/)
+})
+
+test('reads the last day a sheet can hold', () => {
+  assert.equal(serialToDate(2958465, false).getFullYear(), 9999)
+})

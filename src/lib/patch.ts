@@ -103,6 +103,7 @@ function readShape(xml: string): SheetShape {
   let selfClosing = false
 
   let prefix = ''
+  let openDimension = -1
   let currentRow: { row: number; start: number } | undefined
   let currentCells: CellSpan[] = []
   let cellStart = -1
@@ -115,7 +116,10 @@ function readShape(xml: string): SheetShape {
     if (event.kind === 'open') {
       if (event.localName === 'dimension') {
         const ref = event.attributes.get('ref')
-        if (ref !== undefined) dimension = { start: event.start, end: event.end, ref }
+        if (ref !== undefined) {
+          dimension = { start: event.start, end: event.end, ref }
+          openDimension = event.selfClosing ? -1 : event.start
+        }
         continue
       }
       if (event.localName === 'sheetData') {
@@ -166,9 +170,10 @@ function readShape(xml: string): SheetShape {
           })
         }
       }
-      // Only the master carries the expression; dependents name the si alone.
+      // The master is the one carrying ref; dependents name the si alone, and
+      // either may be written self closing.
       if (event.localName === 'f' && event.attributes.get('t') === 'shared') {
-        if (!event.selfClosing) master = event.attributes.get('si')
+        if (event.attributes.get('ref') !== undefined) master = event.attributes.get('si')
       }
       continue
     }
@@ -195,6 +200,12 @@ function readShape(xml: string): SheetShape {
         cells: currentCells,
       })
       currentRow = undefined
+      continue
+    }
+    if (event.localName === 'dimension' && openDimension !== -1 && dimension !== undefined) {
+      // Replacing only the open tag would leave the close tag behind.
+      dimension = { start: openDimension, end: event.end, ref: dimension.ref }
+      openDimension = -1
       continue
     }
     if (event.localName === 'sheetData') {
@@ -229,6 +240,7 @@ export function patchSheet(
   const shape = readShape(xml)
   const splices: Splice[] = []
   const newRows = new Map<number, string[]>()
+  const filledRows = new Map<RowSpan, Array<{ column: number; cell: string }>>()
 
   const styleFor = (reference: string, current: string | undefined) => {
     const override = styleOverrides?.get(reference)
@@ -296,19 +308,31 @@ export function patchSheet(
     )
 
     if (existingRow.selfClosing) {
-      const openTag = xml.slice(existingRow.start, existingRow.end)
-      splices.push({
-        start: existingRow.start,
-        end: existingRow.end,
-        text: `${openTag.slice(0, -2)}>${cell}</${shape.prefix}row>`,
-        order: column,
-      })
+      // Collected rather than spliced now: two cells added to the same empty
+      // row would otherwise each rewrite it, emitting the row twice.
+      const pending = filledRows.get(existingRow) ?? []
+      pending.push({ column, cell })
+      filledRows.set(existingRow, pending)
       continue
     }
 
     const next = existingRow.cells.find((candidate) => candidate.column > column)
     const at = next === undefined ? existingRow.contentEnd : next.start
     splices.push({ start: at, end: at, text: cell, order: column })
+  }
+
+  for (const [row, cells] of filledRows) {
+    const ordered = [...cells]
+      .sort((left, right) => left.column - right.column)
+      .map((entry) => entry.cell)
+      .join('')
+    const openTag = xml.slice(row.start, row.end)
+    splices.push({
+      start: row.start,
+      end: row.end,
+      text: `${openTag.slice(0, -2)}>${ordered}</${shape.prefix}row>`,
+      order: row.row,
+    })
   }
 
   const buildRow = (row: number, cells: string[]) => {
