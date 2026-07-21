@@ -1,0 +1,39 @@
+name: verify
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # The generated and quirk files are not committed, so build them first or
+      # the harness only sees the real ones.
+      - run: npm run fixtures
+      - run: ./verify.sh
+
+  # verify.sh needs Node 22 for coverage thresholds. package.json claims the
+  # package runs on 18, so check the built output actually does.
+  supported-node:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [18, 20, 22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: node scripts/smoke.mjs
