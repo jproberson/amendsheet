@@ -233,3 +233,12 @@ test('does not reuse an entry carrying a phonetic guide', () => {
 
   assert.equal(appendSharedStrings(xml, ['Total']).indexes.get('Total'), 1)
 })
+
+test('raises a single quoted string count', () => {
+  const source = "<sst count='1' uniqueCount='1'><si><t>a</t></si></sst>"
+
+  const result = appendSharedStrings(source, ['b'])
+
+  assert.doesNotMatch(result.xml, /count='1'/, 'the count still claims one string')
+  assert.doesNotMatch(result.xml, /uniqueCount='1'/, 'the unique count still claims one string')
+})

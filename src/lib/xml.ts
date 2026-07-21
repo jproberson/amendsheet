@@ -231,3 +231,31 @@ export function findUnwritableCharacter(text: string): string | undefined {
   }
   return undefined
 }
+
+/**
+ * Both quote characters are legal, and a writer that only recognised double
+ * quotes appended a second copy of the attribute rather than rewriting the one
+ * that was there, which is fatally malformed rather than merely wrong.
+ */
+const attributeIn = (name: string) => new RegExp(`(\\s${name}\\s*=\\s*)("[^"]*"|'[^']*')`)
+
+/** Sets an attribute on an open tag, adding it when the tag has none. */
+export function withAttribute(openTag: string, name: string, value: number): string {
+  const pattern = attributeIn(name)
+  if (pattern.test(openTag)) {
+    return openTag.replace(pattern, (_, head: string, quoted: string) => {
+      const quote = quoted.charAt(0)
+      return `${head}${quote}${value}${quote}`
+    })
+  }
+  return openTag.replace(/^<([^\s/>]+)/, `<$1 ${name}="${value}"`)
+}
+
+/** Raises a counting attribute, leaving a tag that declares none as it is. */
+export function bumpAttribute(openTag: string, name: string, by: number): string {
+  return openTag.replace(
+    new RegExp(`(\\s${name}\\s*=\\s*)(["'])(\\d+)\\2`),
+    (_, head: string, quote: string, digits: string) =>
+      `${head}${quote}${Number(digits) + by}${quote}`,
+  )
+}

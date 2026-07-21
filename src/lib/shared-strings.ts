@@ -1,5 +1,5 @@
 import { XlsxError } from './errors.js'
-import { findUnwritableCharacter, readXml } from './xml.js'
+import { bumpAttribute, findUnwritableCharacter, readXml } from './xml.js'
 
 /**
  * One string may be split across formatting runs, and `rPh` runs hold phonetic
@@ -82,12 +82,6 @@ function entryFor(value: string, prefix: string): string {
   const needsPreserve = value !== value.trim()
   const attributes = needsPreserve ? ' xml:space="preserve"' : ''
   return `<${prefix}si><${prefix}t${attributes}>${escapeXml(value)}</${prefix}t></${prefix}si>`
-}
-
-function bumpAttribute(openTag: string, name: string, by: number): string {
-  return openTag.replace(new RegExp(`${name}="(\\d+)"`), (match, digits: string) =>
-    match.replace(digits, String(Number(digits) + by)),
-  )
 }
 
 /**

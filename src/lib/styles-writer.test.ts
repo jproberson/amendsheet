@@ -344,3 +344,36 @@ test('applies a format to a prefixed cell format that declares no numFmtId', () 
   )
   assert.match(result.xml, /fontId="1"/)
 })
+
+test('applies a format to a cell format whose attributes are single quoted', () => {
+  // Either quote is legal xml, and matching only double quotes added a second
+  // numFmtId rather than rewriting the one that was there.
+  const source =
+    "<styleSheet><cellXfs count='1'><xf numFmtId='0' fontId='3'/></cellXfs></styleSheet>"
+
+  const result = ensureDateStyle(source, 0)
+
+  assertWellFormed(result.xml, 'single quoted xf')
+  assert.equal(isDateFormat(readStyles(result.xml), result.index), true)
+  assert.match(result.xml, /fontId='3'/)
+})
+
+test('raises a single quoted cell format count', () => {
+  const source = "<styleSheet><cellXfs count='1'><xf numFmtId='0'/></cellXfs></styleSheet>"
+
+  const result = ensureDateStyle(source, undefined)
+
+  assert.equal(readStyles(result.xml).cellFormats.length, 2)
+  assert.doesNotMatch(result.xml, /count='1'/, 'the count still claims one format')
+})
+
+test('raises a single quoted number format count', () => {
+  const source =
+    "<styleSheet><numFmts count='1'><numFmt numFmtId='164' formatCode='yyyy'/></numFmts>" +
+    "<cellXfs count='1'><xf numFmtId='0'/></cellXfs></styleSheet>"
+
+  const result = ensureNumberFormat(source, undefined, '0.000')
+
+  assertWellFormed(result.xml, 'single quoted numFmts')
+  assert.doesNotMatch(result.xml, /numFmts count='1'/, 'the count still claims one format')
+})

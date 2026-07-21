@@ -1,6 +1,6 @@
 import { XlsxError } from './errors.js'
 import { builtInFormatId, isDateFormat, numberFormatOf, readStyles } from './styles.js'
-import { findUnwritableCharacter, readXml } from './xml.js'
+import { findUnwritableCharacter, readXml, withAttribute } from './xml.js'
 
 /** Built in short date format, so no custom numFmt has to be written. */
 const SHORT_DATE_FORMAT_ID = 14
@@ -80,9 +80,7 @@ function withFormatId(element: string, formatId: number): string {
 
   // The element may be written <xf> or <x:xf>, so the name is matched rather
   // than assumed. Missing it left the cell on General while it held a serial.
-  const withFormat = openTag.includes('numFmtId="')
-    ? openTag.replace(/numFmtId="\d+"/, `numFmtId="${formatId}"`)
-    : openTag.replace(/^<([^\s/>]+)/, `<$1 numFmtId="${formatId}"`)
+  const withFormat = withAttribute(openTag, 'numFmtId', formatId)
 
   const applied = withFormat.includes('applyNumberFormat=')
     ? withFormat.replace(/applyNumberFormat=("|')(?:\d+|true|false)\1/, 'applyNumberFormat="1"')
@@ -156,7 +154,7 @@ function applyFormatId(
   if (existing !== -1) return { xml: stylesXml, index: existing }
 
   const index = formats.elements.length
-  const openTag = formats.openTag.replace(/count="\d+"/, `count="${index + 1}"`)
+  const openTag = withAttribute(formats.openTag, 'count', index + 1)
 
   if (formats.selfClosing) {
     const opened = `${openTag.slice(0, -2)}>`
@@ -172,12 +170,6 @@ function applyFormatId(
   const head = stylesXml.slice(0, formats.openStart) + openTag
   const body = stylesXml.slice(formats.openEnd, formats.insertAt)
   return { xml: `${head}${body}${prefixed}${stylesXml.slice(formats.insertAt)}`, index }
-}
-
-/** Sets `count` on an open tag, adding it when the file left it off. */
-function withCount(openTag: string, count: number): string {
-  if (/count="\d+"/.test(openTag)) return openTag.replace(/count="\d+"/, `count="${count}"`)
-  return openTag.replace(/^<([^\s/>]+)/, `<$1 count="${count}"`)
 }
 
 function tablePrefix(xml: string): string {
@@ -214,7 +206,7 @@ function withNumberFormat(xml: string, id: number, code: string, prefix: string)
 
   for (const event of readXml(xml)) {
     if (event.kind === 'open' && event.localName === 'numFmts' && event.selfClosing) {
-      const opened = `${withCount(xml.slice(event.start, event.end - 2), 1)}>`
+      const opened = `${withAttribute(xml.slice(event.start, event.end - 2), 'count', 1)}>`
       return `${xml.slice(0, event.start)}${opened}${element}</${prefix}numFmts>${xml.slice(event.end)}`
     }
     if (event.kind === 'open' && event.localName === 'numFmts') {
@@ -233,7 +225,7 @@ function withNumberFormat(xml: string, id: number, code: string, prefix: string)
       // unreadable and offer to repair it, which rewrites the whole package.
       const head =
         xml.slice(0, openStart) +
-        withCount(xml.slice(openStart, openEnd), children + 1) +
+        withAttribute(xml.slice(openStart, openEnd), 'count', children + 1) +
         xml.slice(openEnd, event.start)
       return head + element + xml.slice(event.start)
     }

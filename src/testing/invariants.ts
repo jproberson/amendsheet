@@ -15,8 +15,26 @@ export function assertWellFormed(xml: string, what: string): void {
   for (const event of readXml(xml)) {
     if (event.kind === 'open' && !event.selfClosing) open.push(event.name)
     if (event.kind === 'close') assert.equal(open.pop(), event.name, `${what}: mismatched close`)
+    if (event.kind === 'open') assertAttributesAreUnique(xml.slice(event.start, event.end), what)
   }
   assert.deepEqual(open, [], `${what}: unclosed elements`)
+}
+
+const ATTRIBUTE = /(?:^|\s)([^\s=/>]+)\s*=\s*("[^"]*"|'[^']*')/g
+
+/**
+ * A repeated attribute is fatally malformed, and readXml cannot report it: its
+ * attribute map keeps the last one, so a tag with two numFmtId parses cleanly
+ * and only a real reader rejects the file.
+ */
+function assertAttributesAreUnique(tag: string, what: string): void {
+  const seen = new Set<string>()
+  for (const match of tag.matchAll(ATTRIBUTE)) {
+    const name = match[1]
+    if (name === undefined) continue
+    assert.ok(!seen.has(name), `${what}: ${name} appears twice in ${tag}`)
+    seen.add(name)
+  }
 }
 
 /** A cell outside a row, or a row outside sheetData, makes Excel repair the file. */
