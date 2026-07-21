@@ -218,7 +218,11 @@ test('every edited cell reads back as it was written', async () => {
         assert.equal(stored, dateToSerial(value, workbook.epoch === 1904), `${file} ${reference}`)
       } else {
         // A formula carries no computed result, so only the expression is kept.
-        assert.equal(cell?.formula, value.formula, `${file} ${reference}`)
+        assert.deepEqual(
+          cell?.formula,
+          { kind: 'expression', expression: value.formula },
+          `${file} ${reference}`,
+        )
       }
     }
   }
@@ -380,7 +384,7 @@ test('an edited workbook reads the same before and after it is written', async (
       const after = reopened?.cell(reference)
 
       assert.deepEqual(before?.value, after?.value, `${file} ${reference} value`)
-      assert.equal(before?.formula, after?.formula, `${file} ${reference} formula`)
+      assert.deepEqual(before?.formula, after?.formula, `${file} ${reference} formula`)
       assert.equal(before?.numberFormat, after?.numberFormat, `${file} ${reference} number format`)
     }
   }

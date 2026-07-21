@@ -93,9 +93,11 @@ for that day, and reading it back gives a `Date` whose `getDate()` is 1, in
 whatever timezone the code runs in. Build dates the ordinary way rather than
 with `Date.UTC`.
 
-Reading a formula gives you `cell.formula`, the expression without the leading
-`=`. A cell that follows a shared formula reports an empty string, since the
-expression lives on the master cell.
+Reading a formula gives you `cell.formula`, which is either
+`{ kind: 'expression', expression }` — the source without the leading `=` — or
+`{ kind: 'shared', master }` for a cell that follows a shared formula, naming
+the cell the expression is stored on. A shared formula is written once and
+reused down a column, so the followers hold a cached value and nothing else.
 
 Write one with `{ formula }` rather than a string beginning with `=`, so text
 that happens to start with `=` stays text. Nothing here computes a result, so

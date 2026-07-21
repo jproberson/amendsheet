@@ -33,6 +33,17 @@ export type CellValue =
   /** The stored number is kept so a date can be written back unchanged. */
   | { readonly kind: 'date'; readonly value: Date; readonly serial: number }
 
+/**
+ * A shared formula stores its source once, on the cell that owns the range.
+ * The dependents carry a cached value and no source of their own, which is why
+ * this is a union rather than a string that is sometimes empty.
+ */
+export type CellFormula =
+  /** Without the leading `=`. */
+  | { readonly kind: 'expression'; readonly expression: string }
+  /** `master` is absent when the sheet holds no cell owning that group. */
+  | { readonly kind: 'shared'; readonly master?: string }
+
 export interface Cell {
   readonly address: CellAddress
   /**
@@ -42,7 +53,7 @@ export interface Cell {
    */
   readonly reference: string
   readonly value: CellValue
-  readonly formula?: string
+  readonly formula?: CellFormula
   readonly numberFormat?: string
 }
 
@@ -220,9 +231,23 @@ function toCellValue(raw: RawCell, styles: Styles, date1904: boolean): CellValue
   return value
 }
 
-function toCell(raw: RawCell, styles: Styles, date1904: boolean): Cell {
+/** Where each shared group's source lives, filled in as the sheet is read. */
+type SharedMasters = Map<string, string>
+
+function toFormula(raw: RawCell, masters: SharedMasters | undefined): CellFormula | undefined {
+  if (raw.formula === undefined) return undefined
+  if (raw.sharedIndex === undefined || raw.ownsSharedRange === true) {
+    return { kind: 'expression', expression: raw.formula }
+  }
+
+  const master = masters?.get(raw.sharedIndex)
+  return master === undefined ? { kind: 'shared' } : { kind: 'shared', master }
+}
+
+function toCell(raw: RawCell, styles: Styles, date1904: boolean, masters?: SharedMasters): Cell {
   const numberFormat = numberFormatOf(styles, raw.styleIndex)
   const value = toCellValue(raw, styles, date1904)
+  const formula = toFormula(raw, masters)
 
   return {
     address: raw.address,
@@ -230,7 +255,7 @@ function toCell(raw: RawCell, styles: Styles, date1904: boolean): Cell {
     // cross-references this against set() or formatReference needs one answer.
     reference: canonicalReference(raw.address) ?? raw.reference,
     value,
-    ...(raw.formula === undefined ? {} : { formula: raw.formula }),
+    ...(formula === undefined ? {} : { formula }),
     ...(numberFormat === undefined ? {} : { numberFormat }),
   }
 }
@@ -277,7 +302,17 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     function* readCells(source?: string): Generator<Cell> {
       const xml = source ?? patched()
       if (xml === undefined) return
-      for (const raw of readSheet(xml, sharedStrings)) yield toCell(raw, stylesNow(), date1904)
+
+      // The cell owning a shared range comes before its dependents, so filling
+      // this in as the sheet streams resolves every one of them.
+      const masters: SharedMasters = new Map()
+
+      for (const raw of readSheet(xml, sharedStrings)) {
+        if (raw.ownsSharedRange === true && raw.sharedIndex !== undefined) {
+          masters.set(raw.sharedIndex, canonicalReference(raw.address) ?? raw.reference)
+        }
+        yield toCell(raw, stylesNow(), date1904, masters)
+      }
     }
 
     // The sheet as it was read: which style each cell carried, and which cells

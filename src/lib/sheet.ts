@@ -17,6 +17,10 @@ export interface RawCell {
   readonly value: RawCellValue
   /** Formula source, without the leading `=`. Absent when the cell holds a literal. */
   readonly formula?: string
+  /** The si of the shared group, on the master and on every dependent alike. */
+  readonly sharedIndex?: string
+  /** Set on the cell that owns the shared range, which is where the source is. */
+  readonly ownsSharedRange?: boolean
   /** Resolving this to a format needs styles.xml. */
   readonly styleIndex?: number
 }
@@ -32,6 +36,8 @@ export function* readSheet(xml: string, sharedStrings: readonly string[]): Gener
 
   let rawValue: string[] | null = null
   let formula: string[] | null = null
+  let sharedIndex: string | undefined
+  let ownsSharedRange = false
   let inlineText: string[] | null = null
 
   let inValue = false
@@ -49,6 +55,7 @@ export function* readSheet(xml: string, sharedStrings: readonly string[]): Gener
       reference: written,
       value: toValue(type, rawValue, inlineText, sharedStrings, written),
       ...(formula === null ? {} : { formula: formula.join('') }),
+      ...(sharedIndex === undefined ? {} : { sharedIndex, ownsSharedRange }),
       ...(styleIndex === undefined ? {} : { styleIndex }),
     }
   }
@@ -69,6 +76,8 @@ export function* readSheet(xml: string, sharedStrings: readonly string[]): Gener
           styleIndex = style === undefined ? undefined : Number(style)
           rawValue = null
           formula = null
+          sharedIndex = undefined
+          ownsSharedRange = false
           inlineText = null
           inPhonetic = false
           column++
@@ -83,6 +92,12 @@ export function* readSheet(xml: string, sharedStrings: readonly string[]): Gener
         case 'f':
           formula = []
           inFormula = !event.selfClosing
+          // Only the cell carrying ref owns the range; a dependent names the
+          // si alone, and either may be written self closing.
+          if (event.attributes.get('t') === 'shared') {
+            sharedIndex = event.attributes.get('si')
+            ownsSharedRange = event.attributes.get('ref') !== undefined
+          }
           break
         case 'rPh':
           inPhonetic = true

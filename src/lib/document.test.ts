@@ -725,7 +725,7 @@ test('reads taken between edits agree with a full read', () => {
       cell.value,
       `${cell.reference} read one way but not the other`,
     )
-    assert.equal(sheet?.cell(cell.reference)?.formula, cell.formula, cell.reference)
+    assert.deepEqual(sheet?.cell(cell.reference)?.formula, cell.formula, cell.reference)
     assert.equal(sheet?.cell(cell.reference)?.numberFormat, cell.numberFormat, cell.reference)
   }
 })
@@ -765,7 +765,7 @@ test('a single cell read agrees with a full read after many edits', () => {
       cell.value,
       `${cell.reference} read one way but not the other`,
     )
-    assert.equal(sheet?.cell(cell.reference)?.formula, cell.formula, cell.reference)
+    assert.deepEqual(sheet?.cell(cell.reference)?.formula, cell.formula, cell.reference)
     assert.equal(sheet?.cell(cell.reference)?.numberFormat, cell.numberFormat, cell.reference)
   }
 })
@@ -866,7 +866,7 @@ test('refuses to overwrite a shared formula master at the set() call', () => {
 
   assert.throws(() => sheet?.set('A1', 5), /A1 defines shared formula 0/)
 
-  assert.equal(sheet?.cell('A1')?.formula, 'B1*2')
+  assert.deepEqual(sheet?.cell('A1')?.formula, { kind: 'expression', expression: 'B1*2' })
   assert.deepEqual(sheet?.cell('A1')?.value, { kind: 'number', value: 2 })
 })
 
@@ -1056,4 +1056,27 @@ test('reports a cell reference canonically however the file spelled it', () => {
     ['A1', 'B1'],
   )
   assert.equal(workbook.sheets[0]?.cell('A1')?.reference, 'A1')
+})
+
+test('a shared formula dependent says it shares rather than reporting no expression', () => {
+  // It used to report formula: '', which is falsy, so `if (cell.formula)`
+  // treated a dependent as a cell holding a literal.
+  const workbook = readWorkbook(
+    build(
+      '<row r="1"><c r="A1"><f t="shared" ref="A1:A2" si="0">B1*2</f><v>2</v></c></row>' +
+        '<row r="2"><c r="A2"><f t="shared" si="0"/><v>4</v></c></row>',
+    ),
+  )
+  const sheet = workbook.sheets[0]
+
+  assert.deepEqual(sheet?.cell('A1')?.formula, { kind: 'expression', expression: 'B1*2' })
+  assert.deepEqual(sheet?.cell('A2')?.formula, { kind: 'shared', master: 'A1' })
+})
+
+test('a dependent whose master is nowhere in the sheet still says it shares', () => {
+  const workbook = readWorkbook(
+    build('<row r="2"><c r="A2"><f t="shared" si="7"/><v>4</v></c></row>'),
+  )
+
+  assert.deepEqual(workbook.sheets[0]?.cell('A2')?.formula, { kind: 'shared' })
 })

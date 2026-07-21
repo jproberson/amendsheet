@@ -1,6 +1,13 @@
 export { readWorkbook } from './lib/document.js'
 export type { CellInput, FormulaInput } from './lib/patch.js'
-export type { Cell, CellValue, SetOptions, Workbook, Worksheet } from './lib/document.js'
+export type {
+  Cell,
+  CellFormula,
+  CellValue,
+  SetOptions,
+  Workbook,
+  Worksheet,
+} from './lib/document.js'
 export type { CellAddress } from './lib/reference.js'
 export type { SheetState } from './lib/workbook.js'
 export { XlsxError } from './lib/errors.js'
