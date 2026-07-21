@@ -5,7 +5,6 @@ export default defineConfig({
   format: ['esm', 'cjs'],
   outExtension: ({ format }) => ({ js: format === 'cjs' ? '.cjs' : '.js' }),
   dts: true,
-  sourcemap: true,
   clean: true,
   treeshake: true,
   target: 'es2022',
