@@ -24,21 +24,31 @@ import { readWorkbook } from 'amendsheet'
 
 const workbook = readWorkbook(bytes)
 
-for (const cell of workbook.sheets[0].cells()) {
+const sheet = workbook.sheet('Summary') ?? workbook.sheets[0]
+
+for (const cell of sheet.cells()) {
   console.log(cell.reference, cell.value)
 }
+
+sheet.cell('B7')?.value
 ```
+
+`cells()` yields every cell the sheet stores, which includes cells holding only
+formatting and cells that were cleared. Those arrive as `kind: 'empty'`, so
+filter on `kind` if you only want content.
 
 Editing:
 
 ```ts
 const workbook = readWorkbook(bytes)
 
-workbook.sheets[0].set('B7', 42)
-workbook.sheets[0].set('C1', 'a new cell')
-workbook.sheets[0].set('D2', new Date('2024-01-01'))
+sheet.set('B7', 42)
+sheet.set('C1', 'a new cell')
+sheet.set('D2', new Date('2024-01-01'))
+sheet.set('E1', null) // clears the value, keeps the formatting
 
-await writeFile('out.xlsx', workbook.toBytes())
+const bytes = workbook.toBytes() // synchronous
+await writeFile('out.xlsx', bytes)
 ```
 
 `set` takes a number, string, boolean, `Date`, or `null` to clear a cell. If the
@@ -63,12 +73,16 @@ There is no date type in the file format. A date is a number with a date number
 format applied, so `kind: 'date'` comes from resolving the cell's style. The
 `serial` is kept so the stored value can go back unchanged.
 
+Reading a formula gives you `cell.formula`, the expression without the leading
+`=`. A cell that follows a shared formula reports an empty string, since the
+expression lives on the master cell.
+
 ## Not done yet
 
-- Text is written as an inline string instead of going into the shared string
-  table, so repeated text takes more bytes than it needs to.
+- Formulas are read only. `set` takes values, so there is no way to write one.
 - Writing isn't streamed. A sheet is patched as one string.
 - Charts, pivot tables and drawings are preserved but never created.
+- Nothing reads or writes cell formatting beyond number formats.
 
 ## Layout
 
