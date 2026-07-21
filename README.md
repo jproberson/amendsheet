@@ -2,10 +2,14 @@
 
 Amend `.xlsx` files. Everything you didn't touch stays exactly as it was.
 
-Reads and edits spreadsheets in Node and the browser. Anything the library
-doesn't interpret gets written back byte for byte, so charts, pivot tables,
-drawings and macros all survive a read and a save. Changing one cell won't
-quietly throw away the rest of the workbook.
+Reads and edits spreadsheets in Node and the browser. The contents of any part
+the library doesn't interpret get written back byte for byte, so charts, pivot
+tables, drawings and macros all survive a read and a save. Changing one cell
+won't quietly throw away the rest of the workbook.
+
+The ZIP container itself is rebuilt, so an untouched file comes back the same
+document but not the same bytes: compression, timestamps and entry order are
+the writer's own.
 
 One dependency, `fflate`, for the ZIP container. There is no transitive tree to
 audit.
@@ -47,14 +51,14 @@ sheet.set('C1', 'a new cell')
 sheet.set('D2', new Date('2024-01-01'))
 sheet.set('E1', null) // clears the value, keeps the formatting
 sheet.set('F9', { formula: 'SUM(F1:F8)' })
-sheet.set('G1', 1234.5, { format: '"$"#,##0.00' })
+sheet.set('G1', 1234.5, { numberFormat: '"$"#,##0.00' })
 
 const bytes = workbook.toBytes() // synchronous
 await writeFile('out.xlsx', bytes)
 ```
 
 `set` takes a number, string, boolean, `Date`, `{ formula }`, or `null` to clear
-a cell. Pass `{ format }` to choose a number format code; without one the cell
+a cell. Pass `{ numberFormat }` to choose a format code; without one the cell
 keeps whatever formatting it had. If the
 cell or its row isn't there yet, both get created, and the declared dimension
 grows to cover them. The style of a replaced cell is kept, so its formatting
@@ -102,6 +106,11 @@ and its expression in `cell.formula`.
 - Charts, pivot tables and drawings are preserved but never created.
 - Nothing reads or writes cell formatting beyond number formats, so fonts,
   fills and borders can be preserved but not set.
+- Ranges that name cells are copied, not adjusted. Tables, chart ranges,
+  defined names and conditional formatting keep the extent they had, so writing
+  past the end of a table leaves the new row outside it.
+- Chartsheets and dialogsheets aren't listed in `sheets`, since they hold no
+  cells. They're still written back untouched.
 
 ## Speed
 
@@ -109,10 +118,10 @@ and its expression in `cell.formula`.
 rows, on an M-series laptop:
 
 ```
-write 10000 cells                             62 ms
-write 10000 cells, reading between each      102 ms
-write 10000 dates                            108 ms
-append 10000 new rows                         88 ms
+write 10000 cells                             59 ms
+write 10000 cells, reading between each       69 ms
+write 10000 dates                             92 ms
+append 10000 new rows                         66 ms
 ```
 
 Each is linear in the number of edits. Reading between writes used to be
@@ -162,10 +171,16 @@ reading.
 
 ## Round-trip harness
 
-`npm run harness` reads every test file, writes it straight back out, and reports
-what changed: missing ZIP parts, markup features whose count dropped, and cell
-values that differ. Nothing changes across the 72 committed files, and that's the
-regression gate for the preservation guarantee.
+`npm run harness` reads every test file and reports what changed: missing ZIP
+parts, markup features whose count dropped, and cell values that differ. It runs
+twice. Once writing the file straight back out, which measures the container and
+nothing else. Then again after writing a cell past the last row in use, which is
+the measurement that matches the claim — every existing cell has to come back
+unchanged, and the only parts allowed to differ are the sheet the edit landed in
+and the tables a new value can extend.
+
+Nothing is lost or rewritten across the 72 committed files in either pass, and
+both gate `./verify.sh`.
 
 ## Fixtures
 

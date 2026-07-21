@@ -643,7 +643,7 @@ test('adds a recalculation flag to a prefixed workbook', () => {
 
 test('writes a number with the format that was asked for', () => {
   const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
-  workbook.sheets[0]?.set('A1', 1234.5, { format: '"$"#,##0.00' })
+  workbook.sheets[0]?.set('A1', 1234.5, { numberFormat: '"$"#,##0.00' })
 
   const cell = readWorkbook(workbook.toBytes()).sheets[0]?.cell('A1')
 
@@ -655,8 +655,8 @@ test('two cells asking for one format share a single style', () => {
   const workbook = readWorkbook(
     build('<row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>2</v></c></row>'),
   )
-  workbook.sheets[0]?.set('A1', 1, { format: '0.0%' })
-  workbook.sheets[0]?.set('B1', 2, { format: '0.0%' })
+  workbook.sheets[0]?.set('A1', 1, { numberFormat: '0.0%' })
+  workbook.sheets[0]?.set('B1', 2, { numberFormat: '0.0%' })
 
   const parts = readContainer(workbook.toBytes()).parts
   const styles = new TextDecoder().decode(parts.get('xl/styles.xml') ?? new Uint8Array())
@@ -669,7 +669,7 @@ test('two cells asking for one format share a single style', () => {
 
 test('a format overrides the date format a Date would otherwise get', () => {
   const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
-  workbook.sheets[0]?.set('A1', new Date(2024, 0, 1), { format: 'yyyy' })
+  workbook.sheets[0]?.set('A1', new Date(2024, 0, 1), { numberFormat: 'yyyy' })
 
   const cell = readWorkbook(workbook.toBytes()).sheets[0]?.cell('A1')
 
@@ -711,7 +711,7 @@ test('reads taken between edits agree with a full read', () => {
   ]
 
   for (const [reference, value, format] of writes) {
-    sheet?.set(reference, value, format === undefined ? undefined : { format })
+    sheet?.set(reference, value, format === undefined ? undefined : { numberFormat: format })
     assert.equal(sheet?.cell(reference)?.numberFormat, format, `${reference} format`)
   }
 
@@ -755,7 +755,7 @@ test('a single cell read agrees with a full read after many edits', () => {
   sheet?.set('A4', null)
   sheet?.set('A5', new Date(2024, 0, 1))
   sheet?.set('A6', { formula: 'A1+1' })
-  sheet?.set('B7', 9, { format: '0.0%' })
+  sheet?.set('B7', 9, { numberFormat: '0.0%' })
   sheet?.set('Z40', 'new')
 
   // cells() re-reads the patched sheet, so it is the authority.

@@ -44,7 +44,7 @@ export interface Worksheet {
   cell(reference: string): Cell | undefined
   /**
    * Visible to `cells()` and `cell()` immediately, written by `toBytes()`.
-   * A `format` is a number format code such as `"$"#,##0.00`; without one the
+   * A `numberFormat` is a format code such as `"$"#,##0.00`; without one the
    * cell keeps the formatting it already had.
    */
   set(reference: string, value: CellInput, options?: WriteOptions): void
@@ -52,7 +52,7 @@ export interface Worksheet {
 
 export interface WriteOptions {
   /** A number format code, applied to the cell being written. */
-  readonly format?: string
+  readonly numberFormat?: string
 }
 
 export interface Workbook {
@@ -287,8 +287,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           // An asked-for format wins; a Date only gets one because without one
           // it displays as the serial number it is stored as.
           let applied: DateStyle | undefined
-          if (options?.format !== undefined) {
-            applied = ensureNumberFormat(workingStyles, current, options.format)
+          if (options?.numberFormat !== undefined) {
+            applied = ensureNumberFormat(workingStyles, current, options.numberFormat)
           } else if (value instanceof Date) {
             applied = ensureDateStyle(workingStyles, current)
           }
