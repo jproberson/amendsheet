@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { ensureDateStyle } from './styles-writer.js'
 import { assertWellFormed } from '../testing/invariants.js'
-import { isDateFormat, readStyles } from './styles.js'
+import { ensureNumberFormat } from './styles-writer.js'
+import { isDateFormat, numberFormatOf, readStyles } from './styles.js'
 
 const styles = (cellXfs: string, extra = '') =>
   `<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${extra}<cellXfs count="${(cellXfs.match(/<xf/g) ?? []).length}">${cellXfs}</cellXfs></styleSheet>`
@@ -177,4 +178,99 @@ test('turns on number formatting written as a word', () => {
 
   assert.equal(isDateFormat(readStyles(result.xml), result.index), true)
   assert.match(result.xml, /applyNumberFormat="1"/)
+})
+
+test('reuses a built in format when the code matches one', () => {
+  const source = styles('<xf numFmtId="0"/>')
+
+  const result = ensureNumberFormat(source, undefined, '0.00%')
+
+  assert.equal(numberFormatOf(readStyles(result.xml), result.index), '0.00%')
+  assert.equal(result.xml.includes('<numFmt'), false, 'a custom format was written needlessly')
+})
+
+test('writes a custom format the file does not have', () => {
+  const source = styles('<xf numFmtId="0"/>')
+
+  const result = ensureNumberFormat(source, undefined, '"$"#,##0.00')
+
+  assert.equal(numberFormatOf(readStyles(result.xml), result.index), '"$"#,##0.00')
+  assert.match(result.xml, /<numFmts[^>]*>/)
+})
+
+test('reuses a custom format the file already declares', () => {
+  const source = styles(
+    '<xf numFmtId="164"/>',
+    '<numFmts count="1"><numFmt numFmtId="164" formatCode="0.000"/></numFmts>',
+  )
+
+  const result = ensureNumberFormat(source, undefined, '0.000')
+
+  assert.equal(result.index, 0)
+  assert.equal(result.xml, source)
+})
+
+test('picks an id that is not already taken, including inside dxfs', () => {
+  const source = styles(
+    '<xf numFmtId="0"/>',
+    '<numFmts count="1"><numFmt numFmtId="164" formatCode="0.000"/></numFmts>' +
+      '<dxfs><dxf><numFmt numFmtId="165" formatCode="0.0"/></dxf></dxfs>',
+  )
+
+  const result = ensureNumberFormat(source, undefined, '#,##0')
+
+  assert.equal(numberFormatOf(readStyles(result.xml), result.index), '#,##0')
+  assert.equal(result.xml.includes('numFmtId="165" formatCode="#,##0"'), false)
+})
+
+test('keeps the other formatting of the style it is based on', () => {
+  const source = styles('<xf numFmtId="0" fontId="3" fillId="5"/>')
+
+  const result = ensureNumberFormat(source, 0, '0.0%')
+
+  assert.match(result.xml, /fontId="3" fillId="5"/)
+})
+
+test('refuses a format code xml cannot hold', () => {
+  assert.throws(
+    () =>
+      ensureNumberFormat(styles('<xf numFmtId="0"/>'), undefined, `0.0${String.fromCharCode(7)}`),
+    /cannot be written to xml/i,
+  )
+})
+
+test('adds a format table to a document that has none', () => {
+  const source = '<styleSheet><cellXfs count="1"><xf numFmtId="0"/></cellXfs></styleSheet>'
+
+  const result = ensureNumberFormat(source, undefined, '0.000')
+
+  assert.match(
+    result.xml,
+    /<numFmts count="1"><numFmt numFmtId="164" formatCode="0.000"\/><\/numFmts>/,
+  )
+  assert.equal(numberFormatOf(readStyles(result.xml), result.index), '0.000')
+})
+
+test('writes into a format table that was self closing', () => {
+  const source =
+    '<styleSheet><numFmts count="0"/><cellXfs count="1"><xf numFmtId="0"/></cellXfs></styleSheet>'
+
+  const result = ensureNumberFormat(source, undefined, '0.000')
+
+  assertWellFormed(result.xml, 'self closing numFmts')
+  assert.equal(numberFormatOf(readStyles(result.xml), result.index), '0.000')
+})
+
+test('writes a format into a prefixed document', () => {
+  const source =
+    '<x:styleSheet><x:cellXfs count="1"><x:xf numFmtId="0"/></x:cellXfs></x:styleSheet>'
+
+  const result = ensureNumberFormat(source, undefined, '0.000')
+
+  assertWellFormed(result.xml, 'prefixed numFmts')
+  assert.equal(numberFormatOf(readStyles(result.xml), result.index), '0.000')
+})
+
+test('refuses a document with no styleSheet element', () => {
+  assert.throws(() => ensureNumberFormat('<other/>', undefined, '0.000'), /styleSheet/)
 })

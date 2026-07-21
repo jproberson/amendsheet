@@ -10,7 +10,7 @@ import {
 } from './reference.js'
 import { type RawCell, readSheet } from './sheet.js'
 import { appendSharedStrings, readSharedStrings } from './shared-strings.js'
-import { ensureDateStyle } from './styles-writer.js'
+import { ensureDateStyle, ensureNumberFormat } from './styles-writer.js'
 import { type Styles, isDateFormat, numberFormatOf, readStyles } from './styles.js'
 import { readXml } from './xml.js'
 import { type SheetState, readWorkbookPart } from './workbook.js'
@@ -42,8 +42,17 @@ export interface Worksheet {
   cells(): IterableIterator<Cell>
   /** Undefined when the sheet stores nothing at that reference. */
   cell(reference: string): Cell | undefined
-  /** Visible to `cells()` and `cell()` immediately, written by `toBytes()`. */
-  set(reference: string, value: CellInput): void
+  /**
+   * Visible to `cells()` and `cell()` immediately, written by `toBytes()`.
+   * A `format` is a number format code such as `"$"#,##0.00`; without one the
+   * cell keeps the formatting it already had.
+   */
+  set(reference: string, value: CellInput, options?: WriteOptions): void
+}
+
+export interface WriteOptions {
+  /** A number format code, applied to the cell being written. */
+  readonly format?: string
 }
 
 export interface Workbook {
@@ -157,6 +166,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   const sharedStrings = stringsXml === undefined ? [] : readSharedStrings(stringsXml)
 
   const edits = new Map<string, Map<string, CellInput>>()
+  const formats = new Map<string, Map<string, string>>()
 
   const sheets = part.sheets.map((reference): Worksheet => {
     const sheetXml = partText(container, reference.path)
@@ -190,7 +200,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         }
         return byReference.get(formatReference(parseReference(cellReference)))
       },
-      set(cellReference: string, value: CellInput): void {
+      set(cellReference: string, value: CellInput, options?: WriteOptions): void {
         byReference = undefined
         // Normalised so `a1`, `$A$1` and `A1` are one edit, and so the file
         // never receives a reference spelled the way the caller typed it.
@@ -198,6 +208,12 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         const pending = edits.get(reference.path) ?? new Map<string, CellInput>()
         pending.set(canonical, value)
         edits.set(reference.path, pending)
+
+        if (options?.format !== undefined) {
+          const wanted = formats.get(reference.path) ?? new Map<string, string>()
+          wanted.set(canonical, options.format)
+          formats.set(reference.path, wanted)
+        }
       },
     }
   })
@@ -229,11 +245,19 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         const existing = new Map<string, number | undefined>()
         for (const raw of readSheet(sheetXml, [])) existing.set(raw.reference, raw.styleIndex)
 
+        const wanted = formats.get(path)
         const overrides = new Map<string, number>()
+
         for (const [reference, value] of pending) {
-          if (!(value instanceof Date)) continue
+          const format = wanted?.get(reference)
           const current = existing.get(reference)
-          const applied = ensureDateStyle(workingStyles, current)
+
+          // An asked-for format wins; a Date only gets one because it needs one.
+          let applied: { xml: string; index: number } | undefined
+          if (format !== undefined) applied = ensureNumberFormat(workingStyles, current, format)
+          else if (value instanceof Date) applied = ensureDateStyle(workingStyles, current)
+          if (applied === undefined) continue
+
           workingStyles = applied.xml
           if (applied.index !== current) overrides.set(reference, applied.index)
         }

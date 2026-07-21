@@ -639,3 +639,48 @@ test('adds a recalculation flag to a prefixed workbook', () => {
 
   assert.match(book, /<x:calcPr fullCalcOnLoad="1"\/><\/x:workbook>/)
 })
+
+test('writes a number with the format that was asked for', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.set('A1', 1234.5, { format: '"$"#,##0.00' })
+
+  const cell = readWorkbook(workbook.toBytes()).sheets[0]?.cell('A1')
+
+  assert.deepEqual(cell?.value, { kind: 'number', value: 1234.5 })
+  assert.equal(cell?.numberFormat, '"$"#,##0.00')
+})
+
+test('two cells asking for one format share a single style', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>2</v></c></row>'),
+  )
+  workbook.sheets[0]?.set('A1', 1, { format: '0.0%' })
+  workbook.sheets[0]?.set('B1', 2, { format: '0.0%' })
+
+  const parts = readContainer(workbook.toBytes()).parts
+  const styles = new TextDecoder().decode(parts.get('xl/styles.xml') ?? new Uint8Array())
+  const sheet = new TextDecoder().decode(parts.get('xl/worksheets/sheet1.xml') ?? new Uint8Array())
+
+  assert.equal(styles.match(/<xf /g)?.length, 3)
+  const used = [...sheet.matchAll(/<c r="[AB]1" s="(\d+)"/g)].map((m) => m[1])
+  assert.deepEqual(used, [used[0], used[0]])
+})
+
+test('a format overrides the date format a Date would otherwise get', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.set('A1', new Date(2024, 0, 1), { format: 'yyyy' })
+
+  const cell = readWorkbook(workbook.toBytes()).sheets[0]?.cell('A1')
+
+  assert.equal(cell?.numberFormat, 'yyyy')
+  assert.equal(cell?.value.kind, 'date')
+})
+
+test('a cell written with no format keeps the one it had', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1" s="1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.set('A1', 5)
+
+  const cell = readWorkbook(workbook.toBytes()).sheets[0]?.cell('A1')
+
+  assert.equal(cell?.numberFormat, 'yyyy-mm-dd')
+})

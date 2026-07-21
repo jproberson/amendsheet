@@ -47,13 +47,15 @@ sheet.set('C1', 'a new cell')
 sheet.set('D2', new Date('2024-01-01'))
 sheet.set('E1', null) // clears the value, keeps the formatting
 sheet.set('F9', { formula: 'SUM(F1:F8)' })
+sheet.set('G1', 1234.5, { format: '"$"#,##0.00' })
 
 const bytes = workbook.toBytes() // synchronous
 await writeFile('out.xlsx', bytes)
 ```
 
 `set` takes a number, string, boolean, `Date`, `{ formula }`, or `null` to clear
-a cell. If the
+a cell. Pass `{ format }` to choose a number format code; without one the cell
+keeps whatever formatting it had. If the
 cell or its row isn't there yet, both get created, and the declared dimension
 grows to cover them. The style of a replaced cell is kept, so its formatting
 survives the edit. Writing a `Date` into a cell with no date format applies one,
@@ -98,7 +100,8 @@ and its expression in `cell.formula`.
   application opens the file.
 - Writing isn't streamed. A sheet is patched as one string.
 - Charts, pivot tables and drawings are preserved but never created.
-- Nothing reads or writes cell formatting beyond number formats.
+- Nothing reads or writes cell formatting beyond number formats, so fonts,
+  fills and borders can be preserved but not set.
 
 ## Layout
 

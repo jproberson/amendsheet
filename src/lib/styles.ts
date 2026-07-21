@@ -32,6 +32,14 @@ const BUILT_IN_FORMATS = new Map<number, string>([
   [49, '@'],
 ])
 
+/** The id of a built in format matching this code, when one does. */
+export function builtInFormatId(code: string): number | undefined {
+  for (const [id, builtIn] of BUILT_IN_FORMATS) {
+    if (builtIn === code) return id
+  }
+  return undefined
+}
+
 export interface Styles {
   /** Custom format codes, keyed by the id cell formats reference. */
   readonly numberFormats: ReadonlyMap<number, string>
