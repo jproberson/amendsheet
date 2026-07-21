@@ -81,3 +81,14 @@ export function parseWritableReference(reference: string): CellAddress {
 export function formatReference(address: CellAddress): string {
   return `${indexToColumn(address.column)}${address.row}`
 }
+
+/**
+ * The canonical spelling, or undefined when no column letter names it. Reading
+ * is lenient, so a file may hold an address that cannot be spelled back, and
+ * one of those must not take the lookups around it down with it. The row is
+ * left alone: files really do contain row zero, and it formats fine.
+ */
+export function canonicalReference(address: CellAddress): string | undefined {
+  if (address.column < 1 || address.column > LAST_COLUMN) return undefined
+  return formatReference(address)
+}

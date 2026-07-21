@@ -41,6 +41,10 @@ and the API is still free to change.
 
 ### Fixed
 
+- A cell reference no column letter can spell no longer breaks the lookups
+  around it. One `XFE1` in a sheet made every `cell()` call in it throw, while
+  `cells()` returned the whole sheet.
+
 - Writing to a sheet whose part is missing from the package is refused. The
   edit was accepted, reported by `cell()`, and saved nowhere.
 

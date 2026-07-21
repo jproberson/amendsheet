@@ -11,6 +11,7 @@ import {
 } from './patch.js'
 import {
   type CellAddress,
+  canonicalReference,
   formatReference,
   parseReference,
   parseWritableReference,
@@ -287,14 +288,16 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       state: reference.state,
       cells: () => readCells(),
       cell(cellReference: string): Cell | undefined {
-        const wanted = formatReference(parseReference(cellReference))
+        const wanted = canonicalReference(parseReference(cellReference))
+        if (wanted === undefined) return undefined
         const edited = overlay.get(wanted)
         if (edited !== undefined) return edited
 
         if (byReference === undefined) {
           byReference = new Map()
           for (const found of readCells(sheetXml)) {
-            byReference.set(formatReference(found.address), found)
+            const at = canonicalReference(found.address)
+            if (at !== undefined) byReference.set(at, found)
           }
         }
         return byReference.get(wanted)
@@ -326,7 +329,15 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         // refuses here, and a refusal that had already queued the edit would
         // write the value it claimed to reject.
         let applied: DateStyle | undefined
-        if (workingStyles !== undefined) {
+        if (workingStyles === undefined) {
+          if (options?.numberFormat !== undefined) {
+            throw new XlsxError(
+              'missing-part',
+              `Cannot apply a number format to ${canonical}: the package has no style table`,
+              { part: 'xl/styles.xml', reference: canonical },
+            )
+          }
+        } else {
           // An asked-for format wins; a Date only gets one because without one
           // it displays as the serial number it is stored as.
           if (options?.numberFormat !== undefined) {

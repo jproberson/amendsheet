@@ -961,3 +961,46 @@ test('refuses a write to a sheet whose part is not in the package', () => {
   )
   assert.equal(workbook.sheets[0]?.cell('A1'), undefined)
 })
+
+test('a reference the sheet cannot hold does not break lookups around it', () => {
+  // Reading is deliberately lenient about references real files get wrong, but
+  // one bad cell used to make every cell() call in the sheet throw while
+  // cells() returned the whole sheet happily.
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c><c r="XFE1"><v>2</v></c></row>'),
+  )
+  const sheet = workbook.sheets[0]
+
+  assert.deepEqual(sheet?.cell('A1')?.value, { kind: 'number', value: 1 })
+  assert.equal([...(sheet?.cells() ?? [])].length, 2)
+  // Nothing legal can address it, so there is nothing to return.
+  assert.equal(sheet?.cell('XFE1'), undefined)
+})
+
+test('refuses a number format when the package has no style table', () => {
+  const bytes = writeContainer({
+    parts: new Map([
+      ['_rels/.rels', encode(ROOT_RELS)],
+      [
+        'xl/workbook.xml',
+        encode('<workbook><sheets><sheet name="D" r:id="rId1"/></sheets></workbook>'),
+      ],
+      ['xl/_rels/workbook.xml.rels', encode(WORKBOOK_RELS)],
+      [
+        'xl/worksheets/sheet1.xml',
+        encode(
+          '<worksheet><sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData></worksheet>',
+        ),
+      ],
+    ]),
+  })
+  const workbook = readWorkbook(bytes)
+
+  // It used to accept the write and drop the format without a word, so the
+  // caller had no way to learn the cell would not display as they asked.
+  assert.throws(
+    () => workbook.sheets[0]?.set('A1', 0.25, { numberFormat: '0.0%' }),
+    /style table|styles/i,
+  )
+  assert.deepEqual(workbook.sheets[0]?.cell('A1')?.value, { kind: 'number', value: 1 })
+})
