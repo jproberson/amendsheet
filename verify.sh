@@ -83,6 +83,11 @@ else
   failures=$((failures + 1))
 fi
 
+step "package"
+npm run --silent build > /dev/null || fail "build failed"
+npx publint --strict > /dev/null 2>&1 || { fail "publint found packaging problems"; npx publint --strict 2>&1 | tail -8; }
+npx attw --pack . --format table-flipped > /dev/null 2>&1 || { fail "type resolution is broken for some consumers"; npx attw --pack . 2>&1 | tail -12; }
+
 step "harness regression"
 if [ -d corpus ] && find corpus -name '*.xlsx' -print -quit | grep -q .; then
   npm run --silent harness | tail -n 15

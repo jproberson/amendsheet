@@ -6,3 +6,4 @@ corpus/manual/*
 !corpus/manual/README.md
 CLAUDE.md
 *.log
+*.tgz
