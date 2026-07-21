@@ -21,6 +21,8 @@ export interface SheetRef {
 }
 
 export interface WorkbookPart {
+  /** Where the workbook's own relationships live, for parts we remove. */
+  readonly relationshipsPath: string
   /** Package path of the workbook part itself, usually xl/workbook.xml. */
   readonly path: string
   readonly sheets: readonly SheetRef[]
@@ -114,5 +116,5 @@ export function readWorkbookPart(bytes: Uint8Array): WorkbookPart {
     })
   }
 
-  return { path: workbookPath, sheets, date1904, container }
+  return { path: workbookPath, relationshipsPath, sheets, date1904, container }
 }

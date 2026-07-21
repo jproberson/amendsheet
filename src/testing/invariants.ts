@@ -82,6 +82,9 @@ const EXPECTED_TO_CHANGE = new Set([
   'xl/sharedStrings.xml',
   'xl/styles.xml',
   'xl/calcChain.xml',
+  // The calculation chain is dropped on an edit, so the relationship naming it
+  // goes too rather than being left pointing at nothing.
+  'xl/_rels/workbook.xml.rels',
   'xl/workbook.xml',
   '[Content_Types].xml',
 ])

@@ -78,11 +78,13 @@ test('editing a real fixture changes only the sheet and the tables it appends to
     const worksheets: string[] = []
 
     // Deliberate: the string and style tables grow, and a stale calculation
-    // chain is dropped along with its content type override.
+    // chain is dropped along with its content type override and the
+    // relationship naming it.
     const expectedToChange = new Set([
       'xl/sharedStrings.xml',
       'xl/styles.xml',
       'xl/calcChain.xml',
+      'xl/_rels/workbook.xml.rels',
       '[Content_Types].xml',
     ])
 

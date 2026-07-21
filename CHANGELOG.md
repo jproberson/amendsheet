@@ -41,6 +41,9 @@ and the API is still free to change.
 
 ### Fixed
 
+- Dropping the calculation chain drops the relationship naming it. A
+  relationship pointing at a part that is no longer in the package is invalid,
+  and it is the kind of thing Excel offers to repair.
 - A number too large to be a date, in a cell that carries a date format, reads
   as the number it is. It threw, and because the throw came out of the iterator
   the whole sheet became unreadable. Excel shows such a cell as `###`, so the

@@ -915,3 +915,27 @@ test('records nothing when a write is refused after the value is checked', () =>
   const reopened = readWorkbook(workbook.toBytes())
   assert.deepEqual([...(reopened.sheets[0]?.cells() ?? [])][0]?.value, { kind: 'number', value: 1 })
 })
+
+test('drops the calculation chain relationship along with the part', () => {
+  const withChain = build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+    extra: {
+      'xl/calcChain.xml': '<calcChain><c r="A1"/></calcChain>',
+      'xl/_rels/workbook.xml.rels':
+        '<Relationships>' +
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>' +
+        '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain" Target="calcChain.xml"/>' +
+        '</Relationships>',
+    },
+  })
+
+  const workbook = readWorkbook(withChain)
+  workbook.sheets[0]?.set('A1', 2)
+  const parts = readContainer(workbook.toBytes()).parts
+
+  assert.equal(parts.has('xl/calcChain.xml'), false)
+  // A relationship pointing at a part that is gone is an invalid package, and
+  // it is the kind of thing LibreOffice ignores and Excel offers to repair.
+  const rels = new TextDecoder().decode(parts.get('xl/_rels/workbook.xml.rels'))
+  assert.doesNotMatch(rels, /calcChain/)
+  assert.match(rels, /worksheets\/sheet1\.xml/)
+})

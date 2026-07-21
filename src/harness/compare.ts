@@ -23,6 +23,9 @@ const EDIT_MAY_CHANGE = [
   /^xl\/workbook\.xml$/,
   /^xl\/styles\.xml$/,
   /^xl\/sharedStrings\.xml$/,
+  // The calculation chain is dropped on an edit, so the relationship naming it
+  // has to go with it. Leaving it behind is an invalid package.
+  /^xl\/_rels\/workbook\.xml\.rels$/,
 ]
 
 const isWorksheet = (path: string) => /^xl\/worksheets\/[^/]+\.xml$/.test(path)

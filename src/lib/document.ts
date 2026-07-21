@@ -15,6 +15,7 @@ import {
   parseReference,
   parseWritableReference,
 } from './reference.js'
+import { resolveTarget } from './relationships.js'
 import { type RawCell, readSheet } from './sheet.js'
 import { appendSharedStrings, readSharedStrings } from './shared-strings.js'
 import { type DateStyle, ensureDateStyle, ensureNumberFormat } from './styles-writer.js'
@@ -112,6 +113,21 @@ function withRecalculation(xml: string): string {
     return xml.slice(0, event.start) + element + xml.slice(event.start)
   }
 
+  return xml
+}
+
+/**
+ * Removes the relationship pointing at one part, leaving every other byte
+ * alone. A relationship whose target is gone is an invalid package.
+ */
+function withoutRelationship(xml: string, ownerPath: string, part: string): string {
+  for (const event of readXml(xml)) {
+    if (event.kind !== 'open' || event.localName !== 'Relationship') continue
+    if (event.attributes.get('TargetMode') === 'External') continue
+    const target = event.attributes.get('Target')
+    if (target === undefined || resolveTarget(ownerPath, target) !== part) continue
+    return xml.slice(0, event.start) + xml.slice(event.end)
+  }
   return xml
 }
 
@@ -343,6 +359,13 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       const types = partText(container, CONTENT_TYPES)
       if (types !== undefined) {
         parts.set(CONTENT_TYPES, encoder.encode(withoutOverride(types, CALCULATION_CHAIN)))
+      }
+      const rels = partText(container, part.relationshipsPath)
+      if (rels !== undefined) {
+        parts.set(
+          part.relationshipsPath,
+          encoder.encode(withoutRelationship(rels, part.path, CALCULATION_CHAIN)),
+        )
       }
     }
 
