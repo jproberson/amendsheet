@@ -1,7 +1,7 @@
 import { dateToSerial } from './date.js'
 import { XlsxError } from './errors.js'
 import { formatReference, parseReference } from './reference.js'
-import { readXml } from './xml.js'
+import { findUnwritableCharacter, readXml } from './xml.js'
 
 export type CellInput = number | string | boolean | Date | null
 
@@ -27,7 +27,12 @@ function cellElement(
     if (shared !== undefined) {
       return `<c r="${reference}"${attributes} t="s"><v>${shared}</v></c>`
     }
-    return `<c r="${reference}"${attributes} t="inlineStr"><is><t>${escapeXml(value)}</t></is></c>`
+    const unwritable = findUnwritableCharacter(value)
+    if (unwritable !== undefined) {
+      throw new XlsxError(`Cell ${reference} holds ${unwritable}, which cannot be written to xml`)
+    }
+    const space = value === value.trim() ? '' : ' xml:space="preserve"'
+    return `<c r="${reference}"${attributes} t="inlineStr"><is><t${space}>${escapeXml(value)}</t></is></c>`
   }
   if (typeof value === 'boolean') {
     return `<c r="${reference}"${attributes} t="b"><v>${value ? 1 : 0}</v></c>`

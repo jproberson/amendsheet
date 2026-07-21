@@ -1,5 +1,5 @@
 import { XlsxError } from './errors.js'
-import { readXml } from './xml.js'
+import { findUnwritableCharacter, readXml } from './xml.js'
 
 /**
  * One string may be split across formatting runs, and `rPh` runs hold phonetic
@@ -46,6 +46,10 @@ const escapeXml = (text: string) =>
   text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
 function entryFor(value: string): string {
+  const unwritable = findUnwritableCharacter(value)
+  if (unwritable !== undefined) {
+    throw new XlsxError(`A string holds ${unwritable}, which cannot be written to xml`)
+  }
   const needsPreserve = value !== value.trim()
   const attributes = needsPreserve ? ' xml:space="preserve"' : ''
   return `<si><t${attributes}>${escapeXml(value)}</t></si>`
@@ -116,7 +120,10 @@ export function appendSharedStrings(xml: string, strings: readonly string[]): Ap
 
   if (closeLength > 0) {
     const opened = `${updatedTag.slice(0, -2)}>`
-    return { xml: `${opened}${body}</sst>`, indexes: requested }
+    return {
+      xml: `${xml.slice(0, insertAt - closeLength)}${opened}${body}</sst>${xml.slice(insertAt)}`,
+      indexes: requested,
+    }
   }
 
   const head = xml.slice(0, insertAt).replace(openTag, updatedTag)

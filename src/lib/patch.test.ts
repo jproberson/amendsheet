@@ -120,3 +120,13 @@ test('adds a cell that was not in the sheet yet', () => {
 test('rejects a number that cannot be written', () => {
   assert.throws(() => patch([['A2', Number.POSITIVE_INFINITY]]), /cannot hold/)
 })
+
+test('keeps whitespace on an inline string', () => {
+  const patched = patch([['A2', '  padded  ']])
+
+  assert.match(patched, /<t xml:space="preserve"> {2}padded {2}<\/t>/)
+})
+
+test('rejects text that xml cannot represent', () => {
+  assert.throws(() => patch([['A2', `a${String.fromCharCode(7)}b`]]), /cannot be written to xml/i)
+})

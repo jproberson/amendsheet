@@ -169,3 +169,16 @@ test('maps a duplicated entry to the first place it appears', () => {
 
   assert.equal(result.indexes.get('same'), 0)
 })
+
+test('keeps the declaration when the table was self closing', () => {
+  const result = appendSharedStrings('<?xml version="1.0"?><sst/>', ['x'])
+
+  assert.match(result.xml, /^<\?xml version="1\.0"\?><sst><si><t>x<\/t><\/si><\/sst>$/)
+})
+
+test('rejects text that xml cannot represent', () => {
+  assert.throws(
+    () => appendSharedStrings(sst(''), [`a${String.fromCharCode(7)}b`]),
+    /cannot be written to xml/i,
+  )
+})
