@@ -51,20 +51,31 @@ export function checkWritable(reference: string, value: CellInput, date1904: boo
   }
 }
 
-/** Canonical reference to si, for every cell that defines a shared formula. */
-export function sharedFormulaMasters(xml: string): ReadonlyMap<string, string> {
-  const masters = new Map<string, string>()
+/** Both keyed by canonical reference, so `a1` and `$A$1` find the same cell. */
+export interface SheetIndex {
+  /** The style index a cell carried when the file was read. */
+  readonly styles: ReadonlyMap<string, number>
+  /** The si of the shared formula a cell defines, if it defines one. */
+  readonly sharedFormulas: ReadonlyMap<string, string>
+}
+
+/** One pass, because set() needs both of these before it accepts an edit. */
+export function indexSheet(xml: string): SheetIndex {
+  const styles = new Map<string, number>()
+  const sharedFormulas = new Map<string, string>()
+
   for (const row of readShape(xml).rows) {
     for (const cell of row.cells) {
+      if (cell.style === undefined && cell.sharedFormulaMaster === undefined) continue
+      const reference = formatReference({ row: row.row, column: cell.column })
+      if (cell.style !== undefined) styles.set(reference, Number(cell.style))
       if (cell.sharedFormulaMaster !== undefined) {
-        masters.set(
-          formatReference({ row: row.row, column: cell.column }),
-          cell.sharedFormulaMaster,
-        )
+        sharedFormulas.set(reference, cell.sharedFormulaMaster)
       }
     }
   }
-  return masters
+
+  return { styles, sharedFormulas }
 }
 
 export function sharedFormulaRefusal(reference: string, si: string): XlsxError {

@@ -125,10 +125,10 @@ and its expression in `cell.formula`.
 rows, on an M-series laptop:
 
 ```
-write 10000 cells                             59 ms
-write 10000 cells, reading between each       69 ms
-write 10000 dates                             92 ms
-append 10000 new rows                         66 ms
+write 10000 cells                             55 ms
+write 10000 cells, reading between each       73 ms
+write 10000 dates                            100 ms
+append 10000 new rows                         68 ms
 ```
 
 Each is linear in the number of edits. Reading between writes used to be

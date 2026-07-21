@@ -5,8 +5,9 @@ import {
   type CellInput,
   checkWritable,
   patchSheet,
-  sharedFormulaMasters,
+  indexSheet,
   sharedFormulaRefusal,
+  type SheetIndex,
 } from './patch.js'
 import {
   type CellAddress,
@@ -208,30 +209,19 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       for (const raw of readSheet(xml, sharedStrings)) yield toCell(raw, stylesNow(), date1904)
     }
 
-    let sharedFormulas: ReadonlyMap<string, string> | undefined
-    const masters = () => {
+    // The sheet as it was read: which style each cell carried, and which cells
+    // define a shared formula. Built once, on the first write, because every
+    // set() needs both and parsing the sheet twice per sheet showed up in the
+    // bench.
+    let index: SheetIndex | undefined
+    const indexed = (): SheetIndex | undefined => {
       if (sheetXml === undefined) return undefined
-      sharedFormulas ??= sharedFormulaMasters(sheetXml)
-      return sharedFormulas
+      index ??= indexSheet(sheetXml)
+      return index
     }
 
-    // The style each cell carried when the file was read, keyed canonically so
-    // a file spelling a reference `a1` or `$A$1` still matches an edit to A1.
-    let originalStyles: Map<string, number> | undefined
-    const styleAt = (canonical: string): number | undefined => {
-      const override = styleOverrides.get(reference.path)?.get(canonical)
-      if (override !== undefined) return override
-
-      if (originalStyles === undefined) {
-        originalStyles = new Map()
-        for (const raw of sheetXml === undefined ? [] : readSheet(sheetXml, [])) {
-          if (raw.styleIndex !== undefined) {
-            originalStyles.set(formatReference(raw.address), raw.styleIndex)
-          }
-        }
-      }
-      return originalStyles.get(canonical)
-    }
+    const styleAt = (canonical: string): number | undefined =>
+      styleOverrides.get(reference.path)?.get(canonical) ?? indexed()?.styles.get(canonical)
 
     /**
      * What the cell becomes, resolved through the same function a read uses.
@@ -296,7 +286,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         // the workbook is written takes the whole batch down with it, and until
         // then cell() reports a write that is never going to happen.
         checkWritable(canonical, value, date1904)
-        const si = masters()?.get(canonical)
+        const si = indexed()?.sharedFormulas.get(canonical)
         if (si !== undefined) throw sharedFormulaRefusal(canonical, si)
 
         const pending = edits.get(reference.path) ?? new Map<string, CellInput>()
