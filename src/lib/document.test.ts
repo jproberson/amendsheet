@@ -474,3 +474,52 @@ test('leaves the calculation chain alone when nothing is written', () => {
 
   assert.equal(readContainer(workbook.toBytes()).parts.has('xl/calcChain.xml'), true)
 })
+
+test('reports a part that is not valid utf-8 rather than mangling it', () => {
+  const parts = new Map([
+    ['_rels/.rels', encode(ROOT_RELS)],
+    ['xl/workbook.xml', new Uint8Array([0x3c, 0xff, 0xfe, 0x3e])],
+  ])
+
+  assert.throws(() => readWorkbook(writeContainer({ parts })), /xl\/workbook\.xml/)
+})
+
+test('reads one cell without reparsing the sheet for each lookup', () => {
+  const size = 2000
+  const rows = Array.from(
+    { length: size },
+    (_unused, index) => `<row r="${index + 1}"><c r="A${index + 1}"><v>${index}</v></c></row>`,
+  ).join('')
+  const workbook = readWorkbook(build(rows))
+  const sheet = workbook.sheets[0]
+
+  const started = process.hrtime.bigint()
+  for (let row = 1; row <= size; row++) sheet?.cell(`A${row}`)
+  const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6
+
+  // Reparsing per lookup takes about 1.9s here; an index takes a few ms.
+  assert.ok(elapsedMs < 500, `${size} lookups took ${elapsedMs.toFixed(0)}ms`)
+})
+
+test('a lookup sees a value written after the last lookup', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  const sheet = workbook.sheets[0]
+
+  assert.deepEqual(sheet?.cell('A1')?.value, { kind: 'number', value: 1 })
+  sheet?.set('A1', 2)
+  assert.deepEqual(sheet?.cell('A1')?.value, { kind: 'number', value: 2 })
+})
+
+test('reports which part is not valid utf-8 when it is not the workbook', () => {
+  const parts = new Map([
+    ['_rels/.rels', encode(ROOT_RELS)],
+    [
+      'xl/workbook.xml',
+      encode('<workbook><sheets><sheet name="D" r:id="rId1"/></sheets></workbook>'),
+    ],
+    ['xl/_rels/workbook.xml.rels', encode(WORKBOOK_RELS)],
+    ['xl/sharedStrings.xml', new Uint8Array([0x3c, 0xff, 0xfe, 0x3e])],
+  ])
+
+  assert.throws(() => readWorkbook(writeContainer({ parts })), /sharedStrings\.xml is not valid/)
+})

@@ -1,4 +1,5 @@
 import { type Container, writeContainer } from './container.js'
+import { XlsxError } from './errors.js'
 import { dateToSerial, serialToDate } from './date.js'
 import { type CellInput, patchSheet } from './patch.js'
 import {
@@ -71,7 +72,12 @@ function withoutOverride(xml: string, part: string): string {
 
 function partText(container: Container, path: string): string | undefined {
   const bytes = container.parts.get(path)
-  return bytes === undefined ? undefined : new TextDecoder().decode(bytes)
+  if (bytes === undefined) return undefined
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+  } catch (cause) {
+    throw new XlsxError(`Part ${path} is not valid utf-8`, { part: path, cause })
+  }
 }
 
 function toCellValue(raw: RawCell, styles: Styles, date1904: boolean): CellValue {
@@ -128,24 +134,31 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       return pending === undefined ? sheetXml : patchSheet(sheetXml, pending, date1904)
     }
 
+    function* readCells(): Generator<Cell> {
+      const xml = patched()
+      if (xml === undefined) return
+      for (const raw of readSheet(xml, sharedStrings)) {
+        yield toCell(raw, styles, date1904)
+      }
+    }
+
+    // Built once per edit, so reading many cells does not reparse the sheet
+    // once per lookup.
+    let byReference: Map<string, Cell> | undefined
+
     return {
       name: reference.name,
       state: reference.state,
-      *cells(): Generator<Cell> {
-        const xml = patched()
-        if (xml === undefined) return
-        for (const raw of readSheet(xml, sharedStrings)) {
-          yield toCell(raw, styles, date1904)
-        }
-      },
+      cells: readCells,
       cell(cellReference: string): Cell | undefined {
-        const wanted = formatReference(parseReference(cellReference))
-        for (const cell of this.cells()) {
-          if (cell.reference === wanted) return cell
+        if (byReference === undefined) {
+          byReference = new Map()
+          for (const found of readCells()) byReference.set(found.reference, found)
         }
-        return undefined
+        return byReference.get(formatReference(parseReference(cellReference)))
       },
       set(cellReference: string, value: CellInput): void {
+        byReference = undefined
         // Normalised so `a1`, `$A$1` and `A1` are one edit, and so the file
         // never receives a reference spelled the way the caller typed it.
         const canonical = formatReference(parseWritableReference(cellReference))

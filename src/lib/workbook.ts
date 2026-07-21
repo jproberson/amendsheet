@@ -28,7 +28,11 @@ export interface WorkbookPart {
 function partText(container: Container, path: string): string {
   const bytes = container.parts.get(path)
   if (bytes === undefined) throw new XlsxError(`Missing part ${path}`, { part: path })
-  return new TextDecoder().decode(bytes)
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+  } catch (cause) {
+    throw new XlsxError(`Part ${path} is not valid utf-8`, { part: path, cause })
+  }
 }
 
 function findWorkbookPath(container: Container): string {
