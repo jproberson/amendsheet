@@ -1,6 +1,7 @@
 import { XlsxError } from './errors.js'
 
 const LAST_COLUMN = 16384
+const LAST_ROW = 1048576
 
 const LETTER_A = 'A'.charCodeAt(0)
 
@@ -59,6 +60,20 @@ export function parseReference(reference: string): CellAddress {
   }
 
   return { row: Number(digits), column: columnToIndex(letters) }
+}
+
+/**
+ * Reading stays lenient because real files contain references a sheet cannot
+ * really hold, such as row zero. Writing does not: a reference the caller
+ * supplies has to be one Excel will accept.
+ */
+export function parseWritableReference(reference: string): CellAddress {
+  const address = parseReference(reference)
+  const { row, column } = address
+  if (row < 1 || row > LAST_ROW || column < 1 || column > LAST_COLUMN) {
+    throw new XlsxError(`"${reference}" is outside the sheet`)
+  }
+  return address
 }
 
 export function formatReference(address: CellAddress): string {

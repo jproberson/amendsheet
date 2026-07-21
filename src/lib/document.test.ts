@@ -444,3 +444,33 @@ test('a cleared cell is still visited, as empty', () => {
 
   assert.deepEqual(cell?.value, { kind: 'empty' })
 })
+
+test('drops the calculation chain when a cell is written', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><f>SUM(B1:B2)</f><v>3</v></c></row>', {
+      extra: {
+        'xl/calcChain.xml': '<calcChain><c r="A1" i="1"/></calcChain>',
+        '[Content_Types].xml':
+          '<Types><Override PartName="/xl/calcChain.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.calcChain+xml"/><Override PartName="/xl/workbook.xml" ContentType="x"/></Types>',
+      },
+    }),
+  )
+  workbook.sheets[0]?.set('A1', 5)
+
+  const parts = readContainer(workbook.toBytes()).parts
+  const types = new TextDecoder().decode(parts.get('[Content_Types].xml') ?? new Uint8Array())
+
+  assert.equal(parts.has('xl/calcChain.xml'), false)
+  assert.equal(types.includes('calcChain'), false, 'the content type override was left behind')
+  assert.match(types, /workbook\.xml/, 'the other overrides were lost')
+})
+
+test('leaves the calculation chain alone when nothing is written', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      extra: { 'xl/calcChain.xml': '<calcChain/>' },
+    }),
+  )
+
+  assert.equal(readContainer(workbook.toBytes()).parts.has('xl/calcChain.xml'), true)
+})

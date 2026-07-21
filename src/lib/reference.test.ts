@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { columnToIndex, formatReference, indexToColumn, parseReference } from './reference.js'
+import {
+  columnToIndex,
+  formatReference,
+  indexToColumn,
+  parseReference,
+  parseWritableReference,
+} from './reference.js'
 
 test('reads a reference as one based row and column', () => {
   assert.deepEqual(parseReference('A1'), { row: 1, column: 1 })
@@ -65,4 +71,25 @@ test('rejects an empty reference', () => {
 test('rejects a column outside the sheet', () => {
   assert.throws(() => indexToColumn(0), /Column 0 is outside the sheet/)
   assert.throws(() => indexToColumn(16385), /Column 16385 is outside the sheet/)
+})
+
+test('refuses to write a row past the end of a sheet', () => {
+  assert.throws(() => parseWritableReference('A1048577'), /outside the sheet/)
+})
+
+test('refuses to write a column past the end of a sheet', () => {
+  assert.throws(() => parseWritableReference('XFE1'), /outside the sheet/)
+  assert.throws(() => parseWritableReference('AAAAA1'), /outside the sheet/)
+})
+
+test('writes to the last cell of a sheet', () => {
+  assert.deepEqual(parseWritableReference('XFD1048576'), { row: 1048576, column: 16384 })
+})
+
+test('refuses to write to row zero', () => {
+  assert.throws(() => parseWritableReference('A0'), /outside the sheet/)
+})
+
+test('still reads a row zero reference, which real files contain', () => {
+  assert.deepEqual(parseReference('A0'), { row: 0, column: 1 })
 })

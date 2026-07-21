@@ -111,7 +111,18 @@ test('editing a real fixture changes only the sheet and the tables it appends to
     const after = readContainer(workbook.toBytes())
     const worksheets: string[] = []
 
+    // Deliberate: the string and style tables grow, and a stale calculation
+    // chain is dropped along with its content type override.
+    const expectedToChange = new Set([
+      'xl/sharedStrings.xml',
+      'xl/styles.xml',
+      'xl/calcChain.xml',
+      '[Content_Types].xml',
+    ])
+
     for (const [path, content] of before.parts) {
+      if (expectedToChange.has(path)) continue
+
       const other = after.parts.get(path)
       if (other === undefined) {
         unexpected.push(`${file}: lost ${path}`)
@@ -119,7 +130,6 @@ test('editing a real fixture changes only the sheet and the tables it appends to
       }
       if (Buffer.compare(Buffer.from(content), Buffer.from(other)) === 0) continue
 
-      if (path === 'xl/sharedStrings.xml' || path === 'xl/styles.xml') continue
       if (path.toLowerCase().startsWith('xl/worksheets/')) {
         worksheets.push(path)
         continue

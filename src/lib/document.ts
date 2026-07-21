@@ -1,11 +1,17 @@
 import { type Container, writeContainer } from './container.js'
 import { dateToSerial, serialToDate } from './date.js'
 import { type CellInput, patchSheet } from './patch.js'
-import { type CellAddress, formatReference, parseReference } from './reference.js'
+import {
+  type CellAddress,
+  formatReference,
+  parseReference,
+  parseWritableReference,
+} from './reference.js'
 import { type RawCell, readSheet } from './sheet.js'
 import { appendSharedStrings, readSharedStrings } from './shared-strings.js'
 import { ensureDateStyle } from './styles-writer.js'
 import { type Styles, isDateFormat, numberFormatOf, readStyles } from './styles.js'
+import { readXml } from './xml.js'
 import { type SheetState, readWorkbookPart } from './workbook.js'
 
 export type CellValue =
@@ -49,6 +55,19 @@ export interface Workbook {
 }
 
 const EMPTY_STYLES: Styles = { numberFormats: new Map(), cellFormats: [] }
+
+const CALCULATION_CHAIN = 'xl/calcChain.xml'
+const CONTENT_TYPES = '[Content_Types].xml'
+
+/** Removes one Override element, leaving every other byte of the part alone. */
+function withoutOverride(xml: string, part: string): string {
+  for (const event of readXml(xml)) {
+    if (event.kind !== 'open' || event.localName !== 'Override') continue
+    if (event.attributes.get('PartName') !== `/${part}`) continue
+    return xml.slice(0, event.start) + xml.slice(event.end)
+  }
+  return xml
+}
 
 function partText(container: Container, path: string): string | undefined {
   const bytes = container.parts.get(path)
@@ -129,7 +148,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       set(cellReference: string, value: CellInput): void {
         // Normalised so `a1`, `$A$1` and `A1` are one edit, and so the file
         // never receives a reference spelled the way the caller typed it.
-        const canonical = formatReference(parseReference(cellReference))
+        const canonical = formatReference(parseWritableReference(cellReference))
         const pending = edits.get(reference.path) ?? new Map<string, CellInput>()
         pending.set(canonical, value)
         edits.set(reference.path, pending)
@@ -142,6 +161,15 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
 
     const parts = new Map(container.parts)
     const encoder = new TextEncoder()
+
+    // Excel rebuilds the calculation chain, but a stale one makes it offer to
+    // repair the file, so the part and its content type go together.
+    if (parts.delete(CALCULATION_CHAIN)) {
+      const types = partText(container, CONTENT_TYPES)
+      if (types !== undefined) {
+        parts.set(CONTENT_TYPES, encoder.encode(withoutOverride(types, CALCULATION_CHAIN)))
+      }
+    }
 
     // A Date needs a cell format that displays dates, or it shows as a serial.
     let workingStyles = stylesXml
