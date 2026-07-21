@@ -39,6 +39,15 @@ async function main() {
       results.push(await measureRoundTrip(adapter, relative(FIXTURES_DIR, file), bytes))
     }
     printReport(adapter.name, results)
+
+    if (adapter.edit === undefined) continue
+
+    const edited: RoundTripResult[] = []
+    for (const file of files) {
+      const bytes = new Uint8Array(await readFile(file))
+      edited.push(await measureRoundTrip(adapter, relative(FIXTURES_DIR, file), bytes, true))
+    }
+    printReport(`${adapter.name}, after editing one cell`, edited)
   }
 }
 

@@ -97,25 +97,32 @@ for zone in America/Santiago Asia/Beirut Pacific/Auckland; do
 done
 
 step "harness regression"
+harness_problems=$(mktemp)
+trap 'rm -f "$harness_problems"' EXIT
 if [ -d fixtures ] && find fixtures -name '*.xlsx' -print -quit | grep -q .; then
   harness_output=$(npm run --silent harness)
-  printf '%s\n' "$harness_output" | grep -E 'ROUND-TRIP|SUMMARY'
+  printf '%s\n' "$harness_output" | grep -E 'ROUND-TRIP|PARTS REWRITTEN|SUMMARY'
 
-  # Only this library's line gates the build. The comparison adapter is printed
-  # for context and is expected to be lossy; reading the wrong summary is why
-  # this step went blind once already.
+  # Only this library's blocks gate the build, and both of them do: reading the
+  # comparison adapter's numbers instead is why this step went blind once.
+  # Each block yields "rewritten lossy failed"; all three must be zero.
   ours=$(printf '%s\n' "$harness_output" |
-    awk '/^ROUND-TRIP FIDELITY: amendsheet/ {mine=1; next}
-         /^ROUND-TRIP FIDELITY:/ {mine=0}
-         mine && /^SUMMARY/ {print; exit}')
+    awk '/^ROUND-TRIP FIDELITY:/ {mine = ($0 ~ /amendsheet/)}
+         mine && /^PARTS REWRITTEN/ {rewritten = $3}
+         mine && /^SUMMARY/ {print rewritten, $5, $8}')
 
   if [ -z "$ours" ]; then
     fail "harness printed no summary for amendsheet"
   else
-    lost=$(printf '%s\n' "$ours" | sed -n 's/.*| *\([0-9][0-9]*\) lossy.*/\1/p')
-    unread=$(printf '%s\n' "$ours" | sed -n 's/.*| *\([0-9][0-9]*\) failed to process.*/\1/p')
-    [ "$lost" = "0" ] || fail "harness: $lost file(s) lost something on round trip"
-    [ "$unread" = "0" ] || fail "harness: $unread file(s) could not be processed"
+    printf '%s\n' "$ours" | while read -r rewritten lost unread; do
+      [ "$lost" = "0" ] || printf 'FAIL: harness: %s file(s) lost something\n' "$lost"
+      [ "$unread" = "0" ] || printf 'FAIL: harness: %s file(s) could not be processed\n' "$unread"
+      [ "$rewritten" = "0" ] || printf 'FAIL: harness: %s file(s) had a part rewritten\n' "$rewritten"
+    done > "$harness_problems"
+    if [ -s "$harness_problems" ]; then
+      cat "$harness_problems"
+      fail "harness regression"
+    fi
   fi
 else
   printf 'skipped: no fixtures present (run npm run fixtures && npm run fixtures:real)\n'

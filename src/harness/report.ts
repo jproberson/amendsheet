@@ -18,6 +18,14 @@ export function printReport(adapterName: string, results: RoundTripResult[]): vo
     console.log(fit(r.file, 34) + fit(verdict, 10) + fit(String(r.partsLost.length), 12) + cells)
   }
 
+  const rewritten = results.filter((r) => !r.error && r.partsChanged.length > 0)
+  console.log(
+    `\nPARTS REWRITTEN  ${rewritten.length} file(s) had a part change that had to not change`,
+  )
+  for (const r of rewritten) {
+    console.log(`  ${r.file}: ${r.partsChanged.slice(0, 4).join(', ')}`)
+  }
+
   const failures = results.filter((r) => !r.ok)
   if (failures.length > 0) {
     console.log(`\n${'-'.repeat(78)}\nDETAIL\n${'-'.repeat(78)}`)

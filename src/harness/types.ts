@@ -32,6 +32,11 @@ export interface Adapter {
   name: string
   /** Read the file and write it back out, changing nothing. */
   roundTrip(bytes: Uint8Array): Promise<Uint8Array>
+  /**
+   * Read the file, change one cell, and write it back. Optional, because the
+   * measurement only makes sense for a library that can edit in place.
+   */
+  edit?(bytes: Uint8Array): Promise<Uint8Array>
   /** Extract normalized values for comparison. */
   values(bytes: Uint8Array): Promise<SheetValues[]>
 }
