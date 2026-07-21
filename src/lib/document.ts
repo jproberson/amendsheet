@@ -83,6 +83,22 @@ const CALCULATION_CHAIN = 'xl/calcChain.xml'
 const CONTENT_TYPES = '[Content_Types].xml'
 
 /**
+ * CT_Workbook is a sequence, so a calcPr the file lacks cannot simply be
+ * appended: these are the children the schema puts after it.
+ */
+const AFTER_CALC_PR = new Set([
+  'oleSize',
+  'customWorkbookViews',
+  'pivotCaches',
+  'smartTagPr',
+  'smartTagTypes',
+  'webPublishing',
+  'fileRecoveryPr',
+  'webPublishObjects',
+  'extLst',
+])
+
+/**
  * A written formula carries no computed result, so the workbook is marked for
  * recalculation. Without it a reader that trusts cached values shows nothing.
  */
@@ -106,12 +122,29 @@ function withRecalculation(xml: string): string {
     return xml.slice(0, event.start) + opened + xml.slice(event.end)
   }
 
+  let depth = 0
+  let insertAt = -1
+
   for (const event of readXml(xml)) {
-    if (event.kind !== 'close' || event.localName !== 'workbook') continue
+    if (event.kind === 'open') {
+      // Direct children of the root open at depth 1, so a nested extLst in a
+      // part we do not interpret cannot be mistaken for the workbook's own.
+      if (depth === 1 && insertAt === -1 && AFTER_CALC_PR.has(event.localName)) {
+        insertAt = event.start
+      }
+      if (!event.selfClosing) depth++
+      continue
+    }
+    if (event.kind !== 'close') continue
+
+    depth--
+    if (event.localName !== 'workbook' || depth !== 0) continue
+
     const colon = event.name.indexOf(':')
     const prefix = colon === -1 ? '' : event.name.slice(0, colon + 1)
     const element = `<${prefix}calcPr fullCalcOnLoad="1"/>`
-    return xml.slice(0, event.start) + element + xml.slice(event.start)
+    const at = insertAt === -1 ? event.start : insertAt
+    return xml.slice(0, at) + element + xml.slice(at)
   }
 
   return xml

@@ -1004,3 +1004,27 @@ test('refuses a number format when the package has no style table', () => {
   )
   assert.deepEqual(workbook.sheets[0]?.cell('A1')?.value, { kind: 'number', value: 1 })
 })
+
+test('adds calcPr before the elements the schema puts after it', () => {
+  // CT_Workbook is a sequence, so calcPr appended at the end sits after
+  // pivotCaches and extLst, and the workbook part no longer validates.
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      extra: {
+        'xl/workbook.xml':
+          '<workbook><sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets>' +
+          '<pivotCaches><pivotCache cacheId="1" r:id="rId9"/></pivotCaches>' +
+          '<extLst><ext uri="{XYZ}"/></extLst></workbook>',
+      },
+    }),
+  )
+  workbook.sheets[0]?.set('A1', { formula: 'B1+1' })
+
+  const parts = readContainer(workbook.toBytes()).parts
+  const book = new TextDecoder().decode(parts.get('xl/workbook.xml') ?? new Uint8Array())
+
+  assert.ok(
+    book.indexOf('<calcPr') < book.indexOf('<pivotCaches'),
+    `calcPr must precede pivotCaches: ${book}`,
+  )
+})
