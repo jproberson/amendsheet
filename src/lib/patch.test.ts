@@ -277,3 +277,16 @@ test('escapes a carriage return so a parser cannot normalise it away', () => {
   assert.equal(patched.includes('\r'), false, 'no raw carriage return may reach the file')
   assert.match(patched, /a&#13;\nb/)
 })
+
+test('numbers a row without an r the way a reader counting rows does', () => {
+  // Excel writes r on every row, but the format leaves it optional, and a row
+  // that omits it is the one after the row before it. Counting rows seen so far
+  // instead put this cell in row 2, so cells() and set() disagreed about which
+  // row it was, and an edit to A6 appended a second row 6.
+  const source = sheet('<row r="5"><c r="A5"><v>1</v></c></row><row><c r="A6"><v>2</v></c></row>')
+
+  const patched = patchSheet(source, new Map([['A6', 99]]), false)
+
+  assert.match(patched, /<c r="A6"><v>99<\/v><\/c>/)
+  assert.equal(patched.match(/<row/g)?.length, 2, 'a second row 6 was appended')
+})

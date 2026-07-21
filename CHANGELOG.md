@@ -50,5 +50,8 @@ and the API is still free to change.
 - Shared strings, cell formats and the recalculation flag are written the way
   the file writes them, rather than assuming no namespace prefix and double
   quotes.
+- A row that omits its `r` is numbered as the row after the one before it. The
+  write path counted rows seen instead, so once any row declared a number, an
+  edit to a bare row appended a second row with the same number.
 - Style lookups use the canonical reference, so a file spelling a cell `a1` or
   `$A$1` no longer loses that cell's formatting on an edit.

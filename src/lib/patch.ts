@@ -170,6 +170,7 @@ function readShape(xml: string): SheetShape {
   let selfClosing = false
 
   let prefix = ''
+  let lastRow = 0
   let openDimension = -1
   let currentRow: { row: number; start: number } | undefined
   let currentCells: CellSpan[] = []
@@ -201,11 +202,11 @@ function readShape(xml: string): SheetShape {
         continue
       }
       if (event.localName === 'row') {
+        // A row without r is the one after the row before it, which is not the
+        // same as the count of rows seen once any row declares its number.
         const declared = event.attributes.get('r')
-        currentRow = {
-          row: declared === undefined ? rows.length + 1 : Number(declared),
-          start: event.start,
-        }
+        lastRow = declared === undefined ? lastRow + 1 : Number(declared)
+        currentRow = { row: lastRow, start: event.start }
         currentCells = []
         cellColumn = 0
         if (event.selfClosing) {
