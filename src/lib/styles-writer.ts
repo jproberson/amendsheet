@@ -172,6 +172,12 @@ function applyFormatId(
   return { xml: `${head}${body}${prefixed}${stylesXml.slice(formats.insertAt)}`, index }
 }
 
+/** Sets `count` on an open tag, adding it when the file left it off. */
+function withCount(openTag: string, count: number): string {
+  if (/count="\d+"/.test(openTag)) return openTag.replace(/count="\d+"/, `count="${count}"`)
+  return openTag.replace(/^<([^\s/>]+)/, `<$1 count="${count}"`)
+}
+
 function tablePrefix(xml: string): string {
   for (const event of readXml(xml)) {
     if (event.kind !== 'open') continue
@@ -198,14 +204,36 @@ function usedFormatIds(xml: string): Set<number> {
 /** Adds a numFmt element, creating the numFmts table when the file has none. */
 function withNumberFormat(xml: string, id: number, code: string, prefix: string): string {
   const element = `<${prefix}numFmt numFmtId="${id}" formatCode="${escapeXml(code)}"/>`
+  let openStart = -1
+  let openEnd = -1
+  // Counted rather than read off the open tag, because a file that omits count
+  // or gets it wrong would otherwise have that error carried forward.
+  let children = 0
 
   for (const event of readXml(xml)) {
     if (event.kind === 'open' && event.localName === 'numFmts' && event.selfClosing) {
-      const opened = `${xml.slice(event.start, event.end - 2)}>`
+      const opened = `${withCount(xml.slice(event.start, event.end - 2), 1)}>`
       return `${xml.slice(0, event.start)}${opened}${element}</${prefix}numFmts>${xml.slice(event.end)}`
     }
-    if (event.kind === 'close' && event.localName === 'numFmts') {
-      return xml.slice(0, event.start) + element + xml.slice(event.start)
+    if (event.kind === 'open' && event.localName === 'numFmts') {
+      openStart = event.start
+      openEnd = event.end
+      continue
+    }
+    if (openStart !== -1 && event.kind === 'open' && event.localName === 'numFmt') {
+      children++
+      continue
+    }
+    // openStart guards a close with no open, which leaves the table to be
+    // created below rather than splicing against a position that was never set.
+    if (event.kind === 'close' && event.localName === 'numFmts' && openStart !== -1) {
+      // A count that disagrees with the children makes Excel call the file
+      // unreadable and offer to repair it, which rewrites the whole package.
+      const head =
+        xml.slice(0, openStart) +
+        withCount(xml.slice(openStart, openEnd), children + 1) +
+        xml.slice(openEnd, event.start)
+      return head + element + xml.slice(event.start)
     }
   }
 
@@ -244,8 +272,13 @@ export function ensureNumberFormat(
   if (basedOn !== undefined && numberFormatOf(parsed, basedOn) === formatCode) {
     return { xml: stylesXml, index: basedOn }
   }
-  for (let index = 0; index < parsed.cellFormats.length; index++) {
-    if (numberFormatOf(parsed, index) === formatCode) return { xml: stylesXml, index }
+  // Only a cell with no formatting of its own can borrow another cell's format;
+  // otherwise the borrowed xf brings its font, fill and border along and the
+  // target's are silently dropped.
+  if (basedOn === undefined) {
+    for (let index = 0; index < parsed.cellFormats.length; index++) {
+      if (numberFormatOf(parsed, index) === formatCode) return { xml: stylesXml, index }
+    }
   }
 
   let formatId = builtInFormatId(formatCode)

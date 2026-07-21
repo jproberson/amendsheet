@@ -274,3 +274,54 @@ test('writes a format into a prefixed document', () => {
 test('refuses a document with no styleSheet element', () => {
   assert.throws(() => ensureNumberFormat('<other/>', undefined, '0.000'), /styleSheet/)
 })
+
+test('keeps the font and fill of the cell being formatted', () => {
+  // Index 1 already shows 0.00, but it belongs to a different cell. Borrowing
+  // it would silently strip the bold and the fill from the cell being written.
+  const source =
+    '<styleSheet><cellXfs count="2">' +
+    '<xf numFmtId="0" fontId="7" fillId="9" borderId="3" xfId="0"/>' +
+    '<xf numFmtId="2" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>' +
+    '</cellXfs></styleSheet>'
+
+  const result = ensureNumberFormat(source, 0, '0.00')
+
+  assertWellFormed(result.xml, 'kept formatting')
+  assert.equal(numberFormatOf(readStyles(result.xml), result.index), '0.00')
+  const applied = [...result.xml.matchAll(/<xf [^>]*\/>/g)].map((match) => match[0])[result.index]
+  assert.match(applied ?? '', /fontId="7"/)
+  assert.match(applied ?? '', /fillId="9"/)
+  assert.match(applied ?? '', /borderId="3"/)
+})
+
+test('counts the formats it appends to an existing table', () => {
+  const source =
+    '<styleSheet><numFmts count="1"><numFmt numFmtId="164" formatCode="yyyy"/></numFmts>' +
+    '<cellXfs count="1"><xf numFmtId="0"/></cellXfs></styleSheet>'
+
+  const result = ensureNumberFormat(source, undefined, '"$"#,##0.00_);[Red]("$"#,##0.00)')
+
+  const declared = /<numFmts count="(\d+)"/.exec(result.xml)?.[1]
+  assert.equal(declared, '2', 'numFmts count must match its children or Excel offers to repair')
+})
+
+test('adds a count to a format table that left it off', () => {
+  const source =
+    '<styleSheet><numFmts><numFmt numFmtId="164" formatCode="yyyy"/></numFmts>' +
+    '<cellXfs count="1"><xf numFmtId="0"/></cellXfs></styleSheet>'
+
+  const result = ensureNumberFormat(source, undefined, '0.000')
+
+  assertWellFormed(result.xml, 'counted numFmts')
+  assert.match(result.xml, /<numFmts count="2">/)
+})
+
+test('builds a format table when a stray close tag is all there is', () => {
+  const source =
+    '<styleSheet></numFmts><cellXfs count="1"><xf numFmtId="0"/></cellXfs></styleSheet>'
+
+  const result = ensureNumberFormat(source, undefined, '0.000')
+
+  assert.equal(numberFormatOf(readStyles(result.xml), result.index), '0.000')
+  assert.match(result.xml, /<numFmts count="1">/)
+})
