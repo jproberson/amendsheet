@@ -17,11 +17,16 @@ function cellElement(
   value: CellInput,
   style: string | undefined,
   date1904: boolean,
+  sharedStrings: ReadonlyMap<string, number> | undefined,
 ): string {
   const attributes = style === undefined ? '' : ` s="${style}"`
 
   if (value === null) return `<c r="${reference}"${attributes}/>`
   if (typeof value === 'string') {
+    const shared = sharedStrings?.get(value)
+    if (shared !== undefined) {
+      return `<c r="${reference}"${attributes} t="s"><v>${shared}</v></c>`
+    }
     return `<c r="${reference}"${attributes} t="inlineStr"><is><t>${escapeXml(value)}</t></is></c>`
   }
   if (typeof value === 'boolean') {
@@ -151,6 +156,7 @@ export function patchSheet(
   xml: string,
   edits: ReadonlyMap<string, CellInput>,
   date1904: boolean,
+  sharedStrings?: ReadonlyMap<string, number>,
 ): string {
   if (edits.size === 0) return xml
 
@@ -164,7 +170,7 @@ export function patchSheet(
 
     if (existingRow === undefined) {
       const pending = newRows.get(row) ?? []
-      pending.push(cellElement(reference, value, undefined, date1904))
+      pending.push(cellElement(reference, value, undefined, date1904, sharedStrings))
       newRows.set(row, pending)
       continue
     }
@@ -174,7 +180,7 @@ export function patchSheet(
       splices.push({
         start: existingCell.start,
         end: existingCell.end,
-        text: cellElement(reference, value, existingCell.style, date1904),
+        text: cellElement(reference, value, existingCell.style, date1904, sharedStrings),
         order: column,
       })
       continue
@@ -185,7 +191,7 @@ export function patchSheet(
     splices.push({
       start: at,
       end: at,
-      text: cellElement(reference, value, undefined, date1904),
+      text: cellElement(reference, value, undefined, date1904, sharedStrings),
       order: column,
     })
   }

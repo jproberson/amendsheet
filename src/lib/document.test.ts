@@ -241,3 +241,78 @@ test('writes a date into a cell that already has a date format', () => {
     '2024-01-01T00:00:00.000Z',
   )
 })
+
+const withStrings = (sheetBody: string, sst: string) =>
+  build(sheetBody, { extra: { 'xl/sharedStrings.xml': sst } })
+
+test('puts new text in the shared string table when the file has one', () => {
+  const workbook = readWorkbook(
+    withStrings(
+      '<row r="1"><c r="A1"><v>1</v></c></row>',
+      '<sst count="1" uniqueCount="1"><si><t>existing</t></si></sst>',
+    ),
+  )
+  workbook.sheets[0]?.set('A1', 'fresh')
+
+  const parts = readContainer(workbook.toBytes()).parts
+  const table = new TextDecoder().decode(parts.get('xl/sharedStrings.xml') ?? new Uint8Array())
+  const sheet = new TextDecoder().decode(parts.get('xl/worksheets/sheet1.xml') ?? new Uint8Array())
+
+  assert.match(table, /<si><t>fresh<\/t><\/si>/)
+  assert.match(sheet, /<c r="A1" t="s"><v>1<\/v><\/c>/)
+})
+
+test('reuses a string the table already holds', () => {
+  const workbook = readWorkbook(
+    withStrings(
+      '<row r="1"><c r="A1"><v>1</v></c></row>',
+      '<sst count="1" uniqueCount="1"><si><t>existing</t></si></sst>',
+    ),
+  )
+  workbook.sheets[0]?.set('A1', 'existing')
+
+  const parts = readContainer(workbook.toBytes()).parts
+  const table = new TextDecoder().decode(parts.get('xl/sharedStrings.xml') ?? new Uint8Array())
+
+  assert.equal(table.match(/<si>/g)?.length, 1)
+  assert.match(table, /uniqueCount="1"/)
+})
+
+test('stores repeated text once no matter how many cells use it', () => {
+  const workbook = readWorkbook(
+    withStrings(
+      '<row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>2</v></c></row>',
+      '<sst count="0" uniqueCount="0"></sst>',
+    ),
+  )
+  workbook.sheets[0]?.set('A1', 'repeated')
+  workbook.sheets[0]?.set('B1', 'repeated')
+
+  const parts = readContainer(workbook.toBytes()).parts
+  const table = new TextDecoder().decode(parts.get('xl/sharedStrings.xml') ?? new Uint8Array())
+
+  assert.equal(table.match(/<si>/g)?.length, 1)
+})
+
+test('reads back text written through the shared string table', () => {
+  const workbook = readWorkbook(
+    withStrings('<row r="1"><c r="A1"><v>1</v></c></row>', '<sst count="0" uniqueCount="0"></sst>'),
+  )
+  workbook.sheets[0]?.set('A1', 'round tripped')
+
+  const reopened = readWorkbook(workbook.toBytes())
+  const [cell] = [...(reopened.sheets[0]?.cells() ?? [])]
+
+  assert.deepEqual(cell?.value, { kind: 'text', value: 'round tripped' })
+})
+
+test('falls back to an inline string when the file has no table', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.set('A1', 'inline')
+
+  const parts = readContainer(workbook.toBytes()).parts
+  const sheet = new TextDecoder().decode(parts.get('xl/worksheets/sheet1.xml') ?? new Uint8Array())
+
+  assert.equal(parts.has('xl/sharedStrings.xml'), false)
+  assert.match(sheet, /t="inlineStr"><is><t>inline<\/t><\/is>/)
+})

@@ -3,7 +3,7 @@ import { serialToDate } from './date.js'
 import { type CellInput, patchSheet } from './patch.js'
 import { type CellAddress, parseReference } from './reference.js'
 import { type RawCell, readSheet } from './sheet.js'
-import { readSharedStrings } from './shared-strings.js'
+import { appendSharedStrings, readSharedStrings } from './shared-strings.js'
 import { type Styles, isDateFormat, numberFormatOf, readStyles } from './styles.js'
 import { type SheetState, readWorkbookPart } from './workbook.js'
 
@@ -108,10 +108,29 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     if (edits.size === 0) return writeContainer(container)
 
     const parts = new Map(container.parts)
+    const encoder = new TextEncoder()
+
+    // Text goes into the shared string table when the file has one, so the same
+    // words written into many cells are stored once.
+    let indexes: ReadonlyMap<string, number> | undefined
+    if (stringsXml !== undefined) {
+      const written: string[] = []
+      for (const pending of edits.values()) {
+        for (const value of pending.values()) {
+          if (typeof value === 'string') written.push(value)
+        }
+      }
+      if (written.length > 0) {
+        const appended = appendSharedStrings(stringsXml, written)
+        parts.set('xl/sharedStrings.xml', encoder.encode(appended.xml))
+        indexes = appended.indexes
+      }
+    }
+
     for (const [path, pending] of edits) {
       const xml = partText(container, path)
       if (xml === undefined) continue
-      parts.set(path, new TextEncoder().encode(patchSheet(xml, pending, date1904)))
+      parts.set(path, encoder.encode(patchSheet(xml, pending, date1904, indexes)))
     }
     return writeContainer({ parts })
   }
