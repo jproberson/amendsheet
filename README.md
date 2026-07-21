@@ -121,18 +121,13 @@ and its expression in `cell.formula`.
 
 ## Speed
 
-`node scripts/bench.mjs` writes into a sheet of the given size. Against 10,000
-rows, on an M-series laptop:
+`node scripts/bench.mjs` writes into a sheet of the given size, in the four
+shapes that have caused trouble: replacing cells, appending rows, writing dates,
+and reading between every write.
 
-```
-write 10000 cells                             55 ms
-write 10000 cells, reading between each       73 ms
-write 10000 dates                            100 ms
-append 10000 new rows                         68 ms
-```
-
-Each is linear in the number of edits. Reading between writes used to be
-quadratic, and the same run took 7 minutes 46 seconds.
+Each is linear in the number of edits, and tens of milliseconds against 10,000
+rows on a laptop. Reading between writes used to be quadratic; the same run took
+7 minutes 46 seconds.
 
 ## Layout
 
