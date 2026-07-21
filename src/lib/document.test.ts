@@ -396,3 +396,51 @@ test('a number written to a cell does not gain a date format', () => {
 
   assert.deepEqual(cell?.value, { kind: 'number', value: 42 })
 })
+
+test('finds a sheet by name', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+
+  assert.equal(workbook.sheet('Data')?.name, 'Data')
+})
+
+test('reports no sheet when the name is not there', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+
+  assert.equal(workbook.sheet('Missing'), undefined)
+})
+
+test('reads a single cell by reference', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c><c r="C1"><v>3</v></c></row>'),
+  )
+
+  assert.deepEqual(workbook.sheets[0]?.cell('C1')?.value, { kind: 'number', value: 3 })
+})
+
+test('reports no cell when nothing is there', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+
+  assert.equal(workbook.sheets[0]?.cell('Z9'), undefined)
+})
+
+test('reads a single cell that was just set', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.set('B2', 'fresh')
+
+  assert.deepEqual(workbook.sheets[0]?.cell('B2')?.value, { kind: 'text', value: 'fresh' })
+})
+
+test('normalises the reference it is asked for', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+
+  assert.equal(workbook.sheets[0]?.cell('$a$1')?.reference, 'A1')
+})
+
+test('a cleared cell is still visited, as empty', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1" s="1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.set('A1', null)
+
+  const [cell] = [...(workbook.sheets[0]?.cells() ?? [])]
+
+  assert.deepEqual(cell?.value, { kind: 'empty' })
+})

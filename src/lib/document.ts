@@ -1,7 +1,7 @@
 import { type Container, writeContainer } from './container.js'
 import { serialToDate } from './date.js'
 import { type CellInput, patchSheet } from './patch.js'
-import { type CellAddress, parseReference } from './reference.js'
+import { type CellAddress, formatReference, parseReference } from './reference.js'
 import { type RawCell, readSheet } from './sheet.js'
 import { appendSharedStrings, readSharedStrings } from './shared-strings.js'
 import { ensureDateStyle } from './styles-writer.js'
@@ -28,14 +28,21 @@ export interface Cell {
 export interface Worksheet {
   readonly name: string
   readonly state: SheetState
-  /** Cells that carry content; empty cells are not visited. */
+  /**
+   * Every cell the sheet stores. A cell that was cleared, or that carries only
+   * formatting, is still stored, and arrives with a value of `kind: 'empty'`.
+   */
   cells(): Generator<Cell>
-  /** Visible to `cells()` immediately, written by `toBytes()`. */
+  /** Undefined when the sheet stores nothing at that reference. */
+  cell(reference: string): Cell | undefined
+  /** Visible to `cells()` and `cell()` immediately, written by `toBytes()`. */
   set(reference: string, value: CellInput): void
 }
 
 export interface Workbook {
   readonly sheets: readonly Worksheet[]
+  /** Undefined when no sheet has that name. Names are compared exactly. */
+  sheet(name: string): Worksheet | undefined
   readonly date1904: boolean
   /** Parts that were never interpreted are written exactly as they were read. */
   toBytes(): Uint8Array
@@ -95,6 +102,13 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         for (const raw of readSheet(xml, sharedStrings)) {
           yield toCell(raw, styles, date1904)
         }
+      },
+      cell(cellReference: string): Cell | undefined {
+        const wanted = formatReference(parseReference(cellReference))
+        for (const cell of this.cells()) {
+          if (cell.reference === wanted) return cell
+        }
+        return undefined
       },
       set(cellReference: string, value: CellInput): void {
         parseReference(cellReference)
@@ -167,5 +181,10 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     return writeContainer({ parts })
   }
 
-  return { sheets, date1904, toBytes }
+  return {
+    sheets,
+    sheet: (name: string) => sheets.find((candidate) => candidate.name === name),
+    date1904,
+    toBytes,
+  }
 }
