@@ -1,6 +1,6 @@
 import { type Container, writeContainer } from './container.js'
 import { XlsxError } from './errors.js'
-import { dateToSerial, serialToDate } from './date.js'
+import { LAST_SERIAL, dateToSerial, serialToDate } from './date.js'
 import {
   type CellInput,
   checkWritable,
@@ -146,8 +146,10 @@ function toCellValue(raw: RawCell, styles: Styles, date1904: boolean): CellValue
 
   if (value.kind === 'number' && isDateFormat(styles, raw.styleIndex)) {
     const serial = value.value
-    // A serial outside the range dates cover stays the number it is.
-    if (serial >= 0) {
+    // A serial outside the range dates cover stays the number it is. Excel
+    // shows such a cell as ###, so throwing here would make a legal file
+    // unreadable.
+    if (serial >= 0 && serial <= LAST_SERIAL) {
       return { kind: 'date', value: serialToDate(serial, date1904), serial }
     }
   }
@@ -293,31 +295,34 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         const si = indexed()?.sharedFormulas.get(canonical)
         if (si !== undefined) throw sharedFormulaRefusal(canonical, si)
 
-        const pending = edits.get(reference.path) ?? new Map<string, CellInput>()
-        pending.set(canonical, value)
-        edits.set(reference.path, pending)
-
         const current = styleAt(canonical)
-        let resolved = current
 
+        // Resolved before anything is recorded. A format this file cannot hold
+        // refuses here, and a refusal that had already queued the edit would
+        // write the value it claimed to reject.
+        let applied: DateStyle | undefined
         if (workingStyles !== undefined) {
           // An asked-for format wins; a Date only gets one because without one
           // it displays as the serial number it is stored as.
-          let applied: DateStyle | undefined
           if (options?.numberFormat !== undefined) {
             applied = ensureNumberFormat(workingStyles, current, options.numberFormat)
           } else if (value instanceof Date) {
             applied = ensureDateStyle(workingStyles, current)
           }
+        }
 
-          if (applied !== undefined) {
-            workingStyles = applied.xml
-            resolved = applied.index
-            if (applied.index !== current) {
-              const overrides = styleOverrides.get(reference.path) ?? new Map<string, number>()
-              overrides.set(canonical, applied.index)
-              styleOverrides.set(reference.path, overrides)
-            }
+        const pending = edits.get(reference.path) ?? new Map<string, CellInput>()
+        pending.set(canonical, value)
+        edits.set(reference.path, pending)
+
+        let resolved = current
+        if (applied !== undefined) {
+          workingStyles = applied.xml
+          resolved = applied.index
+          if (applied.index !== current) {
+            const overrides = styleOverrides.get(reference.path) ?? new Map<string, number>()
+            overrides.set(canonical, applied.index)
+            styleOverrides.set(reference.path, overrides)
           }
         }
 

@@ -883,3 +883,35 @@ test('a refused edit leaves the rest of the batch writable', () => {
   assert.equal(reopened?.cell('A3'), undefined)
   assert.deepEqual(reopened?.cell('A4')?.value, { kind: 'text', value: 'also kept' })
 })
+
+test('reads a large number in a date formatted cell as the number it is', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1" s="1"><v>3000000</v></c></row>'))
+
+  const [cell] = [...(workbook.sheets[0]?.cells() ?? [])]
+
+  assert.deepEqual(cell?.value, { kind: 'number', value: 3000000 })
+})
+
+test('refuses a date the workbook cannot hold, naming the cell', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+
+  assert.throws(
+    () => workbook.sheets[0]?.set('A1', new Date(50000, 0, 1)),
+    (error: unknown) => error instanceof XlsxError && /A1/.test(error.message),
+  )
+})
+
+test('records nothing when a write is refused after the value is checked', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  const sheet = workbook.sheets[0]
+
+  assert.throws(() => sheet?.set('A1', 5, { numberFormat: `x${String.fromCharCode(0)}y` }))
+
+  // A refused edit leaves the workbook exactly as it was: readable, and with
+  // nothing queued for the file it is about to write.
+  assert.deepEqual(sheet?.cell('A1')?.value, { kind: 'number', value: 1 })
+  assert.deepEqual([...(sheet?.cells() ?? [])][0]?.value, { kind: 'number', value: 1 })
+
+  const reopened = readWorkbook(workbook.toBytes())
+  assert.deepEqual([...(reopened.sheets[0]?.cells() ?? [])][0]?.value, { kind: 'number', value: 1 })
+})

@@ -14,7 +14,7 @@ const EPOCH_1904 = Date.UTC(1904, 0, 1)
 const PHANTOM_LEAP_DAY = 60
 
 /** 9999-12-31, the last day a sheet can hold. */
-const LAST_SERIAL = 2_958_465
+export const LAST_SERIAL = 2_958_465
 
 /**
  * A spreadsheet date is a calendar date rather than an instant, so a serial
@@ -79,6 +79,14 @@ export function dateToSerial(date: Date, date1904: boolean, reference?: string):
     )
   }
 
-  if (date1904) return days
-  return days >= PHANTOM_LEAP_DAY ? days + 1 : days
+  const serial = date1904 ? days : days >= PHANTOM_LEAP_DAY ? days + 1 : days
+  if (serial > LAST_SERIAL) {
+    throw new XlsxError(
+      'unwritable-value',
+      `Cannot write ${date.toDateString()}${where}: it is after 9999, ` +
+        'which this workbook cannot hold',
+      { reference },
+    )
+  }
+  return serial
 }

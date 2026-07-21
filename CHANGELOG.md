@@ -41,6 +41,16 @@ and the API is still free to change.
 
 ### Fixed
 
+- A number too large to be a date, in a cell that carries a date format, reads
+  as the number it is. It threw, and because the throw came out of the iterator
+  the whole sheet became unreadable. Excel shows such a cell as `###`, so the
+  file was legal and we were the ones refusing it.
+- A `Date` after 9999 is refused by `set`, naming the cell. It was accepted,
+  written, and unreadable afterwards, because only the lower bound was checked.
+- An edit refused by the number format it asks for records nothing. The edit was
+  queued before the format was resolved, so `set` threw, `cell()` reported the
+  old value as though the write had been rejected, and `toBytes()` wrote the new
+  one anyway.
 - A requested number format no longer strips the font, fill and border of the
   cell it is applied to.
 - `numFmts` keeps its `count` in step with its children. A mismatch makes Excel
