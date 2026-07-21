@@ -41,6 +41,9 @@ and the API is still free to change.
 
 ### Fixed
 
+- Asking for a number format on a package with no style table is refused
+  instead of being dropped without a word.
+
 - A cell reference no column letter can spell no longer breaks the lookups
   around it. One `XFE1` in a sheet made every `cell()` call in it throw, while
   `cells()` returned the whole sheet.
