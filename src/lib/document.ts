@@ -111,9 +111,11 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         return undefined
       },
       set(cellReference: string, value: CellInput): void {
-        parseReference(cellReference)
+        // Normalised so `a1`, `$A$1` and `A1` are one edit, and so the file
+        // never receives a reference spelled the way the caller typed it.
+        const canonical = formatReference(parseReference(cellReference))
         const pending = edits.get(reference.path) ?? new Map<string, CellInput>()
-        pending.set(cellReference, value)
+        pending.set(canonical, value)
         edits.set(reference.path, pending)
       },
     }

@@ -53,6 +53,9 @@ interface RowSpan {
   readonly start: number
   /** Offset just before `</row>`, where a new cell is appended. */
   readonly contentEnd: number
+  /** A self closing row holds nothing, so it is rewritten rather than spliced into. */
+  readonly selfClosing: boolean
+  readonly end: number
   readonly cells: CellSpan[]
 }
 
@@ -110,8 +113,15 @@ function readShape(xml: string): SheetShape {
           start: event.start,
         }
         currentCells = []
+        cellColumn = 0
         if (event.selfClosing) {
-          rows.push({ ...currentRow, contentEnd: event.end, cells: [] })
+          rows.push({
+            ...currentRow,
+            contentEnd: event.end,
+            end: event.end,
+            selfClosing: true,
+            cells: [],
+          })
           currentRow = undefined
         }
         continue
@@ -142,7 +152,13 @@ function readShape(xml: string): SheetShape {
       continue
     }
     if (event.name === 'row' && currentRow !== undefined) {
-      rows.push({ ...currentRow, contentEnd: event.start, cells: currentCells })
+      rows.push({
+        ...currentRow,
+        contentEnd: event.start,
+        end: event.end,
+        selfClosing: false,
+        cells: currentCells,
+      })
       currentRow = undefined
       continue
     }
@@ -183,8 +199,11 @@ export function patchSheet(
     return override === undefined ? current : String(override)
   }
 
-  for (const [reference, value] of edits) {
-    const { row, column } = parseReference(reference)
+  for (const [given, value] of edits) {
+    const address = parseReference(given)
+    const { row, column } = address
+    // The file never receives a reference spelled the way the caller typed it.
+    const reference = formatReference(address)
     const existingRow = shape.rows.find((candidate) => candidate.row === row)
 
     if (existingRow === undefined) {
@@ -213,14 +232,28 @@ export function patchSheet(
       continue
     }
 
+    const cell = cellElement(
+      reference,
+      value,
+      styleFor(reference, undefined),
+      date1904,
+      sharedStrings,
+    )
+
+    if (existingRow.selfClosing) {
+      const openTag = xml.slice(existingRow.start, existingRow.end)
+      splices.push({
+        start: existingRow.start,
+        end: existingRow.end,
+        text: `${openTag.slice(0, -2)}>${cell}</row>`,
+        order: column,
+      })
+      continue
+    }
+
     const next = existingRow.cells.find((candidate) => candidate.column > column)
     const at = next === undefined ? existingRow.contentEnd : next.start
-    splices.push({
-      start: at,
-      end: at,
-      text: cellElement(reference, value, styleFor(reference, undefined), date1904, sharedStrings),
-      order: column,
-    })
+    splices.push({ start: at, end: at, text: cell, order: column })
   }
 
   const buildRow = (row: number, cells: string[]) => {
