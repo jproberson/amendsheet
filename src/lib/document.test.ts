@@ -4,6 +4,7 @@ import { test } from 'node:test'
 import { readContainer, writeContainer } from './container.js'
 import { readWorkbook } from './document.js'
 import { XlsxError } from './errors.js'
+import type { CellInput } from './patch.js'
 
 const encode = (text: string) => new TextEncoder().encode(text)
 
@@ -683,4 +684,88 @@ test('a cell written with no format keeps the one it had', () => {
   const cell = readWorkbook(workbook.toBytes()).sheets[0]?.cell('A1')
 
   assert.equal(cell?.numberFormat, 'yyyy-mm-dd')
+})
+
+test('reads taken between edits agree with a full read', () => {
+  const rows = Array.from(
+    { length: 30 },
+    (_unused, index) => `<row r="${index + 1}"><c r="A${index + 1}"><v>${index}</v></c></row>`,
+  ).join('')
+  const workbook = readWorkbook(build(rows))
+  const sheet = workbook.sheets[0]
+
+  // The first read builds the index, so the writes after it are predicted
+  // rather than sent back to the sheet.
+  assert.equal(sheet?.cell('A1')?.value.kind, 'number')
+
+  const writes: Array<[string, CellInput, string | undefined]> = [
+    ['A1', 'text', undefined],
+    ['A2', 42, undefined],
+    ['A3', true, undefined],
+    ['A4', null, undefined],
+    ['A6', { formula: 'A1+1' }, undefined],
+    ['A7', 9, '0.0%'],
+    ['A8', new Date(2024, 0, 1), 'yyyy-mm-dd'],
+    ['A9', 3, '#,##0'],
+    ['Z40', 'new', undefined],
+  ]
+
+  for (const [reference, value, format] of writes) {
+    sheet?.set(reference, value, format === undefined ? undefined : { format })
+    assert.equal(sheet?.cell(reference)?.numberFormat, format, `${reference} format`)
+  }
+
+  // A date written over a cell that already shows dates keeps that format.
+  sheet?.set('A8', new Date(2024, 5, 6))
+  assert.equal(sheet?.cell('A8')?.numberFormat, 'yyyy-mm-dd')
+
+  for (const cell of sheet?.cells() ?? []) {
+    assert.deepEqual(
+      sheet?.cell(cell.reference)?.value,
+      cell.value,
+      `${cell.reference} read one way but not the other`,
+    )
+    assert.equal(sheet?.cell(cell.reference)?.formula, cell.formula, cell.reference)
+    assert.equal(sheet?.cell(cell.reference)?.numberFormat, cell.numberFormat, cell.reference)
+  }
+})
+
+test('a date written onto a plain cell still reads the same both ways', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  const sheet = workbook.sheets[0]
+
+  assert.equal(sheet?.cell('A1')?.value.kind, 'number')
+  sheet?.set('A1', new Date(2024, 0, 1))
+
+  const [cell] = [...(sheet?.cells() ?? [])]
+  assert.deepEqual(sheet?.cell('A1')?.value, cell?.value)
+})
+
+test('a single cell read agrees with a full read after many edits', () => {
+  const rows = Array.from(
+    { length: 30 },
+    (_unused, index) => `<row r="${index + 1}"><c r="A${index + 1}"><v>${index}</v></c></row>`,
+  ).join('')
+  const workbook = readWorkbook(build(rows))
+  const sheet = workbook.sheets[0]
+
+  sheet?.set('A1', 'text')
+  sheet?.set('A2', 42)
+  sheet?.set('A3', true)
+  sheet?.set('A4', null)
+  sheet?.set('A5', new Date(2024, 0, 1))
+  sheet?.set('A6', { formula: 'A1+1' })
+  sheet?.set('B7', 9, { format: '0.0%' })
+  sheet?.set('Z40', 'new')
+
+  // cells() re-reads the patched sheet, so it is the authority.
+  for (const cell of sheet?.cells() ?? []) {
+    assert.deepEqual(
+      sheet?.cell(cell.reference)?.value,
+      cell.value,
+      `${cell.reference} read one way but not the other`,
+    )
+    assert.equal(sheet?.cell(cell.reference)?.formula, cell.formula, cell.reference)
+    assert.equal(sheet?.cell(cell.reference)?.numberFormat, cell.numberFormat, cell.reference)
+  }
 })

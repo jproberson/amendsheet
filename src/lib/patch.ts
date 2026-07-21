@@ -267,12 +267,27 @@ export function patchSheet(
     return override === undefined ? current : String(override)
   }
 
+  // Indexed rather than scanned, so writing many cells into a large sheet stays
+  // linear in the number of edits instead of edits times rows.
+  const rowsByNumber = new Map<number, RowSpan>()
+  for (const candidate of shape.rows) rowsByNumber.set(candidate.row, candidate)
+
+  const cellIndexes = new Map<RowSpan, Map<number, CellSpan>>()
+  const cellsOf = (span: RowSpan) => {
+    const known = cellIndexes.get(span)
+    if (known !== undefined) return known
+    const built = new Map<number, CellSpan>()
+    for (const candidate of span.cells) built.set(candidate.column, candidate)
+    cellIndexes.set(span, built)
+    return built
+  }
+
   for (const [given, value] of edits) {
     const address = parseReference(given)
     const { row, column } = address
     // The file never receives a reference spelled the way the caller typed it.
     const reference = formatReference(address)
-    const existingRow = shape.rows.find((candidate) => candidate.row === row)
+    const existingRow = rowsByNumber.get(row)
 
     if (existingRow === undefined) {
       const pending = newRows.get(row) ?? []
@@ -290,7 +305,7 @@ export function patchSheet(
       continue
     }
 
-    const existingCell = existingRow.cells.find((candidate) => candidate.column === column)
+    const existingCell = cellsOf(existingRow).get(column)
     if (existingCell?.sharedFormulaMaster !== undefined) {
       // Dependents hold no expression of their own, so replacing the master
       // would leave them pointing at a formula that no longer exists.
@@ -376,10 +391,18 @@ export function patchSheet(
       order: 0,
     })
   } else {
-    for (const [row, cells] of newRows) {
-      const next = shape.rows.find((candidate) => candidate.row > row)
-      const at = next === undefined ? shape.contentEnd : next.start
-      splices.push({ start: at, end: at, text: buildRow(row, cells), order: row })
+    // Existing rows come out of readShape in document order, so walking them
+    // once alongside the sorted new rows places every one without rescanning
+    // the sheet per row.
+    let at = 0
+    let next = shape.rows[at]
+    for (const [row, cells] of [...newRows].sort(([left], [right]) => left - right)) {
+      while (next !== undefined && next.row <= row) {
+        at++
+        next = shape.rows[at]
+      }
+      const offset = next === undefined ? shape.contentEnd : next.start
+      splices.push({ start: offset, end: offset, text: buildRow(row, cells), order: row })
     }
   }
 

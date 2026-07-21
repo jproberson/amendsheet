@@ -241,3 +241,30 @@ test('writes a formula into a cell that is not there yet', () => {
 
   assert.match(patched, /<row r="9"><c r="Z9"><f>A1\+1<\/f><\/c><\/row>/)
 })
+
+test('places new rows against a sheet whose rows are not in order', () => {
+  const patched = patchSheet(
+    sheet('<row r="9"><c r="A9"><v>9</v></c></row><row r="2"><c r="A2"><v>2</v></c></row>'),
+    new Map<string, CellInput>([
+      ['A5', 5],
+      ['A7', 7],
+      ['A20', 20],
+    ]),
+    false,
+  )
+
+  assert.match(
+    patched,
+    /<sheetData><row r="5">.*<row r="7">.*<row r="9">.*<row r="2">.*<row r="20">.*<\/sheetData>/,
+  )
+})
+
+test('adds several new rows in ascending order', () => {
+  const patched = patch([
+    ['A9', 9],
+    ['A5', 5],
+    ['A7', 7],
+  ])
+
+  assert.match(patched, /<row r="5">.*<row r="7">.*<row r="9">/)
+})

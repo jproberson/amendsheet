@@ -133,10 +133,14 @@ const DATE_TOKEN = /[ymdhs]/i
 /** `[h]`, `[m]` and `[s]` mark elapsed time, which is a duration rather than a date. */
 const ELAPSED_TIME = /\[[hms]+\]/i
 
-export function isDateFormat(styles: Styles, styleIndex: number | undefined): boolean {
-  const code = numberFormatOf(styles, styleIndex)
+/** Whether a format code shows a date, rather than a number or a duration. */
+export function isDateFormatCode(code: string | undefined): boolean {
   if (code === undefined || code === 'General') return false
   if (ELAPSED_TIME.test(code)) return false
 
   return DATE_TOKEN.test(stripLiterals(code))
+}
+
+export function isDateFormat(styles: Styles, styleIndex: number | undefined): boolean {
+  return isDateFormatCode(numberFormatOf(styles, styleIndex))
 }

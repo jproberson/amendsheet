@@ -103,6 +103,21 @@ and its expression in `cell.formula`.
 - Nothing reads or writes cell formatting beyond number formats, so fonts,
   fills and borders can be preserved but not set.
 
+## Speed
+
+`node scripts/bench.mjs` writes into a sheet of the given size. Against 10,000
+rows, on an M-series laptop:
+
+```
+write 10000 cells                             62 ms
+write 10000 cells, reading between each      102 ms
+write 10000 dates                            108 ms
+append 10000 new rows                         88 ms
+```
+
+Each is linear in the number of edits. Reading between writes used to be
+quadratic, and the same run took 7 minutes 46 seconds.
+
 ## Layout
 
 ```
