@@ -1,6 +1,5 @@
 import { XlsxError } from './errors.js'
 
-/** Sheets stop at column XFD; anything beyond it cannot be addressed. */
 const LAST_COLUMN = 16384
 
 const LETTER_A = 'A'.charCodeAt(0)
@@ -16,10 +15,7 @@ const isLetter = (character: string) =>
 
 const isDigit = (character: string) => character >= '0' && character <= '9'
 
-/**
- * Column letters are bijective base 26: A-Z, then AA-AZ, with no zero digit.
- * Treating them as ordinary base 26 puts every column past Z in the wrong place.
- */
+/** Bijective base 26: there is no zero digit, so A-Z then AA, not A-Z then BA. */
 export function columnToIndex(letters: string): number {
   let index = 0
   for (const letter of letters.toUpperCase()) {
@@ -43,7 +39,7 @@ export function indexToColumn(index: number): string {
   return letters
 }
 
-/** Scanned rather than matched with a regular expression: this runs once per cell. */
+/** Scanned rather than matched: this runs once per cell. */
 export function parseReference(reference: string): CellAddress {
   let index = 0
   if (reference.charAt(index) === '$') index++

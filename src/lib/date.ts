@@ -7,16 +7,12 @@ const EPOCH_1900 = Date.UTC(1899, 11, 31)
 const EPOCH_1904 = Date.UTC(1904, 0, 1)
 
 /**
- * Excel counts 1900 as a leap year to stay compatible with Lotus 1-2-3, so
- * serial 60 is 1900-02-29 — a day that never existed. Every serial after it is
- * one greater than the true day count, which this corrects.
+ * Excel counts 1900 as a leap year for Lotus 1-2-3 compatibility, so serial 60
+ * is 1900-02-29, a day that never existed, and every serial after it is one too
+ * high.
  */
 const PHANTOM_LEAP_DAY = 60
 
-/**
- * Turns a stored serial into a date. Which epoch applies is a property of the
- * workbook, not the cell, so it has to be passed in.
- */
 export function serialToDate(serial: number, date1904: boolean): Date {
   if (!Number.isFinite(serial) || serial < 0) {
     throw new XlsxError(`Serial ${serial} is not a date`)
@@ -30,7 +26,6 @@ export function serialToDate(serial: number, date1904: boolean): Date {
   return new Date(EPOCH_1900 + corrected * MILLISECONDS_PER_DAY)
 }
 
-/** Inverse of `serialToDate`, for writing a date back into a cell. */
 export function dateToSerial(date: Date, date1904: boolean): number {
   const time = date.getTime()
   if (Number.isNaN(time)) throw new XlsxError('Invalid date cannot be written')

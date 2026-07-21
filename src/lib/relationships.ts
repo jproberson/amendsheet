@@ -1,10 +1,7 @@
 import { XlsxError } from './errors.js'
 import { readXml } from './xml.js'
 
-/**
- * Parts refer to each other by relationship id rather than by path, so reading
- * a workbook means following `rId` values through these tables.
- */
+/** Parts refer to each other by relationship id rather than by path. */
 export interface Relationship {
   readonly id: string
   readonly type: string
@@ -36,10 +33,7 @@ export function readRelationships(xml: string): ReadonlyMap<string, Relationship
   return relationships
 }
 
-/**
- * Turns a relationship target into a package path. Targets are relative to the
- * folder holding the part that declared them, except when they start with `/`.
- */
+/** Targets are relative to the folder of the declaring part, unless absolute. */
 export function resolveTarget(ownerPath: string, target: string): string {
   if (target.startsWith('/')) return target.slice(1)
 

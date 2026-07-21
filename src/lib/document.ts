@@ -21,29 +21,22 @@ export interface Cell {
   readonly reference: string
   readonly value: CellValue
   readonly formula?: string
-  /** The number format this cell resolves to, when it has one. */
   readonly numberFormat?: string
 }
 
 export interface Worksheet {
   readonly name: string
   readonly state: SheetState
-  /** Streams the cells that carry content; empty cells are not visited. */
+  /** Cells that carry content; empty cells are not visited. */
   cells(): Generator<Cell>
-  /**
-   * Records a new value for a cell. The change is visible to `cells()` and is
-   * written by `toBytes()`; the rest of the sheet is left byte for byte alone.
-   */
+  /** Visible to `cells()` immediately, written by `toBytes()`. */
   set(reference: string, value: CellInput): void
 }
 
 export interface Workbook {
   readonly sheets: readonly Worksheet[]
   readonly date1904: boolean
-  /**
-   * Serialises the document back to .xlsx. Parts that were never interpreted
-   * are written exactly as they were read.
-   */
+  /** Parts that were never interpreted are written exactly as they were read. */
   toBytes(): Uint8Array
 }
 

@@ -13,16 +13,15 @@ export type SheetState = 'visible' | 'hidden' | 'veryHidden'
 export interface SheetRef {
   readonly name: string
   readonly sheetId: string
-  /** Package path of the worksheet part, already resolved. */
+  /** Package path, already resolved. */
   readonly path: string
   readonly state: SheetState
 }
 
 export interface WorkbookPart {
   readonly sheets: readonly SheetRef[]
-  /** Excel's alternate epoch, where serial dates count from 1904 rather than 1900. */
+  /** The alternate epoch, where serials count from 1904 rather than 1900. */
   readonly date1904: boolean
-  /** Every part of the original file, including the ones nothing here reads. */
   readonly container: Container
 }
 
@@ -52,10 +51,7 @@ function toSheetState(value: string | undefined): SheetState {
 
 const isTrue = (value: string | undefined) => value === '1' || value === 'true'
 
-/**
- * Relationship attributes carry a namespace prefix that files are free to
- * choose, so the prefix is matched loosely rather than assumed to be `r`.
- */
+/** The namespace prefix is the file's choice, so `r` cannot be assumed. */
 function relationshipId(attributes: ReadonlyMap<string, string>): string | undefined {
   const direct = attributes.get('r:id')
   if (direct !== undefined) return direct
@@ -90,8 +86,7 @@ export function readWorkbookPart(bytes: Uint8Array): WorkbookPart {
 
     const id = relationshipId(event.attributes)
     const relationship = id === undefined ? undefined : relationships.get(id)
-    // Files exist that name a sheet with no usable relationship; skip rather
-    // than fail, since the rest of the document is still readable.
+    // Files exist that name a sheet with no usable relationship.
     if (relationship === undefined || relationship.external) continue
 
     sheets.push({

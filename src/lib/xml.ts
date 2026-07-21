@@ -1,6 +1,6 @@
 import { XlsxError } from './errors.js'
 
-/** Byte range the event occupies in the source, so it can be spliced exactly. */
+/** Byte range in the source, so the original can be spliced exactly. */
 interface Span {
   readonly start: number
   readonly end: number
@@ -100,11 +100,7 @@ function parseAttributes(source: string, tagStart: number): ReadonlyMap<string, 
   return attributes
 }
 
-/**
- * Emits elements and text as they are encountered rather than building a tree,
- * so a sheet with hundreds of thousands of rows can be read without holding all
- * of it in memory.
- */
+/** Emits events rather than building a tree, so large sheets stream. */
 export function* readXml(source: string): Generator<XmlEvent> {
   let position = 0
 

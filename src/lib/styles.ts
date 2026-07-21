@@ -1,9 +1,6 @@
 import { readXml } from './xml.js'
 
-/**
- * Number formats built into every workbook rather than written to the file.
- * Only the ones that matter for telling dates from numbers are listed.
- */
+/** Implied by every workbook rather than written to the file. */
 const BUILT_IN_FORMATS = new Map<number, string>([
   [0, 'General'],
   [1, '0'],
@@ -82,11 +79,7 @@ export function numberFormatOf(styles: Styles, styleIndex: number | undefined): 
   return styles.numberFormats.get(formatId) ?? BUILT_IN_FORMATS.get(formatId)
 }
 
-/**
- * Strips the parts of a format code that are shown literally, so their letters
- * are not mistaken for date tokens: `"day"0.0` is a number, not a date.
- * Elapsed-time brackets such as `[h]` are kept, since those are times.
- */
+/** Without this, the letters in `"day"0.0` read as date tokens. */
 function stripLiterals(code: string): string {
   let stripped = ''
   let index = 0
@@ -107,7 +100,7 @@ function stripLiterals(code: string): string {
     if (character === '[') {
       const end = code.indexOf(']', index)
       const section = end === -1 ? '' : code.slice(index + 1, end)
-      // [h], [m] and [s] are elapsed time; anything else is a colour or condition.
+      // [h] is elapsed time; [Red] and conditions are not.
       if (/^[hms]+$/i.test(section)) stripped += section
       index = end === -1 ? code.length : end + 1
       continue

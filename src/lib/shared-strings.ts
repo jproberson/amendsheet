@@ -1,12 +1,8 @@
 import { readXml } from './xml.js'
 
 /**
- * Cell text is not stored in the cell. A cell with `t="s"` holds an index into
- * this table, so reading values means reading this first.
- *
- * A string may be split across formatting runs, and Japanese files carry
- * phonetic guides in `rPh` runs that look like text but are not part of the
- * value.
+ * One string may be split across formatting runs, and `rPh` runs hold phonetic
+ * guides that look like text but are not part of the value.
  */
 export function readSharedStrings(xml: string): readonly string[] {
   const strings: string[] = []

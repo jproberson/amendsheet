@@ -1,8 +1,4 @@
-/**
- * Every failure this library raises. `part` names the location inside the
- * document when one is known, because "Invalid row number in model" is not
- * something a caller can act on.
- */
+/** `part` names where in the document the failure was, when that is known. */
 export class XlsxError extends Error {
   readonly part: string | undefined
 

@@ -15,15 +15,11 @@ export interface RawCell {
   readonly value: RawCellValue
   /** Formula source, without the leading `=`. Absent when the cell holds a literal. */
   readonly formula?: string
-  /** Index into the style table. Resolving it to a format needs styles.xml. */
+  /** Resolving this to a format needs styles.xml. */
   readonly styleIndex?: number
 }
 
-/**
- * Dates are deliberately not produced here. A date is a number wearing a date
- * number format, so telling them apart needs the style table; this reader
- * reports what the cell actually stores.
- */
+/** No dates: a date is a number with a date format, which needs the style table. */
 export function* readSheet(xml: string, sharedStrings: readonly string[]): Generator<RawCell> {
   let row = 0
   let column = 0
@@ -72,7 +68,7 @@ export function* readSheet(xml: string, sharedStrings: readonly string[]): Gener
           formula = null
           inlineText = null
           column++
-          // A self closing cell carries only a style, and gets no close event.
+          // A self closing cell gets no close event.
           if (event.selfClosing) yield finishCell()
           break
         }
