@@ -1,13 +1,13 @@
 # xlsxdoc
 
-Reads `.xlsx` files in Node and the browser. Parts it does not interpret —
-charts, pivot tables, drawings, macros — are written back byte for byte, so
-opening a file and saving it does not damage it.
+Read and edit `.xlsx` files in Node and the browser.
 
-Zero dependencies except [fflate](https://github.com/101arrowz/fflate) for the
-ZIP container.
+Parts it does not interpret — charts, pivot tables, drawings, macros — are
+written back byte for byte, so a file survives being opened, changed and saved
+with everything else intact.
 
-Status: read path only. Editing and writing cell values are not implemented yet.
+One dependency: [fflate](https://github.com/101arrowz/fflate), for the ZIP
+container. Nothing else, so there is no transitive tree to audit.
 
 ## Use
 
@@ -16,14 +16,27 @@ import { readWorkbook } from 'xlsxdoc'
 
 const workbook = readWorkbook(bytes)
 
-for (const sheet of workbook.sheets) {
-  for (const cell of sheet.cells()) {
-    console.log(cell.reference, cell.value)
-  }
+for (const cell of workbook.sheets[0].cells()) {
+  console.log(cell.reference, cell.value)
 }
-
-const saved = workbook.toBytes()
 ```
+
+Editing a file leaves everything you did not touch exactly as it was:
+
+```ts
+const workbook = readWorkbook(bytes)
+
+workbook.sheets[0].set('B7', 42)
+workbook.sheets[0].set('C1', 'a new cell')
+workbook.sheets[0].set('D2', new Date('2024-01-01'))
+
+await writeFile('out.xlsx', workbook.toBytes())
+```
+
+`set` accepts a number, string, boolean, `Date`, or `null` to clear a cell. It
+creates the cell and its row if they are not there yet, and carries over the
+style of a cell it replaces — which means a `Date` written into a cell with no
+date format will display as a number.
 
 `cell.value` is a discriminated union:
 
@@ -40,6 +53,14 @@ type CellValue =
 A date is a number wearing a date number format, so `kind: 'date'` is produced
 by resolving the cell's style. The original `serial` is kept alongside the
 `Date` so the stored value can be written back unchanged.
+
+## Not done yet
+
+- Text is written as an inline string rather than added to the shared string
+  table, so repeated text costs more bytes than it should.
+- Writing is not streamed: a sheet is patched as one string.
+- Nothing writes charts, pivot tables or drawings. They are preserved, not
+  created.
 
 ## Layout
 
@@ -58,29 +79,14 @@ corpus/        the files the harness runs against
 ```
 
 Formats, lints, typechecks, greps for banned constructs, runs the tests with
-coverage thresholds, and prints the harness numbers. Run it before every commit.
+coverage thresholds, and checks the built package. Run it before every commit.
 
-## Measurements
+## Round-trip harness
 
-Round-trip fidelity over the 72 committed corpus files — read a file, write it
-straight back, compare every ZIP part, markup feature, and cell value:
-
-```
-xlsxdoc            72 clean  |   0 lossy  |  0 failed to process
-exceljs@4.4.0      25 clean  |  45 lossy  |  2 failed to process
-```
-
-Opening and saving with ExcelJS damages charts in 12 files, drawings in 12,
-defined names in 8, column widths in 4, and pivot tables in 3. Two files it
-cannot read at all: one omits the optional `r` attribute on `<row>` and `<c>`,
-which is legal, and one trips an internal error on a data validation range.
-
-This comparison is not symmetric. ExcelJS rebuilds a file from its object model;
-xlsxdoc currently writes the parts it read. The interesting measurement is still
-ahead, when writing modified cells lands.
-
-Reproduce with `npm run harness`. Add a library by implementing `Adapter` in
-`src/harness/types.ts` and registering it in `src/harness/run.ts`.
+`npm run harness` reads every file in the corpus, writes it straight back, and
+reports anything that changed: ZIP parts that went missing, markup features whose
+count fell, and cell values that differ. It is the regression gate for the
+preservation guarantee — over the 72 committed files, nothing changes.
 
 ## Corpus
 
@@ -90,8 +96,8 @@ Reproduce with `npm run harness`. Add a library by implementing `Adapter` in
   inline strings, omitted cell references, rows out of order, a lying
   `dimension`, the 1904 epoch, the 1900 leap-year bug, shared formulas, columns
   past Z, XML entities, boolean and error cells.
-- `corpus/generated/` — workbooks built with ExcelJS. Weak by construction: a
-  library reading its own output proves little.
+- `corpus/generated/` — feature-rich workbooks built by another library, as a
+  smoke test. Weaker than the real files, which no JavaScript library produced.
 - `corpus/manual/` — drop your own files here. Gitignored.
 
 `npm run corpus` builds the generated and quirk files. `npm run corpus:real`
