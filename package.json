@@ -8,7 +8,7 @@
     "fixtures": "tsx src/fixtures/generate.ts",
     "fixtures:real": "tsx src/fixtures/fetch.ts",
     "harness": "tsx src/harness/run.ts",
-    "bench": "npm run fixtures && npm run harness",
+    "bench": "node scripts/bench.mjs",
     "format": "biome format --write src",
     "lint": "biome lint --error-on-warnings src",
     "typecheck": "tsc --noEmit",
