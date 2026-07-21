@@ -30,7 +30,12 @@ export type CellValue =
   | { readonly kind: 'boolean'; readonly value: boolean }
   | { readonly kind: 'error'; readonly value: string }
   | { readonly kind: 'empty' }
-  /** The stored number is kept so a date can be written back unchanged. */
+  /**
+   * The stored number is kept so a date can be written back unchanged. Which
+   * formats count as dates is a heuristic and may change in any release, so a
+   * cell can move between `number` and `date`; `serial` and `value` are the
+   * same double, and reading whichever is there survives that.
+   */
   | { readonly kind: 'date'; readonly value: Date; readonly serial: number }
 
 /**

@@ -8,6 +8,12 @@ and the API is still free to change.
 
 ### Added
 
+- `worksheet.sheetId`, as the workbook part spells it, so a sheet can be matched
+  against a defined name or a part this library does not interpret.
+- `invalid-content`, for a part that is well formed xml but says something no
+  reader can honour. `XlsxErrorCode` is now an open union: new codes arrive in
+  minor releases and a switch over it needs a default. Which codes mean the
+  caller is at fault and which mean the file is is written down in the README.
 - `set(reference, { formula })` writes a formula. Written without a cached
   result, so the cell reads back empty until a spreadsheet application opens the
   file and calculates it. The workbook is marked for recalculation.
@@ -21,6 +27,24 @@ and the API is still free to change.
 
 ### Changed
 
+- `cell.formula` is a union rather than a string. A cell following a shared
+  formula reported `''`, which is falsy, so `if (cell.formula)` treated it as a
+  cell holding a literal. It now reports `{ kind: 'shared', master }`, naming the
+  cell the expression is stored on, against `{ kind: 'expression', expression }`
+  for a cell that has one.
+- `cell.reference` is canonical, so it always equals
+  `formatReference(cell.address)`. It used to be whatever the file wrote, so a
+  file spelling a cell `$A$1` or `a1` produced a key that matched nothing the
+  caller could compute, and a different key per writing application.
+- `workbook.date1904` is now `workbook.epoch`, which is `1900` or `1904`.
+- `WriteOptions` is now `SetOptions`. It is `set`'s options, not `toBytes`'s.
+- `worksheet.cells()` returns `Iterable<Cell>` rather than `IterableIterator`.
+- `columnToIndex` refuses anything that is not one or more letters, rather than
+  returning `0` for `''` and a meaningless number for `'a1'`. It still converts
+  columns past the last one a sheet can hold, because reading is lenient and
+  that conversion goes through here.
+- Reading a cell whose numeric text is not a number reports `invalid-content`
+  rather than `unwritable-value`. Nobody was trying to write anything.
 - Cell styles are resolved when `set` is called rather than when the file is
   written, so a read of an edited workbook agrees with a read of the bytes it
   produces. Writing a date, or a number with a date format, previously read back
@@ -40,6 +64,24 @@ and the API is still free to change.
   only the date.
 
 ### Fixed
+
+- A `Date` written and read back is now identical to the millisecond. A serial
+  is a count of days, so the conversion back was fractional and the `Date`
+  constructor truncated it, leaving about one time of day in twenty a
+  millisecond early.
+
+- An attribute is rewritten whatever quotes the file used. A single-quoted
+  `numFmtId` gained a second copy rather than being rewritten, and a duplicate
+  attribute is fatally malformed, so `styles.xml` stopped parsing. The `count`
+  on `cellXfs`, `numFmts` and `sst` had the same fault.
+
+- `calcPr` is added where the schema expects it. `CT_Workbook` is a sequence and
+  it was appended last, so a workbook with `pivotCaches` or `extLst` and no
+  `calcPr` became schema invalid the first time a formula was written.
+
+- Passing an object that is not a `Date` and names no string formula is refused
+  with `unwritable-value`. It used to throw a `TypeError` from inside, outside
+  the error contract entirely.
 
 - Asking for a number format on a package with no style table is refused
   instead of being dropped without a word.

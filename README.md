@@ -88,6 +88,18 @@ There is no date type in the file format. A date is a number with a date number
 format applied, so `kind: 'date'` comes from resolving the cell's style. The
 `serial` is kept so the stored value can go back unchanged.
 
+Which format codes count as dates is a heuristic over the code, and it is not
+frozen: a release may start or stop calling a given format a date, and a cell
+can move between `number` and `date` without the type changing to warn you. Both
+kinds carry the same stored double, so the branch that never breaks is
+
+```ts
+const stored = value.kind === 'date' ? value.serial : value.value
+```
+
+If you need a stable classification, read `cell.numberFormat` and decide for
+yourself.
+
 Dates are calendar dates, not instants. `new Date(2024, 0, 1)` writes the serial
 for that day, and reading it back gives a `Date` whose `getDate()` is 1, in
 whatever timezone the code runs in. Build dates the ordinary way rather than
@@ -104,6 +116,20 @@ that happens to start with `=` stays text. Nothing here computes a result, so
 the cell is written without one and the workbook is marked for recalculation.
 Until something opens it, that cell reads back with a value of `kind: 'empty'`
 and its expression in `cell.formula`.
+
+## Compatibility
+
+What a minor release is allowed to do, so you know which branches are safe:
+
+- **`XlsxErrorCode` is open.** New codes arrive in minor releases, because there
+  is no knowing today every way an xlsx can be malformed. Switch with a default.
+  An existing code will not change meaning without a major version.
+  `bad-reference` and `unwritable-value` mean the caller passed something the
+  library cannot use; every other code means the file is at fault.
+- **`kind: 'date'` is not a frozen classification.** See above.
+- **A `Date` written and read back is the same date.** A serial another
+  application wrote can carry finer resolution than a millisecond, which is all
+  a `Date` holds.
 
 ## Not done yet
 
