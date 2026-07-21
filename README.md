@@ -46,12 +46,14 @@ sheet.set('B7', 42)
 sheet.set('C1', 'a new cell')
 sheet.set('D2', new Date('2024-01-01'))
 sheet.set('E1', null) // clears the value, keeps the formatting
+sheet.set('F9', { formula: 'SUM(F1:F8)' })
 
 const bytes = workbook.toBytes() // synchronous
 await writeFile('out.xlsx', bytes)
 ```
 
-`set` takes a number, string, boolean, `Date`, or `null` to clear a cell. If the
+`set` takes a number, string, boolean, `Date`, `{ formula }`, or `null` to clear
+a cell. If the
 cell or its row isn't there yet, both get created, and the declared dimension
 grows to cover them. The style of a replaced cell is kept, so its formatting
 survives the edit. Writing a `Date` into a cell with no date format applies one,
@@ -82,11 +84,18 @@ Reading a formula gives you `cell.formula`, the expression without the leading
 `=`. A cell that follows a shared formula reports an empty string, since the
 expression lives on the master cell.
 
+Write one with `{ formula }` rather than a string beginning with `=`, so text
+that happens to start with `=` stays text. Nothing here computes a result, so
+the cell is written without one and the workbook is marked for recalculation.
+Until something opens it, that cell reads back with a value of `kind: 'empty'`
+and its expression in `cell.formula`.
+
 ## Not done yet
 
-- Formulas are read only. `set` takes values, so there is no way to write one,
-  and overwriting the cell that defines a shared formula is refused rather than
+- Overwriting the cell that defines a shared formula is refused rather than
   breaking the cells that follow it.
+- Nothing evaluates formulas, so a written one has no value until a spreadsheet
+  application opens the file.
 - Writing isn't streamed. A sheet is patched as one string.
 - Charts, pivot tables and drawings are preserved but never created.
 - Nothing reads or writes cell formatting beyond number formats.

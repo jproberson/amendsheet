@@ -73,6 +73,12 @@ test('escapes text that would break the markup', () => {
   assert.match(patched, /<t>a &amp; b &lt; c<\/t>/)
 })
 
+test('leaves quotes alone in text, which need no escaping', () => {
+  const patched = patch([['A2', 'say "hello"']])
+
+  assert.match(patched, /<t>say "hello"<\/t>/)
+})
+
 test('writes a boolean', () => {
   const patched = patch([['A2', true]])
 
@@ -191,4 +197,47 @@ test('widens a dimension written with a closing tag', () => {
 
   assert.equal(patched.includes('</dimension>'), false, 'a dangling close tag was left behind')
   assert.match(patched, /<dimension ref="A1:D5"\/>/)
+})
+
+test('writes a formula', () => {
+  const patched = patch([['A2', { formula: 'SUM(B1:B9)' }]])
+
+  assert.match(patched, /<c r="A2"><f>SUM\(B1:B9\)<\/f><\/c>/)
+})
+
+test('does not write a cached result, so it is recalculated', () => {
+  const patched = patch([['A2', { formula: 'SUM(B1:B9)' }]])
+
+  assert.equal(/<c r="A2">.*?<v>/.test(patched), false)
+})
+
+test('escapes a formula that would break the markup', () => {
+  const patched = patch([['A2', { formula: 'IF(B1<C1,"a & b","c")' }]])
+
+  assert.match(patched, /<f>IF\(B1&lt;C1,"a &amp; b","c"\)<\/f>/)
+})
+
+test('keeps the style of the cell a formula replaces', () => {
+  const patched = patch([['B1', { formula: 'A1*2' }]])
+
+  assert.match(patched, /<c r="B1" s="4"><f>A1\*2<\/f><\/c>/)
+})
+
+test('leaves text that merely starts with an equals sign as text', () => {
+  const patched = patch([['A2', '=not a formula']])
+
+  assert.match(patched, /t="inlineStr"><is><t>=not a formula<\/t>/)
+})
+
+test('refuses a formula that xml cannot hold', () => {
+  assert.throws(
+    () => patch([['A2', { formula: `SUM(${String.fromCharCode(7)})` }]]),
+    /cannot be written to xml/i,
+  )
+})
+
+test('writes a formula into a cell that is not there yet', () => {
+  const patched = patch([['Z9', { formula: 'A1+1' }]])
+
+  assert.match(patched, /<row r="9"><c r="Z9"><f>A1\+1<\/f><\/c><\/row>/)
 })

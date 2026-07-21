@@ -3,10 +3,16 @@ import { XlsxError } from './errors.js'
 import { formatReference, parseReference } from './reference.js'
 import { findUnwritableCharacter, readXml } from './xml.js'
 
-export type CellInput = number | string | boolean | Date | null
+/** An expression without the leading `=`, so text starting with `=` stays text. */
+export interface FormulaInput {
+  readonly formula: string
+}
 
+export type CellInput = number | string | boolean | Date | null | FormulaInput
+
+/** Element content only. Quotes need no escaping there, and Excel leaves them. */
 const escapeXml = (text: string) =>
-  text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+  text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
 /**
  * An existing style is carried over so formatting survives an edit, which means
@@ -25,6 +31,20 @@ function cellElement(
   const v = `${prefix}v`
 
   if (value === null) return `<${c} r="${reference}"${attributes}/>`
+
+  if (typeof value === 'object' && !(value instanceof Date)) {
+    const unwritable = findUnwritableCharacter(value.formula)
+    if (unwritable !== undefined) {
+      throw new XlsxError(
+        'unwritable-value',
+        `Cell ${reference} holds ${unwritable}, which cannot be written to xml`,
+        { reference },
+      )
+    }
+    // No cached result: nothing here computes one, and a stale one is worse.
+    const f = `${prefix}f`
+    return `<${c} r="${reference}"${attributes}><${f}>${escapeXml(value.formula)}</${f}></${c}>`
+  }
   if (typeof value === 'string') {
     const shared = sharedStrings?.get(value)
     if (shared !== undefined) {

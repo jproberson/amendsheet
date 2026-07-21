@@ -19,6 +19,8 @@ export interface SheetRef {
 }
 
 export interface WorkbookPart {
+  /** Package path of the workbook part itself, usually xl/workbook.xml. */
+  readonly path: string
   readonly sheets: readonly SheetRef[]
   /** The alternate epoch, where serials count from 1904 rather than 1900. */
   readonly date1904: boolean
@@ -106,5 +108,5 @@ export function readWorkbookPart(bytes: Uint8Array): WorkbookPart {
     })
   }
 
-  return { sheets, date1904, container }
+  return { path: workbookPath, sheets, date1904, container }
 }

@@ -544,3 +544,98 @@ test('a bad reference names itself', () => {
     assert.equal(error.reference, 'nonsense')
   }
 })
+
+test('asks for a recalculation once a formula is written', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.set('A1', { formula: 'B1+1' })
+
+  const parts = readContainer(workbook.toBytes()).parts
+  const book = new TextDecoder().decode(parts.get('xl/workbook.xml') ?? new Uint8Array())
+
+  assert.match(book, /<calcPr[^>]*fullCalcOnLoad="1"/)
+})
+
+test('sets the recalculation flag on an existing calcPr without losing it', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      extra: {
+        'xl/workbook.xml':
+          '<workbook><sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets>' +
+          '<calcPr calcId="140000" iterate="1"/></workbook>',
+      },
+    }),
+  )
+  workbook.sheets[0]?.set('A1', { formula: 'B1+1' })
+
+  const parts = readContainer(workbook.toBytes()).parts
+  const book = new TextDecoder().decode(parts.get('xl/workbook.xml') ?? new Uint8Array())
+
+  assert.match(book, /iterate="1"/)
+  assert.match(book, /fullCalcOnLoad="1"/)
+  assert.equal(book.match(/<calcPr/g)?.length, 1)
+})
+
+test('leaves the workbook part alone when no formula is written', () => {
+  const original = build('<row r="1"><c r="A1"><v>1</v></c></row>')
+  const workbook = readWorkbook(original)
+  workbook.sheets[0]?.set('A1', 5)
+
+  const before = readContainer(original).parts.get('xl/workbook.xml')
+  const after = readContainer(workbook.toBytes()).parts.get('xl/workbook.xml')
+
+  assert.deepEqual(after, before)
+})
+
+test('turns an existing recalculation flag back on', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      extra: {
+        'xl/workbook.xml':
+          '<workbook><sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets>' +
+          '<calcPr fullCalcOnLoad="0"/></workbook>',
+      },
+    }),
+  )
+  workbook.sheets[0]?.set('A1', { formula: 'B1+1' })
+
+  const parts = readContainer(workbook.toBytes()).parts
+  const book = new TextDecoder().decode(parts.get('xl/workbook.xml') ?? new Uint8Array())
+
+  assert.match(book, /fullCalcOnLoad="1"/)
+  assert.equal(book.includes('fullCalcOnLoad="0"'), false)
+})
+
+test('adds the flag to a calcPr written with a closing tag', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      extra: {
+        'xl/workbook.xml':
+          '<workbook><sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets>' +
+          '<calcPr calcId="1"></calcPr></workbook>',
+      },
+    }),
+  )
+  workbook.sheets[0]?.set('A1', { formula: 'B1+1' })
+
+  const parts = readContainer(workbook.toBytes()).parts
+  const book = new TextDecoder().decode(parts.get('xl/workbook.xml') ?? new Uint8Array())
+
+  assert.match(book, /<calcPr calcId="1" fullCalcOnLoad="1"><\/calcPr>/)
+})
+
+test('adds a recalculation flag to a prefixed workbook', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      extra: {
+        'xl/workbook.xml':
+          '<x:workbook><x:sheets><x:sheet name="Data" sheetId="1" r:id="rId1"/></x:sheets></x:workbook>',
+      },
+    }),
+  )
+  workbook.sheets[0]?.set('A1', { formula: 'B1+1' })
+
+  const parts = readContainer(workbook.toBytes()).parts
+  const book = new TextDecoder().decode(parts.get('xl/workbook.xml') ?? new Uint8Array())
+
+  assert.match(book, /<x:calcPr fullCalcOnLoad="1"\/><\/x:workbook>/)
+})

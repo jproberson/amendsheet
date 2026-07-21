@@ -60,6 +60,39 @@ const EMPTY_STYLES: Styles = { numberFormats: new Map(), cellFormats: [] }
 const CALCULATION_CHAIN = 'xl/calcChain.xml'
 const CONTENT_TYPES = '[Content_Types].xml'
 
+/**
+ * A written formula carries no computed result, so the workbook is marked for
+ * recalculation. Without it a reader that trusts cached values shows nothing.
+ */
+function withRecalculation(xml: string): string {
+  for (const event of readXml(xml)) {
+    if (event.kind !== 'open' || event.localName !== 'calcPr') continue
+
+    const tag = xml.slice(event.start, event.end)
+    if (tag.includes('fullCalcOnLoad=')) {
+      return (
+        xml.slice(0, event.start) +
+        tag.replace(/fullCalcOnLoad="[^"]*"/, 'fullCalcOnLoad="1"') +
+        xml.slice(event.end)
+      )
+    }
+    const opened = tag.replace(/\/?>$/, (end) =>
+      end === '/>' ? ' fullCalcOnLoad="1"/>' : ' fullCalcOnLoad="1">',
+    )
+    return xml.slice(0, event.start) + opened + xml.slice(event.end)
+  }
+
+  for (const event of readXml(xml)) {
+    if (event.kind !== 'close' || event.localName !== 'workbook') continue
+    const colon = event.name.indexOf(':')
+    const prefix = colon === -1 ? '' : event.name.slice(0, colon + 1)
+    const element = `<${prefix}calcPr fullCalcOnLoad="1"/>`
+    return xml.slice(0, event.start) + element + xml.slice(event.start)
+  }
+
+  return xml
+}
+
 /** Removes one Override element, leaving every other byte of the part alone. */
 function withoutOverride(xml: string, part: string): string {
   for (const event of readXml(xml)) {
@@ -237,6 +270,17 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         encoder.encode(patchSheet(xml, pending, date1904, indexes, dateStyles.get(path))),
       )
     }
+
+    const wroteFormula = [...edits.values()].some((pending) =>
+      [...pending.values()].some(
+        (value) => typeof value === 'object' && value !== null && !(value instanceof Date),
+      ),
+    )
+    if (wroteFormula) {
+      const book = partText(container, part.path)
+      if (book !== undefined) parts.set(part.path, encoder.encode(withRecalculation(book)))
+    }
+
     return writeContainer({ parts })
   }
 

@@ -73,11 +73,16 @@ export function assertPatchedSheet(xml: string, what: string): void {
   assertRowsAreUnique(xml, what)
 }
 
-/** Parts other than these must survive an edit byte for byte. */
+/**
+ * Parts other than these must survive an edit byte for byte. The workbook part
+ * is here because a formula write marks it for recalculation; that it stays
+ * untouched otherwise is pinned by a test in document.test.ts.
+ */
 const EXPECTED_TO_CHANGE = new Set([
   'xl/sharedStrings.xml',
   'xl/styles.xml',
   'xl/calcChain.xml',
+  'xl/workbook.xml',
   '[Content_Types].xml',
 ])
 

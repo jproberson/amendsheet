@@ -45,6 +45,7 @@ function makeEdits(next: () => number, count: number): Edit[] {
     new Date(2024, 5, 15),
     // After 1904, so it is representable under either epoch.
     new Date(1990, 11, 31),
+    { formula: 'A1+1' },
   ]
 
   const edits: Edit[] = []
@@ -172,13 +173,16 @@ test('every edited cell reads back as it was written', async () => {
         assert.deepEqual(cell?.value, { kind: 'text', value }, `${file} ${reference}`)
       } else if (typeof value === 'boolean') {
         assert.deepEqual(cell?.value, { kind: 'boolean', value }, `${file} ${reference}`)
-      } else {
+      } else if (value instanceof Date) {
         assert.equal(cell?.value.kind, 'date', `${file} ${reference}`)
         assert.equal(
           cell?.value.kind === 'date' && cell.value.value.getTime(),
           value.getTime(),
           `${file} ${reference}`,
         )
+      } else {
+        // A formula carries no computed result, so only the expression is kept.
+        assert.equal(cell?.formula, value.formula, `${file} ${reference}`)
       }
     }
   }
