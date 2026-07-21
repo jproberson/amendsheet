@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFile, readdir } from 'node:fs/promises'
 import { test } from 'node:test'
-import { readContainer } from './container.js'
 import { readSheet } from './sheet.js'
 import { readSharedStrings } from './shared-strings.js'
 import { readWorkbookPart } from './workbook.js'

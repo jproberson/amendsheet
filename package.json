@@ -10,7 +10,7 @@
     "harness": "tsx src/harness/run.ts",
     "bench": "npm run fixtures && npm run harness",
     "format": "biome format --write src",
-    "lint": "biome lint src",
+    "lint": "biome lint --error-on-warnings src",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test 'src/**/*.test.ts'",
     "verify": "./verify.sh",

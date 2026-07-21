@@ -40,7 +40,7 @@ if ! npx biome format --write src; then
 fi
 
 step "lint"
-npx biome lint src || fail "lint found problems"
+npx biome lint --error-on-warnings src || fail "lint found problems"
 
 step "typecheck"
 npx tsc --noEmit || fail "typecheck failed"
