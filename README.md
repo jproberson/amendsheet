@@ -169,6 +169,22 @@ checks that some test notices. It is slow, so it is not part of `verify.sh`.
 A survivor is either a real gap or a mutation that changes nothing; both need
 reading.
 
+## Checking against something that isn't us
+
+Every check above validates against this library's own reader, so a file we
+write wrongly and read back wrongly looks right everywhere. `npm run external`
+writes a value into each of the 60 real files and converts the result with
+LibreOffice, which is a different OOXML implementation with its own opinions
+about what is valid.
+
+Each file is converted before and after the edit. A fixture LibreOffice can't
+open to begin with proves nothing, so only one that opened before and fails
+after counts. Currently 60 of 60 open after editing and LibreOffice finds the
+written value in all of them.
+
+It needs LibreOffice installed and takes a few minutes, so it isn't part of
+`./verify.sh`.
+
 ## Round-trip harness
 
 `npm run harness` reads every test file and reports what changed: missing ZIP

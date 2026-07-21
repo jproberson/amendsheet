@@ -17,7 +17,8 @@
     "coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-include='src/lib/**' --test-coverage-exclude='**/*.test.ts' 'src/**/*.test.ts'",
     "build": "tsup",
     "check:package": "publint --strict && attw --pack .",
-    "mutate": "node scripts/mutate.mjs"
+    "mutate": "node scripts/mutate.mjs",
+    "external": "node scripts/external.mjs"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
