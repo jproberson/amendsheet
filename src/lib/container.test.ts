@@ -32,3 +32,14 @@ test('reports the part that could not be read', async () => {
 
   assert.throws(() => readContainer(notAZip), /not a zip/i)
 })
+
+test('writes the same bytes every time for the same parts', () => {
+  const parts = new Map([['a.xml', new TextEncoder().encode('<a/>')]])
+
+  const first = writeContainer({ parts })
+  const header = first.slice(10, 14)
+
+  // Local file header: bytes 10-11 hold the DOS time, 12-13 the DOS date.
+  // A fixed stamp keeps output reproducible; 0x0021 is 1980-01-01.
+  assert.deepEqual([...header], [0, 0, 33, 0])
+})
