@@ -45,9 +45,11 @@ export function serialToDate(serial: number, date1904: boolean): Date {
   )
 }
 
-export function dateToSerial(date: Date, date1904: boolean): number {
+export function dateToSerial(date: Date, date1904: boolean, reference?: string): number {
+  const where = reference === undefined ? '' : ` to cell ${reference}`
+
   if (Number.isNaN(date.getTime())) {
-    throw new XlsxError('unwritable-value', 'Invalid date cannot be written')
+    throw new XlsxError('unwritable-value', `Cannot write an invalid date${where}`, { reference })
   }
 
   // Some zones move the clock forward at midnight, so the first moment of a
@@ -71,7 +73,9 @@ export function dateToSerial(date: Date, date1904: boolean): number {
   if (days < 0) {
     throw new XlsxError(
       'unwritable-value',
-      `${date.toDateString()} is before ${date1904 ? 1904 : 1900}, which this workbook cannot hold`,
+      `Cannot write ${date.toDateString()}${where}: it is before ` +
+        `${date1904 ? 1904 : 1900}, which this workbook cannot hold`,
+      { reference },
     )
   }
 

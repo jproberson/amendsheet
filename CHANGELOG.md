@@ -30,8 +30,14 @@ and the API is still free to change.
 - Chartsheets and dialogsheets are no longer listed in `workbook.sheets`. They
   hold no cells, so they arrived as empty worksheets that refused writes. Their
   parts are still preserved.
-- `set` throws for an out-of-range date at the call that caused it rather than
-  at `toBytes()`.
+- `set` refuses an edit the format cannot hold at the call that caused it,
+  rather than at `toBytes()`. `NaN`, an infinity, a character XML cannot encode,
+  a date outside the workbook's epoch and overwriting the master of a shared
+  formula previously left a workbook that threw on every later read and could
+  not be saved at all. A refused edit is not recorded, so the rest of the batch
+  survives.
+- Refusals name the cell they came from. A date the epoch cannot hold reported
+  only the date.
 
 ### Fixed
 

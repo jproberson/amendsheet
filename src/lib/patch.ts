@@ -21,6 +21,64 @@ const escapeXml = (text: string) =>
     .replace(/\r/g, '&#13;')
 
 /**
+ * Every refusal writing a cell can make, so `set()` can make it at the call
+ * instead of leaving a workbook that only fails once it is saved.
+ */
+export function checkWritable(reference: string, value: CellInput, date1904: boolean): void {
+  if (value === null || typeof value === 'boolean') return
+
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      throw new XlsxError('unwritable-value', `Cell ${reference} cannot hold ${value}`, {
+        reference,
+      })
+    }
+    return
+  }
+
+  if (value instanceof Date) {
+    dateToSerial(value, date1904, reference)
+    return
+  }
+
+  const unwritable = findUnwritableCharacter(typeof value === 'string' ? value : value.formula)
+  if (unwritable !== undefined) {
+    throw new XlsxError(
+      'unwritable-value',
+      `Cell ${reference} holds ${unwritable}, which cannot be written to xml`,
+      { reference },
+    )
+  }
+}
+
+/** Canonical reference to si, for every cell that defines a shared formula. */
+export function sharedFormulaMasters(xml: string): ReadonlyMap<string, string> {
+  const masters = new Map<string, string>()
+  for (const row of readShape(xml).rows) {
+    for (const cell of row.cells) {
+      if (cell.sharedFormulaMaster !== undefined) {
+        masters.set(
+          formatReference({ row: row.row, column: cell.column }),
+          cell.sharedFormulaMaster,
+        )
+      }
+    }
+  }
+  return masters
+}
+
+export function sharedFormulaRefusal(reference: string, si: string): XlsxError {
+  // Dependents hold no expression of their own, so replacing the master would
+  // leave them pointing at a formula that no longer exists.
+  return new XlsxError(
+    'unwritable-value',
+    `Cell ${reference} defines shared formula ${si}; ` +
+      'overwriting it would break the cells that follow it',
+    { reference },
+  )
+}
+
+/**
  * An existing style is carried over so formatting survives an edit, which means
  * a Date written into a cell with no date format will show as a number.
  */
@@ -32,6 +90,8 @@ function cellElement(
   sharedStrings: ReadonlyMap<string, number> | undefined,
   prefix: string,
 ): string {
+  checkWritable(reference, value, date1904)
+
   const attributes = style === undefined ? '' : ` s="${style}"`
   const c = `${prefix}c`
   const v = `${prefix}v`
@@ -39,14 +99,6 @@ function cellElement(
   if (value === null) return `<${c} r="${reference}"${attributes}/>`
 
   if (typeof value === 'object' && !(value instanceof Date)) {
-    const unwritable = findUnwritableCharacter(value.formula)
-    if (unwritable !== undefined) {
-      throw new XlsxError(
-        'unwritable-value',
-        `Cell ${reference} holds ${unwritable}, which cannot be written to xml`,
-        { reference },
-      )
-    }
     // No cached result: nothing here computes one, and a stale one is worse.
     const f = `${prefix}f`
     return `<${c} r="${reference}"${attributes}><${f}>${escapeXml(value.formula)}</${f}></${c}>`
@@ -55,14 +107,6 @@ function cellElement(
     const shared = sharedStrings?.get(value)
     if (shared !== undefined) {
       return `<${c} r="${reference}"${attributes} t="s"><${v}>${shared}</${v}></${c}>`
-    }
-    const unwritable = findUnwritableCharacter(value)
-    if (unwritable !== undefined) {
-      throw new XlsxError(
-        'unwritable-value',
-        `Cell ${reference} holds ${unwritable}, which cannot be written to xml`,
-        { reference },
-      )
     }
     const space = value === value.trim() ? '' : ' xml:space="preserve"'
     return (
@@ -75,9 +119,6 @@ function cellElement(
   }
   if (value instanceof Date) {
     return `<${c} r="${reference}"${attributes}><${v}>${dateToSerial(value, date1904)}</${v}></${c}>`
-  }
-  if (!Number.isFinite(value)) {
-    throw new XlsxError('unwritable-value', `Cell ${reference} cannot hold ${value}`, { reference })
   }
   return `<${c} r="${reference}"${attributes}><${v}>${value}</${v}></${c}>`
 }
@@ -313,14 +354,7 @@ export function patchSheet(
 
     const existingCell = cellsOf(existingRow).get(column)
     if (existingCell?.sharedFormulaMaster !== undefined) {
-      // Dependents hold no expression of their own, so replacing the master
-      // would leave them pointing at a formula that no longer exists.
-      throw new XlsxError(
-        'unwritable-value',
-        `Cell ${reference} defines shared formula ${existingCell.sharedFormulaMaster}; ` +
-          'overwriting it would break the cells that follow it',
-        { reference },
-      )
+      throw sharedFormulaRefusal(reference, existingCell.sharedFormulaMaster)
     }
     if (existingCell !== undefined) {
       splices.push({

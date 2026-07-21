@@ -80,7 +80,7 @@ test('writes the phantom leap day as the day it maps onto', () => {
 })
 
 test('rejects writing an invalid date', () => {
-  assert.throws(() => dateToSerial(new Date('nonsense'), false), /Invalid date/)
+  assert.throws(() => dateToSerial(new Date('nonsense'), false), /invalid date/)
 })
 
 test('a date built the ordinary way writes the serial for that day', () => {

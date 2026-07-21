@@ -1,7 +1,13 @@
 import { type Container, writeContainer } from './container.js'
 import { XlsxError } from './errors.js'
 import { dateToSerial, serialToDate } from './date.js'
-import { type CellInput, patchSheet } from './patch.js'
+import {
+  type CellInput,
+  checkWritable,
+  patchSheet,
+  sharedFormulaMasters,
+  sharedFormulaRefusal,
+} from './patch.js'
 import {
   type CellAddress,
   formatReference,
@@ -202,6 +208,13 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       for (const raw of readSheet(xml, sharedStrings)) yield toCell(raw, stylesNow(), date1904)
     }
 
+    let sharedFormulas: ReadonlyMap<string, string> | undefined
+    const masters = () => {
+      if (sheetXml === undefined) return undefined
+      sharedFormulas ??= sharedFormulaMasters(sheetXml)
+      return sharedFormulas
+    }
+
     // The style each cell carried when the file was read, keyed canonically so
     // a file spelling a reference `a1` or `$A$1` still matches an edit to A1.
     let originalStyles: Map<string, number> | undefined
@@ -278,6 +291,14 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         // Normalised so `a1`, `$A$1` and `A1` are one edit, and so the file
         // never receives a reference spelled the way the caller typed it.
         const canonical = formatReference(parseWritableReference(cellReference))
+
+        // Refused here rather than at save time. An edit that only fails once
+        // the workbook is written takes the whole batch down with it, and until
+        // then cell() reports a write that is never going to happen.
+        checkWritable(canonical, value, date1904)
+        const si = masters()?.get(canonical)
+        if (si !== undefined) throw sharedFormulaRefusal(canonical, si)
+
         const pending = edits.get(reference.path) ?? new Map<string, CellInput>()
         pending.set(canonical, value)
         edits.set(reference.path, pending)

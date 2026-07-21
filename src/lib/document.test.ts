@@ -818,3 +818,68 @@ test('marks a workbook for recalculation whichever quotes it used', () => {
 
   assert.match(book, /fullCalcOnLoad=("|')1\1/)
 })
+
+const REFUSED: ReadonlyArray<readonly [string, CellInput, RegExp]> = [
+  ['a value that is not a number', Number.NaN, /A1 cannot hold NaN/],
+  ['an infinite number', Number.POSITIVE_INFINITY, /A1 cannot hold Infinity/],
+  ['text xml cannot hold', 'a\u0000b', /A1 holds U\+0000/],
+  ['a formula xml cannot hold', { formula: 'LEN("\u0000")' }, /A1 holds U\+0000/],
+  ['a date before the epoch', new Date(1800, 0, 1), /to cell A1/],
+  ['an invalid date', new Date('nonsense'), /to cell A1/],
+]
+
+for (const [what, value, message] of REFUSED) {
+  test(`refuses ${what} at the set() call, not at save time`, () => {
+    const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+    const sheet = workbook.sheets[0]
+
+    assert.throws(
+      () => sheet?.set('A1', value),
+      (error: unknown) => {
+        assert.ok(error instanceof XlsxError)
+        assert.equal(error.code, 'unwritable-value')
+        assert.equal(error.reference, 'A1')
+        assert.match(error.message, message)
+        return true
+      },
+    )
+
+    // The refused edit was never recorded, so nothing downstream sees it.
+    assert.deepEqual(sheet?.cell('A1')?.value, { kind: 'number', value: 1 })
+    assert.deepEqual(
+      [...(sheet?.cells() ?? [])].map((cell) => cell.value),
+      [{ kind: 'number', value: 1 }],
+    )
+    const reopened = readWorkbook(workbook.toBytes())
+    assert.deepEqual(reopened.sheets[0]?.cell('A1')?.value, { kind: 'number', value: 1 })
+  })
+}
+
+test('refuses to overwrite a shared formula master at the set() call', () => {
+  const workbook = readWorkbook(
+    build(
+      '<row r="1"><c r="A1"><f t="shared" ref="A1:A2" si="0">B1*2</f><v>2</v></c></row>' +
+        '<row r="2"><c r="A2"><f t="shared" si="0"/><v>4</v></c></row>',
+    ),
+  )
+  const sheet = workbook.sheets[0]
+
+  assert.throws(() => sheet?.set('A1', 5), /A1 defines shared formula 0/)
+
+  assert.equal(sheet?.cell('A1')?.formula, 'B1*2')
+  assert.deepEqual(sheet?.cell('A1')?.value, { kind: 'number', value: 2 })
+})
+
+test('a refused edit leaves the rest of the batch writable', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  const sheet = workbook.sheets[0]
+
+  sheet?.set('A2', 'kept')
+  assert.throws(() => sheet?.set('A3', Number.NaN), /cannot hold/)
+  sheet?.set('A4', 'also kept')
+
+  const reopened = readWorkbook(workbook.toBytes()).sheets[0]
+  assert.deepEqual(reopened?.cell('A2')?.value, { kind: 'text', value: 'kept' })
+  assert.equal(reopened?.cell('A3'), undefined)
+  assert.deepEqual(reopened?.cell('A4')?.value, { kind: 'text', value: 'also kept' })
+})

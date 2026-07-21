@@ -65,6 +65,13 @@ grows to cover them. The style of a replaced cell is kept, so its formatting
 survives the edit. Writing a `Date` into a cell with no date format applies one,
 reusing a format the file already has where possible.
 
+An edit the format cannot hold is refused by `set` itself, with an `XlsxError`
+naming the cell. `NaN`, an infinity, a character XML has no way to encode, a
+date outside the workbook's epoch, and overwriting the cell that defines a
+shared formula are all refused this way. A refused edit is not recorded, so the
+rest of the batch still writes and `cell()` never reports a value the file is
+not going to receive.
+
 `cell.value` is a discriminated union:
 
 ```ts
