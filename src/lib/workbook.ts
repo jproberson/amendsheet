@@ -6,6 +6,8 @@ import { readXml } from './xml.js'
 const OFFICE_DOCUMENT =
   'http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument'
 
+const WORKSHEET = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet'
+
 const ROOT_RELATIONSHIPS = '_rels/.rels'
 
 export type SheetState = 'visible' | 'hidden' | 'veryHidden'
@@ -99,6 +101,10 @@ export function readWorkbookPart(bytes: Uint8Array): WorkbookPart {
     const relationship = id === undefined ? undefined : relationships.get(id)
     // Files exist that name a sheet with no usable relationship.
     if (relationship === undefined || relationship.external) continue
+    // Chartsheets and dialogsheets are listed alongside worksheets but hold no
+    // cells, so a caller handed one gets an empty sheet that refuses writes.
+    // They are still written back untouched; they are just not editable.
+    if (relationship.type !== WORKSHEET) continue
 
     sheets.push({
       name: event.attributes.get('name') ?? '',

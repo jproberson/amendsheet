@@ -769,3 +769,23 @@ test('a single cell read agrees with a full read after many edits', () => {
     assert.equal(sheet?.cell(cell.reference)?.numberFormat, cell.numberFormat, cell.reference)
   }
 })
+
+test('leaves chartsheets out of the sheets a caller can edit', async () => {
+  const bytes = new Uint8Array(await readFile('fixtures/real/WithChartSheet.xlsx'))
+  const workbook = readWorkbook(bytes)
+
+  // A chartsheet holds no cells, so exposing it as a Worksheet means cells()
+  // reports an empty sheet and set() reports the file is malformed.
+  assert.equal(
+    workbook.sheets.some((sheet) => sheet.name === 'Chart2'),
+    false,
+  )
+
+  // Still written back untouched, like every other part we do not interpret.
+  const before = readContainer(bytes)
+  const after = readContainer(workbook.toBytes())
+  for (const path of before.parts.keys()) {
+    assert.equal(after.parts.has(path), true, `lost ${path}`)
+  }
+  assert.equal(after.parts.has('xl/chartsheets/sheet1.xml'), true)
+})
