@@ -268,3 +268,12 @@ test('adds several new rows in ascending order', () => {
 
   assert.match(patched, /<row r="5">.*<row r="7">.*<row r="9">/)
 })
+
+test('escapes a carriage return so a parser cannot normalise it away', () => {
+  // XML 1.0 requires a parser to turn a literal CR or CRLF in content into a
+  // bare LF before the application sees it, so writing one raw loses it.
+  const patched = patch([['A2', 'a\r\nb']])
+
+  assert.equal(patched.includes('\r'), false, 'no raw carriage return may reach the file')
+  assert.match(patched, /a&#13;\nb/)
+})

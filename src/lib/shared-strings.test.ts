@@ -182,3 +182,10 @@ test('rejects text that xml cannot represent', () => {
     /cannot be written to xml/i,
   )
 })
+
+test('escapes a carriage return in a shared string', () => {
+  const result = appendSharedStrings('<sst count="0" uniqueCount="0"></sst>', ['a\r\nb'])
+
+  assert.equal(result.xml.includes('\r'), false)
+  assert.match(result.xml, /a&#13;\nb/)
+})

@@ -43,7 +43,13 @@ export interface AppendedStrings {
 }
 
 const escapeXml = (text: string) =>
-  text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    // XML 1.0 has a parser fold a literal CR, and the CR of a CRLF, into a bare
+    // LF before the document reaches the application. Written raw it is lost.
+    .replace(/\r/g, '&#13;')
 
 function entryFor(value: string): string {
   const unwritable = findUnwritableCharacter(value)

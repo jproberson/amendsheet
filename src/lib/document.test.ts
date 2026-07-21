@@ -789,3 +789,13 @@ test('leaves chartsheets out of the sheets a caller can edit', async () => {
   }
   assert.equal(after.parts.has('xl/chartsheets/sheet1.xml'), true)
 })
+
+test('a carriage return survives a round trip through the file', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.set('A1', 'a\r\nb')
+
+  const reopened = readWorkbook(workbook.toBytes())
+  const [cell] = [...(reopened.sheets[0]?.cells() ?? [])]
+
+  assert.deepEqual(cell?.value, { kind: 'text', value: 'a\r\nb' })
+})
