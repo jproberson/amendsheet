@@ -41,6 +41,10 @@ and the API is still free to change.
 
 ### Fixed
 
+- Overwriting the cell an array formula or a data table spills from is refused,
+  as it already was for a shared formula. The rest of the range holds cached
+  values and no formula, so replacing the anchor left them owned by nothing.
+
 - Date format detection follows the format code sections. A code's fourth
   section applies only to text, so `#,##0;-#,##0;0;"due "mmm` is a number
   format, and the character after `*` or `_` is a literal like the one after

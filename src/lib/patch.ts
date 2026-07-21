@@ -51,26 +51,37 @@ export function checkWritable(reference: string, value: CellInput, date1904: boo
   }
 }
 
+/**
+ * A formula whose result covers more cells than the one holding it. The others
+ * carry a cached value and no formula of their own, so replacing this cell
+ * leaves them owned by nothing.
+ */
+export interface SpillingFormula {
+  readonly kind: 'shared' | 'array' | 'dataTable'
+  /** The si for a shared formula, the covered range for the other two. */
+  readonly name: string
+}
+
 /** Both keyed by canonical reference, so `a1` and `$A$1` find the same cell. */
 export interface SheetIndex {
   /** The style index a cell carried when the file was read. */
   readonly styles: ReadonlyMap<string, number>
-  /** The si of the shared formula a cell defines, if it defines one. */
-  readonly sharedFormulas: ReadonlyMap<string, string>
+  /** Cells that other cells depend on for their formula. */
+  readonly sharedFormulas: ReadonlyMap<string, SpillingFormula>
 }
 
 /** One pass, because set() needs both of these before it accepts an edit. */
 export function indexSheet(xml: string): SheetIndex {
   const styles = new Map<string, number>()
-  const sharedFormulas = new Map<string, string>()
+  const sharedFormulas = new Map<string, SpillingFormula>()
 
   for (const row of readShape(xml).rows) {
     for (const cell of row.cells) {
-      if (cell.style === undefined && cell.sharedFormulaMaster === undefined) continue
+      if (cell.style === undefined && cell.spillingFormula === undefined) continue
       const reference = formatReference({ row: row.row, column: cell.column })
       if (cell.style !== undefined) styles.set(reference, Number(cell.style))
-      if (cell.sharedFormulaMaster !== undefined) {
-        sharedFormulas.set(reference, cell.sharedFormulaMaster)
+      if (cell.spillingFormula !== undefined) {
+        sharedFormulas.set(reference, cell.spillingFormula)
       }
     }
   }
@@ -78,13 +89,14 @@ export function indexSheet(xml: string): SheetIndex {
   return { styles, sharedFormulas }
 }
 
-export function sharedFormulaRefusal(reference: string, si: string): XlsxError {
-  // Dependents hold no expression of their own, so replacing the master would
-  // leave them pointing at a formula that no longer exists.
+export function sharedFormulaRefusal(reference: string, master: SpillingFormula): XlsxError {
+  const what =
+    master.kind === 'shared'
+      ? `defines shared formula ${master.name}`
+      : `holds the ${master.kind === 'array' ? 'array formula' : 'data table'} covering ${master.name}`
   return new XlsxError(
     'unwritable-value',
-    `Cell ${reference} defines shared formula ${si}; ` +
-      'overwriting it would break the cells that follow it',
+    `Cell ${reference} ${what}; overwriting it would break the cells that depend on it`,
     { reference },
   )
 }
@@ -139,8 +151,8 @@ interface CellSpan {
   readonly start: number
   readonly end: number
   readonly style: string | undefined
-  /** The si of a shared formula this cell defines, if it is the master. */
-  readonly sharedFormulaMaster: string | undefined
+  /** Set when other cells take their formula from this one. */
+  readonly spillingFormula: SpillingFormula | undefined
 }
 
 interface RowSpan {
@@ -188,7 +200,7 @@ function readShape(xml: string): SheetShape {
   let cellStart = -1
   let cellColumn = 0
   let cellStyle: string | undefined
-  let master: string | undefined
+  let master: SpillingFormula | undefined
   let openCell = false
 
   for (const event of readXml(xml)) {
@@ -245,14 +257,23 @@ function readShape(xml: string): SheetShape {
             start: event.start,
             end: event.end,
             style: cellStyle,
-            sharedFormulaMaster: undefined,
+            spillingFormula: undefined,
           })
         }
       }
-      // The master is the one carrying ref; dependents name the si alone, and
-      // either may be written self closing.
-      if (event.localName === 'f' && event.attributes.get('t') === 'shared') {
-        if (event.attributes.get('ref') !== undefined) master = event.attributes.get('si')
+      // Only the cell carrying ref owns the range. A shared dependent names the
+      // si alone, and any of them may be written self closing.
+      if (event.localName === 'f') {
+        const kind = event.attributes.get('t')
+        const covers = event.attributes.get('ref')
+        if (covers !== undefined) {
+          if (kind === 'shared') {
+            const si = event.attributes.get('si')
+            if (si !== undefined) master = { kind: 'shared', name: si }
+          } else if (kind === 'array' || kind === 'dataTable') {
+            master = { kind, name: covers }
+          }
+        }
       }
       continue
     }
@@ -265,7 +286,7 @@ function readShape(xml: string): SheetShape {
         start: cellStart,
         end: event.end,
         style: cellStyle,
-        sharedFormulaMaster: master,
+        spillingFormula: master,
       })
       openCell = false
       continue
@@ -365,8 +386,8 @@ export function patchSheet(
     }
 
     const existingCell = cellsOf(existingRow).get(column)
-    if (existingCell?.sharedFormulaMaster !== undefined) {
-      throw sharedFormulaRefusal(reference, existingCell.sharedFormulaMaster)
+    if (existingCell?.spillingFormula !== undefined) {
+      throw sharedFormulaRefusal(reference, existingCell.spillingFormula)
     }
     if (existingCell !== undefined) {
       splices.push({

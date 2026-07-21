@@ -290,3 +290,34 @@ test('numbers a row without an r the way a reader counting rows does', () => {
   assert.match(patched, /<c r="A6"><v>99<\/v><\/c>/)
   assert.equal(patched.match(/<row/g)?.length, 2, 'a second row 6 was appended')
 })
+
+test('refuses to overwrite the cell an array formula spills from', () => {
+  // The other cells in the range hold cached values and no formula, so
+  // replacing the anchor leaves them owned by nothing.
+  const spilling = sheet(
+    '<row r="1"><c r="A1"><f t="array" ref="A1:B2">TRANSPOSE(D1:E2)</f><v>1</v></c></row>',
+  )
+
+  assert.throws(
+    () => patchSheet(spilling, new Map<string, CellInput>([['A1', 5]]), false),
+    /A1:B2|array/i,
+  )
+})
+
+test('refuses to overwrite the cell a data table spills from', () => {
+  const table = sheet('<row r="1"><c r="A1"><f t="dataTable" ref="A1:A3"/><v>1</v></c></row>')
+
+  assert.throws(
+    () => patchSheet(table, new Map<string, CellInput>([['A1', 5]]), false),
+    /A1:A3|table/i,
+  )
+})
+
+test('allows writing a cell inside an array range that is not the anchor', () => {
+  const spilling = sheet(
+    '<row r="1"><c r="A1"><f t="array" ref="A1:B2">TRANSPOSE(D1:E2)</f><v>1</v></c>' +
+      '<c r="B1"><v>2</v></c></row>',
+  )
+
+  assert.match(patchSheet(spilling, new Map<string, CellInput>([['B1', 5]]), false), /<v>5<\/v>/)
+})
