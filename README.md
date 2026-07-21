@@ -42,9 +42,10 @@ await writeFile('out.xlsx', workbook.toBytes())
 ```
 
 `set` takes a number, string, boolean, `Date`, or `null` to clear a cell. If the
-cell or its row isn't there yet, both get created. The style of a replaced cell
-is kept, so a `Date` written into a cell with no date format shows up as a
-number.
+cell or its row isn't there yet, both get created, and the declared dimension
+grows to cover them. The style of a replaced cell is kept, so its formatting
+survives the edit. Writing a `Date` into a cell with no date format applies one,
+reusing a format the file already has where possible.
 
 `cell.value` is a discriminated union:
 

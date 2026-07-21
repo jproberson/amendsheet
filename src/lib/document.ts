@@ -4,6 +4,7 @@ import { type CellInput, patchSheet } from './patch.js'
 import { type CellAddress, parseReference } from './reference.js'
 import { type RawCell, readSheet } from './sheet.js'
 import { appendSharedStrings, readSharedStrings } from './shared-strings.js'
+import { ensureDateStyle } from './styles-writer.js'
 import { type Styles, isDateFormat, numberFormatOf, readStyles } from './styles.js'
 import { type SheetState, readWorkbookPart } from './workbook.js'
 
@@ -110,6 +111,34 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     const parts = new Map(container.parts)
     const encoder = new TextEncoder()
 
+    // A Date needs a cell format that displays dates, or it shows as a serial.
+    let workingStyles = stylesXml
+    const dateStyles = new Map<string, Map<string, number>>()
+
+    if (workingStyles !== undefined) {
+      for (const [path, pending] of edits) {
+        const sheetXml = partText(container, path)
+        if (sheetXml === undefined) continue
+
+        const existing = new Map<string, number | undefined>()
+        for (const raw of readSheet(sheetXml, [])) existing.set(raw.reference, raw.styleIndex)
+
+        const overrides = new Map<string, number>()
+        for (const [reference, value] of pending) {
+          if (!(value instanceof Date)) continue
+          const current = existing.get(reference)
+          const applied = ensureDateStyle(workingStyles, current)
+          workingStyles = applied.xml
+          if (applied.index !== current) overrides.set(reference, applied.index)
+        }
+        if (overrides.size > 0) dateStyles.set(path, overrides)
+      }
+
+      if (workingStyles !== stylesXml) {
+        parts.set('xl/styles.xml', encoder.encode(workingStyles))
+      }
+    }
+
     // Text goes into the shared string table when the file has one, so the same
     // words written into many cells are stored once.
     let indexes: ReadonlyMap<string, number> | undefined
@@ -130,7 +159,10 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     for (const [path, pending] of edits) {
       const xml = partText(container, path)
       if (xml === undefined) continue
-      parts.set(path, encoder.encode(patchSheet(xml, pending, date1904, indexes)))
+      parts.set(
+        path,
+        encoder.encode(patchSheet(xml, pending, date1904, indexes, dateStyles.get(path))),
+      )
     }
     return writeContainer({ parts })
   }

@@ -170,6 +170,7 @@ export function patchSheet(
   edits: ReadonlyMap<string, CellInput>,
   date1904: boolean,
   sharedStrings?: ReadonlyMap<string, number>,
+  styleOverrides?: ReadonlyMap<string, number>,
 ): string {
   if (edits.size === 0) return xml
 
@@ -177,13 +178,20 @@ export function patchSheet(
   const splices: Splice[] = []
   const newRows = new Map<number, string[]>()
 
+  const styleFor = (reference: string, current: string | undefined) => {
+    const override = styleOverrides?.get(reference)
+    return override === undefined ? current : String(override)
+  }
+
   for (const [reference, value] of edits) {
     const { row, column } = parseReference(reference)
     const existingRow = shape.rows.find((candidate) => candidate.row === row)
 
     if (existingRow === undefined) {
       const pending = newRows.get(row) ?? []
-      pending.push(cellElement(reference, value, undefined, date1904, sharedStrings))
+      pending.push(
+        cellElement(reference, value, styleFor(reference, undefined), date1904, sharedStrings),
+      )
       newRows.set(row, pending)
       continue
     }
@@ -193,7 +201,13 @@ export function patchSheet(
       splices.push({
         start: existingCell.start,
         end: existingCell.end,
-        text: cellElement(reference, value, existingCell.style, date1904, sharedStrings),
+        text: cellElement(
+          reference,
+          value,
+          styleFor(reference, existingCell.style),
+          date1904,
+          sharedStrings,
+        ),
         order: column,
       })
       continue
@@ -204,7 +218,7 @@ export function patchSheet(
     splices.push({
       start: at,
       end: at,
-      text: cellElement(reference, value, undefined, date1904, sharedStrings),
+      text: cellElement(reference, value, styleFor(reference, undefined), date1904, sharedStrings),
       order: column,
     })
   }
