@@ -154,7 +154,7 @@ function toValue(
       const value = Number(raw)
       if (Number.isNaN(value)) {
         throw new XlsxError(
-          'unwritable-value',
+          'invalid-content',
           `Cell ${reference} holds "${raw}", which is not a number`,
           {
             reference,

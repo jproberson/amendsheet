@@ -27,7 +27,7 @@ export const LAST_SERIAL = 2_958_465
  */
 export function serialToDate(serial: number, date1904: boolean): Date {
   if (!Number.isFinite(serial) || serial < 0 || serial > LAST_SERIAL) {
-    throw new XlsxError('unwritable-value', `Serial ${serial} is not a date`)
+    throw new XlsxError('invalid-content', `Serial ${serial} is not a date`)
   }
 
   const corrected = !date1904 && serial > PHANTOM_LEAP_DAY ? serial - 1 : serial

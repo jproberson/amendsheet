@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile, readdir } from 'node:fs/promises'
 import { test } from 'node:test'
+import { XlsxError } from './errors.js'
 import { readSheet } from './sheet.js'
 import { readSharedStrings } from './shared-strings.js'
 import { readWorkbookPart } from './workbook.js'
@@ -117,7 +118,12 @@ test('treats an out of range shared string index as empty text', () => {
 })
 
 test('rejects a number it cannot read', () => {
-  assert.throws(() => cells('<row r="1"><c r="A1"><v>banana</v></c></row>'), /A1/)
+  // The file is at fault, not the caller: nobody was trying to write anything.
+  assert.throws(
+    () => cells('<row r="1"><c r="A1"><v>banana</v></c></row>'),
+    (error: unknown) =>
+      error instanceof XlsxError && error.code === 'invalid-content' && error.reference === 'A1',
+  )
 })
 
 test('reads every sheet in the fixtures', async () => {
