@@ -307,6 +307,15 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         // Refused here rather than at save time. An edit that only fails once
         // the workbook is written takes the whole batch down with it, and until
         // then cell() reports a write that is never going to happen.
+        if (sheetXml === undefined) {
+          // Recording it would report the value from cell() and save none of it.
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so ${canonical} cannot be written`,
+            { part: reference.path, reference: canonical },
+          )
+        }
+
         checkWritable(canonical, value, date1904)
         const si = indexed()?.sharedFormulas.get(canonical)
         if (si !== undefined) throw sharedFormulaRefusal(canonical, si)

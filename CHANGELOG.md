@@ -41,6 +41,9 @@ and the API is still free to change.
 
 ### Fixed
 
+- Writing to a sheet whose part is missing from the package is refused. The
+  edit was accepted, reported by `cell()`, and saved nowhere.
+
 - A lone surrogate is refused rather than written. Encoding replaced it with
   U+FFFD, so the cell held one string in memory and a different one in the
   file, with nothing to say so. U+FFFE and U+FFFF are refused too: both survive

@@ -939,3 +939,25 @@ test('drops the calculation chain relationship along with the part', () => {
   assert.doesNotMatch(rels, /calcChain/)
   assert.match(rels, /worksheets\/sheet1\.xml/)
 })
+
+test('refuses a write to a sheet whose part is not in the package', () => {
+  const bytes = writeContainer({
+    parts: new Map([
+      ['_rels/.rels', encode(ROOT_RELS)],
+      [
+        'xl/workbook.xml',
+        encode('<workbook><sheets><sheet name="Gone" r:id="rId1"/></sheets></workbook>'),
+      ],
+      ['xl/_rels/workbook.xml.rels', encode(WORKBOOK_RELS)],
+    ]),
+  })
+  const workbook = readWorkbook(bytes)
+
+  // Accepting it wrote nothing while cell() went on reporting the value, which
+  // is the edit disappearing with nobody told.
+  assert.throws(
+    () => workbook.sheets[0]?.set('A1', 'written'),
+    (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
+  )
+  assert.equal(workbook.sheets[0]?.cell('A1'), undefined)
+})
