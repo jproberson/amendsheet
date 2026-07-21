@@ -205,14 +205,29 @@ export function* readXml(source: string): Generator<XmlEvent> {
   }
 }
 
+const name = (code: number) => `U+${code.toString(16).toUpperCase().padStart(4, '0')}`
+
 /** Returns the offending code point, or undefined when the text is writable. */
 export function findUnwritableCharacter(text: string): string | undefined {
   for (let index = 0; index < text.length; index++) {
     const code = text.charCodeAt(index)
+
     // XML 1.0 permits only tab, newline and carriage return below U+0020.
-    const writable = code >= 0x20 || code === 0x09 || code === 0x0a || code === 0x0d
-    if (writable) continue
-    return `U+${code.toString(16).toUpperCase().padStart(4, '0')}`
+    if (code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) return name(code)
+
+    // Not characters at all, and outside XML's Char production.
+    if (code === 0xfffe || code === 0xffff) return name(code)
+
+    // A pair is one character above the basic plane and perfectly writable; a
+    // half on its own is not, and encoding replaces it with U+FFFD, so the
+    // value in hand and the value in the file would quietly differ.
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = text.charCodeAt(index + 1)
+      if (Number.isNaN(next) || next < 0xdc00 || next > 0xdfff) return name(code)
+      index++
+      continue
+    }
+    if (code >= 0xdc00 && code <= 0xdfff) return name(code)
   }
   return undefined
 }

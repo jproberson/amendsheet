@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile, readdir } from 'node:fs/promises'
 import { test } from 'node:test'
 import { readContainer } from './container.js'
-import { type XmlEvent, readXml } from './xml.js'
+import { type XmlEvent, findUnwritableCharacter, readXml } from './xml.js'
 
 const events = (source: string): XmlEvent[] => [...readXml(source)]
 
@@ -222,4 +222,23 @@ test('leaves an unprefixed name as its own local name', () => {
   const [first] = events('<row/>')
 
   assert.equal(first?.kind === 'open' && first.localName, 'row')
+})
+
+test('accepts a character outside the basic plane, which is a surrogate pair', () => {
+  assert.equal(findUnwritableCharacter('a\u{1F600}b'), undefined)
+})
+
+test('refuses a surrogate with no partner', () => {
+  // TextEncoder turns it into U+FFFD, so the cell would hold one thing in
+  // memory and another in the file, with nothing to say so.
+  assert.equal(findUnwritableCharacter('x\uD800y'), 'U+D800')
+  assert.equal(findUnwritableCharacter('x\uDC00y'), 'U+DC00')
+  assert.equal(findUnwritableCharacter('\uD800'), 'U+D800')
+})
+
+test('refuses the noncharacters XML has no way to hold', () => {
+  // These survive our own reader, which is what makes them dangerous: the file
+  // looks fine here and is rejected by a parser that follows the spec.
+  assert.equal(findUnwritableCharacter('x￾y'), 'U+FFFE')
+  assert.equal(findUnwritableCharacter('x￿y'), 'U+FFFF')
 })

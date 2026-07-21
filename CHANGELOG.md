@@ -41,6 +41,12 @@ and the API is still free to change.
 
 ### Fixed
 
+- A lone surrogate is refused rather than written. Encoding replaced it with
+  U+FFFD, so the cell held one string in memory and a different one in the
+  file, with nothing to say so. U+FFFE and U+FFFF are refused too: both survive
+  our own reader and neither is legal XML, so the file was one a stricter
+  parser would reject.
+
 - Overwriting the cell an array formula or a data table spills from is refused,
   as it already was for a shared formula. The rest of the range holds cached
   values and no formula, so replacing the anchor left them owned by nothing.

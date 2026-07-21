@@ -52,7 +52,10 @@ function makeEdits(next: () => number, count: number): Edit[] {
     // corpus that "a refusal changes nothing" is asserted about almost nothing.
     Number.NaN,
     'a\u0000b',
+    'a\ud800b',
+    'a\uffffb',
     new Date(1800, 0, 1),
+    new Date(50000, 0, 1),
   ]
 
   // A format is refused after the value itself has been checked, which is the
