@@ -53,6 +53,10 @@ export interface Worksheet {
    * Visible to `cells()` and `cell()` immediately, written by `toBytes()`.
    * A `numberFormat` is a format code such as `"$"#,##0.00`; without one the
    * cell keeps the formatting it already had.
+   *
+   * Throws `XlsxError` with code `unwritable-value` for a value the format
+   * cannot hold, and records nothing when it does, so the rest of a batch of
+   * edits still writes.
    */
   set(reference: string, value: CellInput, options?: WriteOptions): void
 }
