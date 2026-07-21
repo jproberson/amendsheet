@@ -41,6 +41,10 @@ and the API is still free to change.
 
 ### Fixed
 
+- Date format detection follows the format code sections. A code's fourth
+  section applies only to text, so `#,##0;-#,##0;0;"due "mmm` is a number
+  format, and the character after `*` or `_` is a literal like the one after
+  `\` already was.
 - Dropping the calculation chain drops the relationship naming it. A
   relationship pointing at a part that is no longer in the package is invalid,
   and it is the kind of thing Excel offers to repair.

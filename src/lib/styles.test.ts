@@ -218,3 +218,27 @@ test('treats an elapsed time format as a duration, not a date', () => {
 
   assert.equal(isDateFormat(parsed, 0), false)
 })
+
+test('ignores date tokens in the section that only text uses', () => {
+  // Sections are positive;negative;zero;text. A number never displays with the
+  // fourth, so tokens there say nothing about how this cell reads.
+  const parsed = withFormats([[165, '#,##0;-#,##0;0;mmm']], [165])
+
+  assert.equal(isDateFormat(parsed, 0), false)
+})
+
+test('reads date tokens in the negative and zero sections', () => {
+  const parsed = withFormats([[165, '0.00;[Red]m/d/yy']], [165])
+
+  assert.equal(isDateFormat(parsed, 0), true)
+})
+
+test('treats the character after a fill or skip marker as a literal', () => {
+  // `*` repeats the next character to fill the column and `_` skips a width
+  // equal to it, so in both cases it is a literal rather than a token.
+  const filled = withFormats([[165, '*d0.00']], [165])
+  const skipped = withFormats([[166, '_d0.00']], [166])
+
+  assert.equal(isDateFormat(filled, 0), false)
+  assert.equal(isDateFormat(skipped, 0), false)
+})

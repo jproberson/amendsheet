@@ -94,29 +94,45 @@ export function numberFormatOf(styles: Styles, styleIndex: number | undefined): 
   return styles.numberFormats.get(formatId) ?? BUILT_IN_FORMATS.get(formatId)
 }
 
-/** Without this, the letters in `"day"0.0` read as date tokens. */
-function stripLiterals(code: string): string {
+/**
+ * The parts of a format code a number can display with, stripped of the text
+ * that only looks like tokens. A code has up to four sections — positive,
+ * negative, zero, then text — and a numeric cell never displays with the
+ * fourth, so `#,##0;-#,##0;0;"due "mmm` is not a date format. Without the
+ * stripping, the letters in `"day"0.0` read as date tokens.
+ */
+function numericSections(code: string): string {
   let stripped = ''
   let index = 0
+  let section = 1
 
   while (index < code.length) {
     const character = code.charAt(index)
 
+    if (character === ';') {
+      section++
+      if (section > 3) break
+      stripped += ';'
+      index++
+      continue
+    }
     if (character === '"') {
       index++
       while (index < code.length && code.charAt(index) !== '"') index++
       index++
       continue
     }
-    if (character === '\\') {
+    // `\` escapes the next character, `*` repeats it to fill the column and `_`
+    // skips a width equal to it. All three make it a literal, not a token.
+    if (character === '\\' || character === '*' || character === '_') {
       index += 2
       continue
     }
     if (character === '[') {
       const end = code.indexOf(']', index)
-      const section = end === -1 ? '' : code.slice(index + 1, end)
       // [h] is elapsed time; [Red] and conditions are not.
-      if (/^[hms]+$/i.test(section)) stripped += section
+      const inside = end === -1 ? '' : code.slice(index + 1, end)
+      if (/^[hms]+$/i.test(inside)) stripped += inside
       index = end === -1 ? code.length : end + 1
       continue
     }
@@ -138,7 +154,7 @@ export function isDateFormatCode(code: string | undefined): boolean {
   if (code === undefined || code === 'General') return false
   if (ELAPSED_TIME.test(code)) return false
 
-  return DATE_TOKEN.test(stripLiterals(code))
+  return DATE_TOKEN.test(numericSections(code))
 }
 
 export function isDateFormat(styles: Styles, styleIndex: number | undefined): boolean {
