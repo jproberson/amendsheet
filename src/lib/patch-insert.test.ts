@@ -166,3 +166,77 @@ test('adds a cell beside one written self closing', () => {
 
   assert.match(patched, /<c r="A1" s="2"\/><c r="B1"><v>2<\/v><\/c>/)
 })
+
+const withDimension = (ref: string, rows: string) =>
+  `<worksheet><dimension ref="${ref}"/><sheetData>${rows}</sheetData></worksheet>`
+
+const ROW_ONE = '<row r="1"><c r="A1"><v>1</v></c></row>'
+
+test('widens the declared dimension rightwards for a new column', () => {
+  const patched = patchSheet(
+    withDimension('A1:B2', ROW_ONE),
+    new Map<string, CellInput>([['D1', 4]]),
+    false,
+  )
+
+  assert.match(patched, /<dimension ref="A1:D2"\/>/)
+})
+
+test('widens the declared dimension downwards for a new row', () => {
+  const patched = patchSheet(
+    withDimension('A1:B2', ROW_ONE),
+    new Map<string, CellInput>([['B9', 9]]),
+    false,
+  )
+
+  assert.match(patched, /<dimension ref="A1:B9"\/>/)
+})
+
+test('leaves the dimension alone when the edit fits inside it', () => {
+  const patched = patchSheet(
+    withDimension('A1:Z100', ROW_ONE),
+    new Map<string, CellInput>([['A1', 2]]),
+    false,
+  )
+
+  assert.match(patched, /<dimension ref="A1:Z100"\/>/)
+})
+
+test('widens a dimension written as a single cell', () => {
+  const patched = patchSheet(
+    withDimension('A1', ROW_ONE),
+    new Map<string, CellInput>([['C3', 3]]),
+    false,
+  )
+
+  assert.match(patched, /<dimension ref="A1:C3"\/>/)
+})
+
+test('grows the dimension upwards and leftwards too', () => {
+  const patched = patchSheet(
+    withDimension('C3:D4', '<row r="3"><c r="C3"><v>1</v></c></row>'),
+    new Map<string, CellInput>([['A1', 1]]),
+    false,
+  )
+
+  assert.match(patched, /<dimension ref="A1:D4"\/>/)
+})
+
+test('ignores a dimension with an empty reference', () => {
+  const patched = patchSheet(
+    withDimension('', ROW_ONE),
+    new Map<string, CellInput>([['D1', 4]]),
+    false,
+  )
+
+  assert.match(patched, /<dimension ref=""\/>/)
+})
+
+test('writes a sheet with no dimension element unchanged in that respect', () => {
+  const source = `<worksheet><sheetData>${ROW_ONE}</sheetData></worksheet>`
+
+  const patched = patchSheet(source, new Map<string, CellInput>([['D1', 4]]), false)
+
+  assert.equal(patched.includes('<dimension'), false)
+  assert.match(patched, /<c r="D1"><v>4<\/v><\/c>/)
+})

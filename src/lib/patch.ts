@@ -1,6 +1,6 @@
 import { dateToSerial } from './date.js'
 import { XlsxError } from './errors.js'
-import { parseReference } from './reference.js'
+import { formatReference, parseReference } from './reference.js'
 import { readXml } from './xml.js'
 
 export type CellInput = number | string | boolean | Date | null
@@ -56,7 +56,14 @@ interface RowSpan {
   readonly cells: CellSpan[]
 }
 
+interface DimensionSpan {
+  readonly start: number
+  readonly end: number
+  readonly ref: string
+}
+
 interface SheetShape {
+  readonly dimension: DimensionSpan | undefined
   readonly rows: RowSpan[]
   /** Offset just before `</sheetData>`, where a new row is appended. */
   readonly contentEnd: number
@@ -67,6 +74,7 @@ interface SheetShape {
 
 function readShape(xml: string): SheetShape {
   const rows: RowSpan[] = []
+  let dimension: DimensionSpan | undefined
   let contentEnd = -1
   let dataStart = -1
   let dataEnd = -1
@@ -81,6 +89,11 @@ function readShape(xml: string): SheetShape {
 
   for (const event of readXml(xml)) {
     if (event.kind === 'open') {
+      if (event.name === 'dimension') {
+        const ref = event.attributes.get('ref')
+        if (ref !== undefined) dimension = { start: event.start, end: event.end, ref }
+        continue
+      }
       if (event.name === 'sheetData') {
         dataStart = event.start
         selfClosing = event.selfClosing
@@ -141,7 +154,7 @@ function readShape(xml: string): SheetShape {
 
   if (dataStart === -1) throw new XlsxError('Sheet has no sheetData element to write into')
 
-  return { rows, contentEnd, selfClosing, dataStart, dataEnd }
+  return { dimension, rows, contentEnd, selfClosing, dataStart, dataEnd }
 }
 
 interface Splice {
@@ -224,7 +237,57 @@ export function patchSheet(
     }
   }
 
+  const widened = widenDimension(shape.dimension, [...edits.keys()])
+  if (widened !== undefined && shape.dimension !== undefined) {
+    splices.push({
+      start: shape.dimension.start,
+      end: shape.dimension.end,
+      text: `<dimension ref="${widened}"/>`,
+      order: -1,
+    })
+  }
+
   return applySplices(xml, splices)
+}
+
+/**
+ * Excel recalculates the used range, but stricter readers trust what the file
+ * declares, so a cell written outside it would be ignored.
+ */
+function widenDimension(
+  dimension: DimensionSpan | undefined,
+  references: readonly string[],
+): string | undefined {
+  if (dimension === undefined) return undefined
+
+  const bounds = dimension.ref.split(':')
+  const from = bounds[0] ?? ''
+  if (from === '') return undefined
+
+  const topLeft = parseReference(from)
+  const bottomRight = parseReference(bounds[1] ?? from)
+
+  let { row: lastRow, column: lastColumn } = bottomRight
+  let { row: firstRow, column: firstColumn } = topLeft
+
+  for (const reference of references) {
+    const { row, column } = parseReference(reference)
+    firstRow = Math.min(firstRow, row)
+    firstColumn = Math.min(firstColumn, column)
+    lastRow = Math.max(lastRow, row)
+    lastColumn = Math.max(lastColumn, column)
+  }
+
+  const grown =
+    firstRow !== topLeft.row ||
+    firstColumn !== topLeft.column ||
+    lastRow !== bottomRight.row ||
+    lastColumn !== bottomRight.column
+  if (!grown) return undefined
+
+  const start = formatReference({ row: firstRow, column: firstColumn })
+  const end = formatReference({ row: lastRow, column: lastColumn })
+  return `${start}:${end}`
 }
 
 /** Only safe on elements built above, where the reference is the first attribute. */
