@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile, readdir } from 'node:fs/promises'
 import { test } from 'node:test'
+import { assertWellFormed } from '../testing/invariants.js'
 import { readContainer } from './container.js'
 import { appendSharedStrings, readSharedStrings } from './shared-strings.js'
 
@@ -188,4 +189,30 @@ test('escapes a carriage return in a shared string', () => {
 
   assert.equal(result.xml.includes('\r'), false)
   assert.match(result.xml, /a&#13;\nb/)
+})
+
+test('writes new entries with the prefix the table uses', () => {
+  const source =
+    '<x:sst xmlns:x="http://x" count="1" uniqueCount="1"><x:si><x:t>a</x:t></x:si></x:sst>'
+
+  const result = appendSharedStrings(source, ['b'])
+
+  assertWellFormed(result.xml, 'prefixed sst')
+  assert.match(result.xml, /<x:si><x:t>b<\/x:t><\/x:si>/)
+})
+
+test('closes a self closing prefixed table with the matching tag', () => {
+  const result = appendSharedStrings('<x:sst xmlns:x="http://x"/>', ['b'])
+
+  assertWellFormed(result.xml, 'self closing prefixed sst')
+  assert.equal(result.xml.includes('</sst>'), false)
+})
+
+test('counts references even when uniqueCount comes first', () => {
+  const source = '<sst uniqueCount="1" count="1"><si><t>a</t></si></sst>'
+
+  const result = appendSharedStrings(source, ['b'])
+
+  assert.match(result.xml, /count="2"/)
+  assert.match(result.xml, /uniqueCount="2"/)
 })

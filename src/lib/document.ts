@@ -81,7 +81,9 @@ function withRecalculation(xml: string): string {
     if (tag.includes('fullCalcOnLoad=')) {
       return (
         xml.slice(0, event.start) +
-        tag.replace(/fullCalcOnLoad="[^"]*"/, 'fullCalcOnLoad="1"') +
+        // Either quote character is legal, and matching only double quotes
+        // left the check passing while the rewrite did nothing.
+        tag.replace(/fullCalcOnLoad=("|')[^"']*\1/, 'fullCalcOnLoad="1"') +
         xml.slice(event.end)
       )
     }

@@ -51,7 +51,7 @@ const escapeXml = (text: string) =>
     // LF before the document reaches the application. Written raw it is lost.
     .replace(/\r/g, '&#13;')
 
-function entryFor(value: string): string {
+function entryFor(value: string, prefix: string): string {
   const unwritable = findUnwritableCharacter(value)
   if (unwritable !== undefined) {
     throw new XlsxError(
@@ -61,7 +61,7 @@ function entryFor(value: string): string {
   }
   const needsPreserve = value !== value.trim()
   const attributes = needsPreserve ? ' xml:space="preserve"' : ''
-  return `<si><t${attributes}>${escapeXml(value)}</t></si>`
+  return `<${prefix}si><${prefix}t${attributes}>${escapeXml(value)}</${prefix}t></${prefix}si>`
 }
 
 function bumpAttribute(openTag: string, name: string, by: number): string {
@@ -81,6 +81,31 @@ export function appendSharedStrings(xml: string, strings: readonly string[]): Ap
     if (!indexes.has(value)) indexes.set(value, index)
   }
 
+  let openTag = ''
+  let insertAt = -1
+  let closeLength = 0
+  // Some writers prefix every element. An entry written without the prefix
+  // lands in a namespace the document may not even bind, so the strings are
+  // there but no cell resolves to them.
+  let prefix = ''
+
+  for (const event of readXml(xml)) {
+    if (event.kind === 'open' && event.localName === 'sst') {
+      openTag = xml.slice(event.start, event.end)
+      const colon = event.name.indexOf(':')
+      prefix = colon === -1 ? '' : event.name.slice(0, colon + 1)
+      if (event.selfClosing) {
+        insertAt = event.end
+        closeLength = event.end - event.start
+      }
+      continue
+    }
+    if (event.kind === 'close' && event.localName === 'sst') {
+      insertAt = event.start
+      closeLength = 0
+    }
+  }
+
   const additions: string[] = []
   const requested = new Map<string, number>()
 
@@ -93,29 +118,10 @@ export function appendSharedStrings(xml: string, strings: readonly string[]): Ap
     const index = existing.length + additions.length
     indexes.set(value, index)
     requested.set(value, index)
-    additions.push(entryFor(value))
+    additions.push(entryFor(value, prefix))
   }
 
   if (additions.length === 0) return { xml, indexes: requested }
-
-  let openTag = ''
-  let insertAt = -1
-  let closeLength = 0
-
-  for (const event of readXml(xml)) {
-    if (event.kind === 'open' && event.localName === 'sst') {
-      openTag = xml.slice(event.start, event.end)
-      if (event.selfClosing) {
-        insertAt = event.end
-        closeLength = event.end - event.start
-      }
-      continue
-    }
-    if (event.kind === 'close' && event.localName === 'sst') {
-      insertAt = event.start
-      closeLength = 0
-    }
-  }
 
   if (insertAt === -1)
     throw new XlsxError('malformed-xml', 'Shared string table has no sst element')
@@ -131,7 +137,7 @@ export function appendSharedStrings(xml: string, strings: readonly string[]): Ap
   if (closeLength > 0) {
     const opened = `${updatedTag.slice(0, -2)}>`
     return {
-      xml: `${xml.slice(0, insertAt - closeLength)}${opened}${body}</sst>${xml.slice(insertAt)}`,
+      xml: `${xml.slice(0, insertAt - closeLength)}${opened}${body}</${prefix}sst>${xml.slice(insertAt)}`,
       indexes: requested,
     }
   }

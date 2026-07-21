@@ -325,3 +325,22 @@ test('builds a format table when a stray close tag is all there is', () => {
   assert.equal(numberFormatOf(readStyles(result.xml), result.index), '0.000')
   assert.match(result.xml, /<numFmts count="1">/)
 })
+
+test('applies a format to a prefixed cell format that declares no numFmtId', () => {
+  // /^<xf/ cannot match <x:xf, so the format was dropped and the cell fell back
+  // to General while still being written as a serial.
+  const source =
+    '<x:styleSheet><x:cellXfs count="1">' +
+    '<x:xf fontId="1" fillId="0" borderId="0" xfId="0"/>' +
+    '</x:cellXfs></x:styleSheet>'
+
+  const result = ensureDateStyle(source, 0)
+
+  assertWellFormed(result.xml, 'prefixed xf without numFmtId')
+  assert.equal(
+    isDateFormat(readStyles(result.xml), result.index),
+    true,
+    'a date needs a cell format that shows dates',
+  )
+  assert.match(result.xml, /fontId="1"/)
+})

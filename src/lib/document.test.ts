@@ -799,3 +799,22 @@ test('a carriage return survives a round trip through the file', () => {
 
   assert.deepEqual(cell?.value, { kind: 'text', value: 'a\r\nb' })
 })
+
+test('marks a workbook for recalculation whichever quotes it used', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      extra: {
+        'xl/workbook.xml':
+          "<workbook><calcPr calcId='1' fullCalcOnLoad='0'/><sheets>" +
+          '<sheet name="Data" sheetId="1" r:id="rId1"/></sheets></workbook>',
+      },
+    }),
+  )
+  workbook.sheets[0]?.set('A1', { formula: 'B1+1' })
+
+  const book = new TextDecoder().decode(
+    readContainer(workbook.toBytes()).parts.get('xl/workbook.xml') ?? new Uint8Array(),
+  )
+
+  assert.match(book, /fullCalcOnLoad=("|')1\1/)
+})

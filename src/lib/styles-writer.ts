@@ -78,12 +78,14 @@ function withFormatId(element: string, formatId: number): string {
   const openTag = element.slice(0, openTagEnd)
   const rest = element.slice(openTagEnd)
 
+  // The element may be written <xf> or <x:xf>, so the name is matched rather
+  // than assumed. Missing it left the cell on General while it held a serial.
   const withFormat = openTag.includes('numFmtId="')
     ? openTag.replace(/numFmtId="\d+"/, `numFmtId="${formatId}"`)
-    : openTag.replace(/^<xf/, `<xf numFmtId="${formatId}"`)
+    : openTag.replace(/^<([^\s/>]+)/, `<$1 numFmtId="${formatId}"`)
 
   const applied = withFormat.includes('applyNumberFormat=')
-    ? withFormat.replace(/applyNumberFormat="(?:\d+|true|false)"/, 'applyNumberFormat="1"')
+    ? withFormat.replace(/applyNumberFormat=("|')(?:\d+|true|false)\1/, 'applyNumberFormat="1"')
     : withFormat.replace(/\/?>$/, (tag) =>
         tag === '/>' ? ' applyNumberFormat="1"/>' : ' applyNumberFormat="1">',
       )
@@ -141,7 +143,7 @@ function applyFormatId(
       })
     }
 
-    const element = wanted.replace(/^<xf/, `<${rootPrefix}xf`)
+    const element = wanted.replace(/^<[^\s/>]+/, `<${rootPrefix}xf`)
     const table = `<${rootPrefix}cellXfs count="1">${element}</${rootPrefix}cellXfs>`
     return {
       xml: `${stylesXml.slice(0, closeStart)}${table}${stylesXml.slice(closeStart)}`,
@@ -149,7 +151,7 @@ function applyFormatId(
     }
   }
 
-  const prefixed = wanted.replace(/^<xf/, `<${formats.prefix}xf`)
+  const prefixed = wanted.replace(/^<[^\s/>]+/, `<${formats.prefix}xf`)
   const existing = formats.elements.indexOf(prefixed)
   if (existing !== -1) return { xml: stylesXml, index: existing }
 
