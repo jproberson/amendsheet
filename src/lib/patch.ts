@@ -61,6 +61,8 @@ interface CellSpan {
   readonly start: number
   readonly end: number
   readonly style: string | undefined
+  /** The si of a shared formula this cell defines, if it is the master. */
+  readonly sharedFormulaMaster: string | undefined
 }
 
 interface RowSpan {
@@ -106,6 +108,7 @@ function readShape(xml: string): SheetShape {
   let cellStart = -1
   let cellColumn = 0
   let cellStyle: string | undefined
+  let master: string | undefined
   let openCell = false
 
   for (const event of readXml(xml)) {
@@ -151,6 +154,7 @@ function readShape(xml: string): SheetShape {
         cellColumn = reference === undefined ? cellColumn + 1 : parseReference(reference).column
         cellStyle = event.attributes.get('s')
         cellStart = event.start
+        master = undefined
         openCell = !event.selfClosing
         if (event.selfClosing) {
           currentCells.push({
@@ -158,8 +162,13 @@ function readShape(xml: string): SheetShape {
             start: event.start,
             end: event.end,
             style: cellStyle,
+            sharedFormulaMaster: undefined,
           })
         }
+      }
+      // Only the master carries the expression; dependents name the si alone.
+      if (event.localName === 'f' && event.attributes.get('t') === 'shared') {
+        if (!event.selfClosing) master = event.attributes.get('si')
       }
       continue
     }
@@ -167,7 +176,13 @@ function readShape(xml: string): SheetShape {
     if (event.kind !== 'close') continue
 
     if (event.localName === 'c' && openCell) {
-      currentCells.push({ column: cellColumn, start: cellStart, end: event.end, style: cellStyle })
+      currentCells.push({
+        column: cellColumn,
+        start: cellStart,
+        end: event.end,
+        style: cellStyle,
+        sharedFormulaMaster: master,
+      })
       openCell = false
       continue
     }
@@ -244,6 +259,16 @@ export function patchSheet(
     }
 
     const existingCell = existingRow.cells.find((candidate) => candidate.column === column)
+    if (existingCell?.sharedFormulaMaster !== undefined) {
+      // Dependents hold no expression of their own, so replacing the master
+      // would leave them pointing at a formula that no longer exists.
+      throw new XlsxError(
+        'unwritable-value',
+        `Cell ${reference} defines shared formula ${existingCell.sharedFormulaMaster}; ` +
+          'overwriting it would break the cells that follow it',
+        { reference },
+      )
+    }
     if (existingCell !== undefined) {
       splices.push({
         start: existingCell.start,

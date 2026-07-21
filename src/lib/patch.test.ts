@@ -86,7 +86,7 @@ test('writes null as a cell with no value', () => {
 })
 
 test('writes a date as its serial', () => {
-  const patched = patch([['A2', new Date('2024-01-01T00:00:00Z')]])
+  const patched = patch([['A2', new Date(2024, 0, 1)]])
 
   assert.match(patched, /<c r="A2"><v>45292<\/v><\/c>/)
 })
@@ -94,7 +94,7 @@ test('writes a date as its serial', () => {
 test('writes a date against the workbook epoch', () => {
   const patched = patchSheet(
     sheet(ROWS),
-    new Map<string, CellInput>([['A2', new Date('1904-01-01T00:00:00Z')]]),
+    new Map<string, CellInput>([['A2', new Date(1904, 0, 1)]]),
     true,
   )
 
@@ -129,4 +129,35 @@ test('keeps whitespace on an inline string', () => {
 
 test('rejects text that xml cannot represent', () => {
   assert.throws(() => patch([['A2', `a${String.fromCharCode(7)}b`]]), /cannot be written to xml/i)
+})
+
+test('refuses to overwrite the master of a shared formula', () => {
+  const source = sheet(
+    '<row r="1"><c r="A1"><f t="shared" ref="A1:A3" si="0">B1*2</f><v>2</v></c></row>' +
+      '<row r="2"><c r="A2"><f t="shared" si="0"/><v>4</v></c></row>',
+  )
+
+  assert.throws(
+    () => patchSheet(source, new Map<string, CellInput>([['A1', 9]]), false),
+    /shared formula/i,
+  )
+})
+
+test('writes over a cell that follows a shared formula', () => {
+  const source = sheet(
+    '<row r="1"><c r="A1"><f t="shared" ref="A1:A3" si="0">B1*2</f><v>2</v></c></row>' +
+      '<row r="2"><c r="A2"><f t="shared" si="0"/><v>4</v></c></row>',
+  )
+
+  const patched = patchSheet(source, new Map<string, CellInput>([['A2', 9]]), false)
+
+  assert.match(patched, /<c r="A2"><v>9<\/v><\/c>/)
+})
+
+test('writes over an ordinary formula cell', () => {
+  const source = sheet('<row r="1"><c r="A1"><f>SUM(B1:B2)</f><v>3</v></c></row>')
+
+  const patched = patchSheet(source, new Map<string, CellInput>([['A1', 9]]), false)
+
+  assert.match(patched, /<c r="A1"><v>9<\/v><\/c>/)
 })

@@ -13,25 +13,52 @@ const EPOCH_1904 = Date.UTC(1904, 0, 1)
  */
 const PHANTOM_LEAP_DAY = 60
 
+/**
+ * A spreadsheet date is a calendar date rather than an instant, so a serial
+ * means the same wall clock day wherever it is read, and `new Date(2024, 0, 1)`
+ * writes the serial for that day.
+ *
+ * Both directions convert through the date's components rather than its
+ * timestamp. Arithmetic on timestamps drifts by an hour whenever the date and
+ * the epoch sit on opposite sides of a daylight saving change.
+ */
 export function serialToDate(serial: number, date1904: boolean): Date {
   if (!Number.isFinite(serial) || serial < 0) {
     throw new XlsxError('unwritable-value', `Serial ${serial} is not a date`)
   }
 
-  if (date1904) {
-    return new Date(EPOCH_1904 + serial * MILLISECONDS_PER_DAY)
-  }
+  const corrected = !date1904 && serial > PHANTOM_LEAP_DAY ? serial - 1 : serial
+  const epoch = date1904 ? EPOCH_1904 : EPOCH_1900
+  const asUtc = new Date(epoch + corrected * MILLISECONDS_PER_DAY)
 
-  const corrected = serial > PHANTOM_LEAP_DAY ? serial - 1 : serial
-  return new Date(EPOCH_1900 + corrected * MILLISECONDS_PER_DAY)
+  return new Date(
+    asUtc.getUTCFullYear(),
+    asUtc.getUTCMonth(),
+    asUtc.getUTCDate(),
+    asUtc.getUTCHours(),
+    asUtc.getUTCMinutes(),
+    asUtc.getUTCSeconds(),
+    asUtc.getUTCMilliseconds(),
+  )
 }
 
 export function dateToSerial(date: Date, date1904: boolean): number {
-  const time = date.getTime()
-  if (Number.isNaN(time)) throw new XlsxError('unwritable-value', 'Invalid date cannot be written')
+  if (Number.isNaN(date.getTime())) {
+    throw new XlsxError('unwritable-value', 'Invalid date cannot be written')
+  }
 
-  if (date1904) return (time - EPOCH_1904) / MILLISECONDS_PER_DAY
+  const asUtc = Date.UTC(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+    date.getHours(),
+    date.getMinutes(),
+    date.getSeconds(),
+    date.getMilliseconds(),
+  )
 
-  const days = (time - EPOCH_1900) / MILLISECONDS_PER_DAY
+  if (date1904) return (asUtc - EPOCH_1904) / MILLISECONDS_PER_DAY
+
+  const days = (asUtc - EPOCH_1900) / MILLISECONDS_PER_DAY
   return days >= PHANTOM_LEAP_DAY ? days + 1 : days
 }

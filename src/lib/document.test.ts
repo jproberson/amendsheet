@@ -53,10 +53,9 @@ test('reads a number with a date format as a date', () => {
   const [cell] = [...(workbook.sheets[0]?.cells() ?? [])]
 
   assert.equal(cell?.value.kind, 'date')
-  assert.equal(
-    cell?.value.kind === 'date' && cell.value.value.toISOString(),
-    '2024-01-01T00:00:00.000Z',
-  )
+  assert.equal(cell?.value.kind === 'date' && cell.value.value.getFullYear(), 2024)
+  assert.equal(cell?.value.kind === 'date' && cell.value.value.getMonth(), 0)
+  assert.equal(cell?.value.kind === 'date' && cell.value.value.getDate(), 1)
 })
 
 test('keeps the serial alongside a date', () => {
@@ -72,10 +71,8 @@ test('reads dates against the workbook epoch', () => {
   )
   const [cell] = [...(workbook.sheets[0]?.cells() ?? [])]
 
-  assert.equal(
-    cell?.value.kind === 'date' && cell.value.value.toISOString(),
-    '1904-01-01T00:00:00.000Z',
-  )
+  assert.equal(cell?.value.kind === 'date' && cell.value.value.getFullYear(), 1904)
+  assert.equal(cell?.value.kind === 'date' && cell.value.value.getDate(), 1)
 })
 
 test('leaves a date formatted cell that holds text alone', () => {
@@ -231,16 +228,15 @@ test('rejects a reference that is not a cell', () => {
 
 test('writes a date into a cell that already has a date format', () => {
   const workbook = readWorkbook(build('<row r="1"><c r="A1" s="1"><v>1</v></c></row>'))
-  workbook.sheets[0]?.set('A1', new Date('2024-01-01T00:00:00Z'))
+  workbook.sheets[0]?.set('A1', new Date(2024, 0, 1))
 
   const reopened = readWorkbook(workbook.toBytes())
   const [cell] = [...(reopened.sheets[0]?.cells() ?? [])]
 
   assert.equal(cell?.value.kind, 'date')
-  assert.equal(
-    cell?.value.kind === 'date' && cell.value.value.toISOString(),
-    '2024-01-01T00:00:00.000Z',
-  )
+  assert.equal(cell?.value.kind === 'date' && cell.value.value.getFullYear(), 2024)
+  assert.equal(cell?.value.kind === 'date' && cell.value.value.getMonth(), 0)
+  assert.equal(cell?.value.kind === 'date' && cell.value.value.getDate(), 1)
 })
 
 const withStrings = (sheetBody: string, sst: string) =>
@@ -320,21 +316,19 @@ test('falls back to an inline string when the file has no table', () => {
 
 test('a date written into an unformatted cell reads back as a date', () => {
   const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
-  workbook.sheets[0]?.set('A1', new Date('2024-03-05T00:00:00Z'))
+  workbook.sheets[0]?.set('A1', new Date(2024, 2, 5))
 
   const reopened = readWorkbook(workbook.toBytes())
   const [cell] = [...(reopened.sheets[0]?.cells() ?? [])]
 
   assert.equal(cell?.value.kind, 'date')
-  assert.equal(
-    cell?.value.kind === 'date' && cell.value.value.toISOString(),
-    '2024-03-05T00:00:00.000Z',
-  )
+  assert.equal(cell?.value.kind === 'date' && cell.value.value.getMonth(), 2)
+  assert.equal(cell?.value.kind === 'date' && cell.value.value.getDate(), 5)
 })
 
 test('a date written into a new cell reads back as a date', () => {
   const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
-  workbook.sheets[0]?.set('D4', new Date('2024-03-05T00:00:00Z'))
+  workbook.sheets[0]?.set('D4', new Date(2024, 2, 5))
 
   const reopened = readWorkbook(workbook.toBytes())
   const cell = [...(reopened.sheets[0]?.cells() ?? [])].find((each) => each.reference === 'D4')
@@ -344,7 +338,7 @@ test('a date written into a new cell reads back as a date', () => {
 
 test('a cell that already has a date format keeps it', () => {
   const workbook = readWorkbook(build('<row r="1"><c r="A1" s="1"><v>1</v></c></row>'))
-  workbook.sheets[0]?.set('A1', new Date('2024-03-05T00:00:00Z'))
+  workbook.sheets[0]?.set('A1', new Date(2024, 2, 5))
 
   const parts = readContainer(workbook.toBytes()).parts
   const styles = new TextDecoder().decode(parts.get('xl/styles.xml') ?? new Uint8Array())
@@ -356,8 +350,8 @@ test('reuses a date format the file already has', () => {
   const workbook = readWorkbook(
     build('<row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>2</v></c></row>'),
   )
-  workbook.sheets[0]?.set('A1', new Date('2024-03-05T00:00:00Z'))
-  workbook.sheets[0]?.set('B1', new Date('2024-04-06T00:00:00Z'))
+  workbook.sheets[0]?.set('A1', new Date(2024, 2, 5))
+  workbook.sheets[0]?.set('B1', new Date(2024, 3, 6))
 
   const parts = readContainer(workbook.toBytes()).parts
   const styles = new TextDecoder().decode(parts.get('xl/styles.xml') ?? new Uint8Array())
@@ -376,8 +370,8 @@ test('adds one date format when the file has none, however many dates are writte
       },
     }),
   )
-  workbook.sheets[0]?.set('A1', new Date('2024-03-05T00:00:00Z'))
-  workbook.sheets[0]?.set('B1', new Date('2024-04-06T00:00:00Z'))
+  workbook.sheets[0]?.set('A1', new Date(2024, 2, 5))
+  workbook.sheets[0]?.set('B1', new Date(2024, 3, 6))
 
   const parts = readContainer(workbook.toBytes()).parts
   const styles = new TextDecoder().decode(parts.get('xl/styles.xml') ?? new Uint8Array())

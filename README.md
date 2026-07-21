@@ -73,13 +73,20 @@ There is no date type in the file format. A date is a number with a date number
 format applied, so `kind: 'date'` comes from resolving the cell's style. The
 `serial` is kept so the stored value can go back unchanged.
 
+Dates are calendar dates, not instants. `new Date(2024, 0, 1)` writes the serial
+for that day, and reading it back gives a `Date` whose `getDate()` is 1, in
+whatever timezone the code runs in. Build dates the ordinary way rather than
+with `Date.UTC`.
+
 Reading a formula gives you `cell.formula`, the expression without the leading
 `=`. A cell that follows a shared formula reports an empty string, since the
 expression lives on the master cell.
 
 ## Not done yet
 
-- Formulas are read only. `set` takes values, so there is no way to write one.
+- Formulas are read only. `set` takes values, so there is no way to write one,
+  and overwriting the cell that defines a shared formula is refused rather than
+  breaking the cells that follow it.
 - Writing isn't streamed. A sheet is patched as one string.
 - Charts, pivot tables and drawings are preserved but never created.
 - Nothing reads or writes cell formatting beyond number formats.
