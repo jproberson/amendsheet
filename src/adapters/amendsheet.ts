@@ -23,8 +23,8 @@ function toHarnessValue(value: DocumentValue): CellValue | null {
  * Measures this library with the same rig used on the incumbents, so the
  * comparison runs over identical files and identical assertions.
  */
-export const xlsxdocAdapter: Adapter = {
-  name: 'xlsxdoc (this library)',
+export const amendsheetAdapter: Adapter = {
+  name: 'amendsheet (this library)',
 
   async roundTrip(bytes) {
     return readWorkbook(bytes).toBytes()

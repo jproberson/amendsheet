@@ -1,9 +1,9 @@
 {
-  "name": "xlsxdoc",
+  "name": "amendsheet",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Read and write .xlsx files without damaging what you did not touch.",
+  "description": "Amend .xlsx files. Everything you did not touch stays exactly as it was.",
   "scripts": {
     "fixtures": "tsx src/fixtures/generate.ts",
     "fixtures:real": "tsx src/fixtures/fetch.ts",

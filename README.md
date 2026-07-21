@@ -1,10 +1,11 @@
-# xlsxdoc
+# AmendSheet
 
-Read and edit `.xlsx` files in Node and the browser.
+Amend `.xlsx` files. Everything you didn't touch stays exactly as it was.
 
-Anything the library doesn't interpret gets written back byte for byte. Charts,
-pivot tables, drawings and macros all survive a read and a save, so editing one
-cell won't quietly throw away the rest of the workbook.
+Reads and edits spreadsheets in Node and the browser. Anything the library
+doesn't interpret gets written back byte for byte, so charts, pivot tables,
+drawings and macros all survive a read and a save. Changing one cell won't
+quietly throw away the rest of the workbook.
 
 One dependency, `fflate`, for the ZIP container. There is no transitive tree to
 audit.
@@ -19,7 +20,7 @@ library had no hand in creating.
 ## Use
 
 ```ts
-import { readWorkbook } from 'xlsxdoc'
+import { readWorkbook } from 'amendsheet'
 
 const workbook = readWorkbook(bytes)
 
