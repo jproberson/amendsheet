@@ -111,8 +111,10 @@ test('applies several edits at once', () => {
   assert.match(patched, /<c r="A2"><v>1<\/v><\/c>/)
 })
 
-test('reports a cell that is not in the sheet yet', () => {
-  assert.throws(() => patch([['Z9', 1]]), /Z9/)
+test('adds a cell that was not in the sheet yet', () => {
+  const patched = patch([['Z9', 1]])
+
+  assert.match(patched, /<row r="9"><c r="Z9"><v>1<\/v><\/c><\/row>/)
 })
 
 test('rejects a number that cannot be written', () => {
