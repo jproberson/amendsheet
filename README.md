@@ -9,6 +9,13 @@ cell won't quietly throw away the rest of the workbook.
 One dependency, `fflate`, for the ZIP container. There is no transitive tree to
 audit.
 
+## On AI
+
+Heads up: this was built with heavy use of AI assistance, partly as a test of
+what that produces when held to normal standards. Tests are written first,
+`./verify.sh` gates every commit, and the test files are real spreadsheets this
+library had no hand in creating.
+
 ## Use
 
 ```ts
