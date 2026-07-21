@@ -6,7 +6,8 @@ import {
   assertPatchedSheet,
   assertWellFormed,
 } from '../testing/invariants.js'
-import { readWorkbook } from './document.js'
+import { dateToSerial } from './date.js'
+import { type WriteOptions, readWorkbook } from './document.js'
 import { XlsxError } from './errors.js'
 import type { CellInput } from './patch.js'
 import { indexToColumn } from './reference.js'
@@ -29,7 +30,7 @@ function randomSource(seed: number) {
   }
 }
 
-type Edit = readonly [string, CellInput]
+type Edit = readonly [string, CellInput, WriteOptions?]
 
 function makeEdits(next: () => number, count: number): Edit[] {
   const values: CellInput[] = [
@@ -54,6 +55,17 @@ function makeEdits(next: () => number, count: number): Edit[] {
     new Date(1800, 0, 1),
   ]
 
+  // A format is refused after the value itself has been checked, which is the
+  // only way to reach a refusal that arrives once the edit is already in hand.
+  const formats: Array<WriteOptions | undefined> = [
+    undefined,
+    undefined,
+    undefined,
+    { numberFormat: '0.00' },
+    { numberFormat: 'yyyy-mm-dd' },
+    { numberFormat: `bad\u0000format` },
+  ]
+
   const edits: Edit[] = []
   const used = new Set<string>()
 
@@ -65,7 +77,8 @@ function makeEdits(next: () => number, count: number): Edit[] {
     used.add(reference)
 
     const value = values[Math.floor(next() * values.length)]
-    edits.push([reference, value === undefined ? 0 : value])
+    const options = formats[Math.floor(next() * formats.length)]
+    edits.push([reference, value === undefined ? 0 : value, options])
   }
 
   return edits
@@ -92,14 +105,14 @@ function applyEdits(bytes: Uint8Array, edits: readonly Edit[]): Applied {
   assert.ok(sheet !== undefined, 'fixture has no sheets')
 
   const accepted: Edit[] = []
-  for (const [reference, value] of edits) {
+  for (const [reference, value, options] of edits) {
     try {
-      sheet.set(reference, value)
+      sheet.set(reference, value, options)
     } catch (error) {
       if (!isRefusal(error)) throw error
       continue
     }
-    accepted.push([reference, value])
+    accepted.push([reference, value, options])
   }
 
   // Nothing is caught around toBytes(): once set() has accepted an edit, saving
@@ -169,7 +182,8 @@ test('every edited cell reads back as it was written', async () => {
   for (const file of files) {
     const bytes = new Uint8Array(await readFile(`fixtures/real/${file}`))
     const { written, edits } = applyEdits(bytes, makeEdits(next, 10))
-    const sheet = readWorkbook(written).sheets[0]
+    const workbook = readWorkbook(written)
+    const sheet = workbook.sheets[0]
 
     for (const [reference, value] of edits) {
       const cell = sheet?.cell(reference)
@@ -190,12 +204,15 @@ test('every edited cell reads back as it was written', async () => {
       } else if (typeof value === 'boolean') {
         assert.deepEqual(cell?.value, { kind: 'boolean', value }, `${file} ${reference}`)
       } else if (value instanceof Date) {
-        assert.equal(cell?.value.kind, 'date', `${file} ${reference}`)
-        assert.equal(
-          cell?.value.kind === 'date' && cell.value.value.getTime(),
-          value.getTime(),
-          `${file} ${reference}`,
-        )
+        // A date is stored as a serial, and an asked-for format decides whether
+        // it displays as one. Either way the serial has to be the same instant.
+        const stored =
+          cell?.value.kind === 'date'
+            ? cell.value.serial
+            : cell?.value.kind === 'number'
+              ? cell.value.value
+              : undefined
+        assert.equal(stored, dateToSerial(value, workbook.date1904), `${file} ${reference}`)
       } else {
         // A formula carries no computed result, so only the expression is kept.
         assert.equal(cell?.formula, value.formula, `${file} ${reference}`)
@@ -323,18 +340,38 @@ test('an edited workbook reads the same before and after it is written', async (
     const sheet = workbook.sheets[0]
     assert.ok(sheet !== undefined, 'fixture has no sheets')
 
+    const original = readWorkbook(bytes).sheets[0]
     const applied: Edit[] = []
-    for (const [reference, value] of edits) {
+    const refused: string[] = []
+    for (const [reference, value, options] of edits) {
       try {
-        sheet.set(reference, value)
+        sheet.set(reference, value, options)
       } catch (error) {
         if (!isRefusal(error)) throw error
+        refused.push(reference)
         continue
       }
-      applied.push([reference, value])
+      applied.push([reference, value, options])
     }
 
     const reopened = readWorkbook(workbook.toBytes()).sheets[0]
+
+    // A refusal has to leave no trace. Skipping these is what let an edit that
+    // was rejected at the call still reach the file it was rejected from.
+    for (const reference of refused) {
+      const untouched = original?.cell(reference)
+      assert.deepEqual(
+        sheet.cell(reference)?.value,
+        untouched?.value,
+        `${file} ${reference} refused`,
+      )
+      assert.deepEqual(
+        reopened?.cell(reference)?.value,
+        untouched?.value,
+        `${file} ${reference} refused, written`,
+      )
+    }
+
     for (const [reference] of applied) {
       const before = sheet.cell(reference)
       const after = reopened?.cell(reference)
