@@ -28,6 +28,7 @@ function readCellFormats(xml: string): CellFormats | undefined {
   let insertAt = -1
   let selfClosing = false
   let inside = false
+  let openElement = -1
   const elements: string[] = []
 
   for (const event of readXml(xml)) {
@@ -46,7 +47,15 @@ function readCellFormats(xml: string): CellFormats | undefined {
       continue
     }
     if (inside && event.kind === 'open' && event.localName === 'xf') {
-      elements.push(xml.slice(event.start, event.end))
+      if (event.selfClosing) elements.push(xml.slice(event.start, event.end))
+      else openElement = event.start
+      continue
+    }
+    // A style may carry alignment or protection children, which have to come
+    // along or the cloned element is an unclosed tag.
+    if (inside && event.kind === 'close' && event.localName === 'xf' && openElement !== -1) {
+      elements.push(xml.slice(openElement, event.end))
+      openElement = -1
     }
   }
 
@@ -55,13 +64,21 @@ function readCellFormats(xml: string): CellFormats | undefined {
 }
 
 function asDateFormat(element: string): string {
-  const withFormat = element.includes('numFmtId="')
-    ? element.replace(/numFmtId="\d+"/, `numFmtId="${SHORT_DATE_FORMAT_ID}"`)
-    : element.replace(/^<xf/, `<xf numFmtId="${SHORT_DATE_FORMAT_ID}"`)
+  const openTagEnd = element.indexOf('>') + 1
+  const openTag = element.slice(0, openTagEnd)
+  const rest = element.slice(openTagEnd)
 
-  return withFormat.includes('applyNumberFormat=')
+  const withFormat = openTag.includes('numFmtId="')
+    ? openTag.replace(/numFmtId="\d+"/, `numFmtId="${SHORT_DATE_FORMAT_ID}"`)
+    : openTag.replace(/^<xf/, `<xf numFmtId="${SHORT_DATE_FORMAT_ID}"`)
+
+  const applied = withFormat.includes('applyNumberFormat=')
     ? withFormat.replace(/applyNumberFormat="\d+"/, 'applyNumberFormat="1"')
-    : withFormat.replace(/\/?>$/, ' applyNumberFormat="1"/>')
+    : withFormat.replace(/\/?>$/, (tag) =>
+        tag === '/>' ? ' applyNumberFormat="1"/>' : ' applyNumberFormat="1">',
+      )
+
+  return `${applied}${rest}`
 }
 
 /**

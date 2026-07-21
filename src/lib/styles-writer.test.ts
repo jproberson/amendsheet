@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { ensureDateStyle } from './styles-writer.js'
+import { assertWellFormed } from '../testing/invariants.js'
 import { isDateFormat, readStyles } from './styles.js'
 
 const styles = (cellXfs: string, extra = '') =>
@@ -126,4 +127,17 @@ test('keeps a style written with a closing tag rather than self closed', () => {
   const result = ensureDateStyle(source, 0)
 
   assert.equal(isDateFormat(readStyles(result.xml), result.index), true)
+})
+
+test('clones a style that has children without breaking the table', () => {
+  const source = styles(
+    '<xf numFmtId="3" fontId="6" applyNumberFormat="1" applyAlignment="1">' +
+      '<alignment horizontal="center"/></xf>',
+  )
+
+  const result = ensureDateStyle(source, 0)
+
+  assert.equal(isDateFormat(readStyles(result.xml), result.index), true)
+  assertWellFormed(result.xml, 'styles with children')
+  assert.match(result.xml, /<alignment horizontal="center"\/><\/xf><\/cellXfs>/)
 })

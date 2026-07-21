@@ -118,3 +118,12 @@ test('every day of a year round trips to the same calendar day', () => {
     day.setDate(day.getDate() + 1)
   }
 })
+
+test('refuses a date the workbook epoch cannot represent', () => {
+  // The 1904 system has no way to write a day before 1904.
+  assert.throws(() => dateToSerial(new Date(1900, 1, 28), true), /before/i)
+})
+
+test('writes the first day the 1904 system can hold', () => {
+  assert.equal(dateToSerial(new Date(1904, 0, 1), true), 0)
+})

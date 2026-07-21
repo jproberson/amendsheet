@@ -57,8 +57,15 @@ export function dateToSerial(date: Date, date1904: boolean): number {
     date.getMilliseconds(),
   )
 
-  if (date1904) return (asUtc - EPOCH_1904) / MILLISECONDS_PER_DAY
+  const epoch = date1904 ? EPOCH_1904 : EPOCH_1900
+  const days = (asUtc - epoch) / MILLISECONDS_PER_DAY
+  if (days < 0) {
+    throw new XlsxError(
+      'unwritable-value',
+      `${date.toDateString()} is before ${date1904 ? 1904 : 1900}, which this workbook cannot hold`,
+    )
+  }
 
-  const days = (asUtc - EPOCH_1900) / MILLISECONDS_PER_DAY
+  if (date1904) return days
   return days >= PHANTOM_LEAP_DAY ? days + 1 : days
 }

@@ -110,6 +110,29 @@ fixtures/       the test files themselves
 Formats, lints, typechecks, greps for banned constructs, runs the tests with
 coverage thresholds, and checks the built package. Run it before every commit.
 
+## How the tests are built
+
+Coverage says a line ran, not that its output was right, so three things sit on
+top of the ordinary tests.
+
+**Invariants over fragments.** `src/testing/invariants.ts` holds the assertions
+every write must satisfy: the sheet is well formed, cells sit inside rows, no
+reference appears twice, and no part outside the edited sheet changed. Checking
+for a substring passes on output that contains the right fragment inside a
+broken document.
+
+**Properties over examples.** `properties.test.ts` generates edits against all
+60 real files and asserts what must hold for any of them: the sheet still
+parses, edited cells read back as written, untouched cells are untouched, and
+the order edits were made in does not matter. The seed is fixed so a failure
+reproduces, and a failing case is shrunk to the fewest edits that still fail.
+Hand-written tests only cover failure modes somebody already imagined.
+
+**Mutation testing.** `npm run mutate` breaks the library one edit at a time and
+checks that some test notices. It is slow, so it is not part of `verify.sh`.
+A survivor is either a real gap or a mutation that changes nothing; both need
+reading.
+
 ## Round-trip harness
 
 `npm run harness` reads every test file, writes it straight back out, and reports
