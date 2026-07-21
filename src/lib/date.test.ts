@@ -136,3 +136,16 @@ test('refuses a serial beyond the last day a sheet can hold', () => {
 test('reads the last day a sheet can hold', () => {
   assert.equal(serialToDate(2958465, false).getFullYear(), 9999)
 })
+
+test('a day whose midnight does not exist still writes a whole serial', () => {
+  // Some zones move the clock forward at midnight, so new Date(y, m, d) is
+  // 01:00 there. Each day is built fresh, the way a caller writes one.
+  for (let month = 0; month < 12; month++) {
+    for (let day = 1; day <= 28; day++) {
+      const built = new Date(2024, month, day)
+      const serial = dateToSerial(built, false)
+      assert.ok(Number.isInteger(serial), `${built.toDateString()} gave ${serial}`)
+      assert.equal(serialToDate(serial, false).getDate(), day, built.toDateString())
+    }
+  }
+})

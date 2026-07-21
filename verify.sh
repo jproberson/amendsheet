@@ -88,6 +88,14 @@ npm run --silent build > /dev/null || fail "build failed"
 npx publint --strict > /dev/null 2>&1 || { fail "publint found packaging problems"; npx publint --strict 2>&1 | tail -8; }
 npx attw --pack . --format table-flipped > /dev/null 2>&1 || { fail "type resolution is broken for some consumers"; npx attw --pack . 2>&1 | tail -12; }
 
+step "dates in other timezones"
+# date.ts converts through calendar components to survive daylight saving, and
+# that only means anything if it is run somewhere the clock actually moves.
+for zone in America/Santiago Asia/Beirut Pacific/Auckland; do
+  TZ="$zone" node --import tsx --test 'src/lib/date.test.ts' > /dev/null 2>&1 \
+    || fail "date handling is wrong in $zone"
+done
+
 step "harness regression"
 if [ -d fixtures ] && find fixtures -name '*.xlsx' -print -quit | grep -q .; then
   npm run --silent harness | tail -n 15

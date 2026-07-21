@@ -20,6 +20,25 @@ jobs:
       - run: npm run fixtures
       - run: ./verify.sh
 
+  # The date conversion exists to survive daylight saving, so it is run where
+  # the clock moves at midnight.
+  timezones:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        zone: [America/Santiago, Asia/Beirut, Pacific/Auckland, UTC]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+        env:
+          TZ: ${{ matrix.zone }}
+
   # verify.sh needs Node 22 for coverage thresholds. package.json claims the
   # package runs on 18, so check the built output actually does.
   supported-node:

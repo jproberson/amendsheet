@@ -50,14 +50,20 @@ export function dateToSerial(date: Date, date1904: boolean): number {
     throw new XlsxError('unwritable-value', 'Invalid date cannot be written')
   }
 
+  // Some zones move the clock forward at midnight, so the first moment of a
+  // day is 01:00 there. A date sitting on it means that whole day, not an hour
+  // past it, and has to give a whole serial.
+  const startOfDay = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+  const atStartOfDay = date.getTime() === startOfDay.getTime()
+
   const asUtc = Date.UTC(
     date.getFullYear(),
     date.getMonth(),
     date.getDate(),
-    date.getHours(),
-    date.getMinutes(),
-    date.getSeconds(),
-    date.getMilliseconds(),
+    atStartOfDay ? 0 : date.getHours(),
+    atStartOfDay ? 0 : date.getMinutes(),
+    atStartOfDay ? 0 : date.getSeconds(),
+    atStartOfDay ? 0 : date.getMilliseconds(),
   )
 
   const epoch = date1904 ? EPOCH_1904 : EPOCH_1900
