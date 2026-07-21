@@ -46,6 +46,12 @@ function makeEdits(next: () => number, count: number): Edit[] {
     // After 1904, so it is representable under either epoch.
     new Date(1990, 11, 31),
     { formula: 'A1+1' },
+    // Refused values, so the properties see edits that were turned down as well
+    // as edits that went through. Without them a refusal is rare enough in the
+    // corpus that "a refusal changes nothing" is asserted about almost nothing.
+    Number.NaN,
+    'a\u0000b',
+    new Date(1800, 0, 1),
   ]
 
   const edits: Edit[] = []
@@ -66,19 +72,39 @@ function makeEdits(next: () => number, count: number): Edit[] {
 }
 
 /**
- * The library refuses a few edits on purpose. Only those may be skipped; any
- * other throw is a failure, or a property becomes a no-op that reports green.
+ * The library refuses a few edits on purpose, and `set()` is the only place it
+ * may do so. Skipping a refusal anywhere else would let a property that never
+ * ran report green.
  */
 function isRefusal(error: unknown): boolean {
   return error instanceof XlsxError && error.code === 'unwritable-value'
 }
 
-function applyEdits(bytes: Uint8Array, edits: readonly Edit[]): Uint8Array {
+interface Applied {
+  readonly written: Uint8Array
+  /** The edits `set()` accepted. A refused one leaves nothing behind. */
+  readonly edits: Edit[]
+}
+
+function applyEdits(bytes: Uint8Array, edits: readonly Edit[]): Applied {
   const workbook = readWorkbook(bytes)
   const sheet = workbook.sheets[0]
   assert.ok(sheet !== undefined, 'fixture has no sheets')
-  for (const [reference, value] of edits) sheet.set(reference, value)
-  return workbook.toBytes()
+
+  const accepted: Edit[] = []
+  for (const [reference, value] of edits) {
+    try {
+      sheet.set(reference, value)
+    } catch (error) {
+      if (!isRefusal(error)) throw error
+      continue
+    }
+    accepted.push([reference, value])
+  }
+
+  // Nothing is caught around toBytes(): once set() has accepted an edit, saving
+  // it has to work.
+  return { written: workbook.toBytes(), edits: accepted }
 }
 
 /** Reduces a failing case to the fewest edits that still fail. */
@@ -93,7 +119,7 @@ function shrink(
     const without = smallest.filter((_unused, position) => position !== index)
     let stillFails = false
     try {
-      check(applyEdits(bytes, without))
+      check(applyEdits(bytes, without).written)
     } catch {
       stillFails = true
     }
@@ -124,10 +150,8 @@ test('any set of edits leaves a sheet a valid sheet', async () => {
       }
     }
 
-    let written: Uint8Array
     try {
-      written = applyEdits(bytes, edits)
-      check(written)
+      check(applyEdits(bytes, edits).written)
     } catch (error) {
       const smallest = shrink(bytes, edits, check)
       assert.fail(
@@ -144,15 +168,7 @@ test('every edited cell reads back as it was written', async () => {
 
   for (const file of files) {
     const bytes = new Uint8Array(await readFile(`fixtures/real/${file}`))
-    const edits = makeEdits(next, 10)
-
-    let written: Uint8Array
-    try {
-      written = applyEdits(bytes, edits)
-    } catch (error) {
-      if (!isRefusal(error)) throw error
-      continue
-    }
+    const { written, edits } = applyEdits(bytes, makeEdits(next, 10))
     const sheet = readWorkbook(written).sheets[0]
 
     for (const [reference, value] of edits) {
@@ -203,17 +219,10 @@ test('cells nobody edited are left alone', async () => {
       original.set(cell.reference, JSON.stringify(cell.value))
     }
 
-    const edits = makeEdits(next, 8)
+    // A refused edit is not in `edits`, so the cell it aimed at is one of the
+    // ones that has to come back unchanged.
+    const { written, edits } = applyEdits(bytes, makeEdits(next, 8))
     const touched = new Set(edits.map(([reference]) => reference))
-
-    let written: Uint8Array
-    try {
-      written = applyEdits(bytes, edits)
-    } catch (error) {
-      if (!isRefusal(error)) throw error
-      // An edit the library refuses cannot have disturbed anything.
-      continue
-    }
 
     // Looked up by reference rather than by position, since inserting a cell
     // shifts what the first N of the sheet are.
@@ -233,16 +242,7 @@ test('no edit disturbs a part it has no business touching', async () => {
 
   for (const file of files) {
     const bytes = new Uint8Array(await readFile(`fixtures/real/${file}`))
-    const edits = makeEdits(next, 6)
-
-    let written: Uint8Array
-    try {
-      written = applyEdits(bytes, edits)
-    } catch (error) {
-      if (!isRefusal(error)) throw error
-      continue
-    }
-    assertOnlyTheSheetChanged(bytes, written, file)
+    assertOnlyTheSheetChanged(bytes, applyEdits(bytes, makeEdits(next, 6)).written, file)
   }
 })
 
@@ -257,21 +257,20 @@ test('the order edits are applied in does not change what the sheet holds', asyn
     const edits = makeEdits(next, 6)
     if (edits.length < 2) continue
 
-    let forwards: Uint8Array
-    let backwards: Uint8Array
-    try {
-      forwards = applyEdits(bytes, edits)
-      backwards = applyEdits(bytes, [...edits].reverse())
-    } catch (error) {
-      if (!isRefusal(error)) throw error
-      // Refusing an edit is order independent too.
-      continue
-    }
+    const forwards = applyEdits(bytes, edits)
+    const backwards = applyEdits(bytes, [...edits].reverse())
 
-    const one = readWorkbook(forwards).sheets[0]
-    const other = readWorkbook(backwards).sheets[0]
+    // Refusing an edit is order independent too.
+    assert.deepEqual(
+      forwards.edits.map(([reference]) => reference).sort(),
+      backwards.edits.map(([reference]) => reference).sort(),
+      `${file}: a different set of edits was refused`,
+    )
 
-    for (const [reference] of edits) {
+    const one = readWorkbook(forwards.written).sheets[0]
+    const other = readWorkbook(backwards.written).sheets[0]
+
+    for (const [reference] of forwards.edits) {
       assert.deepEqual(
         one?.cell(reference)?.value,
         other?.cell(reference)?.value,
@@ -294,13 +293,7 @@ test('every patched sheet keeps its structure and its references', async () => {
 
   for (const file of files) {
     const bytes = new Uint8Array(await readFile(`fixtures/real/${file}`))
-    let written: Uint8Array
-    try {
-      written = applyEdits(bytes, makeEdits(next, 10))
-    } catch (error) {
-      if (!isRefusal(error)) throw error
-      continue
-    }
+    const { written } = applyEdits(bytes, makeEdits(next, 10))
 
     for (const [path, content] of readContainer(written).parts) {
       const text = new TextDecoder().decode(content)
@@ -330,17 +323,19 @@ test('an edited workbook reads the same before and after it is written', async (
     const sheet = workbook.sheets[0]
     assert.ok(sheet !== undefined, 'fixture has no sheets')
 
-    let written: Uint8Array
-    try {
-      for (const [reference, value] of edits) sheet.set(reference, value)
-      written = workbook.toBytes()
-    } catch (error) {
-      if (!isRefusal(error)) throw error
-      continue
+    const applied: Edit[] = []
+    for (const [reference, value] of edits) {
+      try {
+        sheet.set(reference, value)
+      } catch (error) {
+        if (!isRefusal(error)) throw error
+        continue
+      }
+      applied.push([reference, value])
     }
 
-    const reopened = readWorkbook(written).sheets[0]
-    for (const [reference] of edits) {
+    const reopened = readWorkbook(workbook.toBytes()).sheets[0]
+    for (const [reference] of applied) {
       const before = sheet.cell(reference)
       const after = reopened?.cell(reference)
 
