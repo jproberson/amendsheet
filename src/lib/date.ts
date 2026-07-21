@@ -32,7 +32,11 @@ export function serialToDate(serial: number, date1904: boolean): Date {
 
   const corrected = !date1904 && serial > PHANTOM_LEAP_DAY ? serial - 1 : serial
   const epoch = date1904 ? EPOCH_1904 : EPOCH_1900
-  const asUtc = new Date(epoch + corrected * MILLISECONDS_PER_DAY)
+  // A serial is a count of days, so the product is fractional and the Date
+  // constructor truncates it. Rounding recovers the exact millisecond a serial
+  // written from a Date came from, and costs nothing on one that was not: the
+  // format cannot express a serial finer than a Date can hold anyway.
+  const asUtc = new Date(Math.round(epoch + corrected * MILLISECONDS_PER_DAY))
 
   return new Date(
     asUtc.getUTCFullYear(),

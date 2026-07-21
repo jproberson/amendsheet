@@ -149,3 +149,32 @@ test('a day whose midnight does not exist still writes a whole serial', () => {
     }
   }
 })
+
+test('a date survives the serial round trip to the millisecond', () => {
+  // corrected * MILLISECONDS_PER_DAY is fractional, and the Date constructor
+  // truncates it, so a time of day came back a millisecond early.
+  const fields = (date: Date) =>
+    [
+      date.getFullYear(),
+      date.getMonth(),
+      date.getDate(),
+      date.getHours(),
+      date.getMinutes(),
+      date.getSeconds(),
+      date.getMilliseconds(),
+    ].join(' ')
+
+  for (const date1904 of [false, true]) {
+    for (let year = 1905; year < 2400; year += 7) {
+      for (const [month, day, ms] of [
+        [0, 5, 70],
+        [5, 30, 999],
+        [11, 31, 1],
+      ]) {
+        const source = new Date(year, month ?? 0, day ?? 1, 2, 35, 52, ms ?? 0)
+        const back = serialToDate(dateToSerial(source, date1904), date1904)
+        assert.equal(fields(back), fields(source), `${source.toISOString()} 1904=${date1904}`)
+      }
+    }
+  }
+})
