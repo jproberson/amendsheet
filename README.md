@@ -102,3 +102,11 @@ regression gate for the preservation guarantee.
 
 `npm run fixtures` builds the generated and quirk files. `npm run fixtures:real`
 pulls more from the pinned POI commit.
+
+## License
+
+MIT, see `LICENSE`.
+
+The files in `fixtures/real/` come from Apache POI and stay under Apache-2.0,
+with that project's `LICENSE` and `NOTICE` kept alongside them. They are test
+data only. The published package contains just `dist/`, so none of it ships.
