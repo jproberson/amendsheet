@@ -80,12 +80,12 @@ test('reports where an unclosed tag started', () => {
   assert.throws(() => events('<a><b'), /offset 3/)
 })
 
-test('parses every xml part in the corpus with balanced elements', async () => {
-  const files = (await readdir('corpus/real')).filter((name) => name.endsWith('.xlsx'))
-  assert.ok(files.length > 0, 'corpus is missing')
+test('parses every xml part in the fixtures with balanced elements', async () => {
+  const files = (await readdir('fixtures/real')).filter((name) => name.endsWith('.xlsx'))
+  assert.ok(files.length > 0, 'fixtures is missing')
 
   for (const file of files) {
-    const container = readContainer(new Uint8Array(await readFile(`corpus/real/${file}`)))
+    const container = readContainer(new Uint8Array(await readFile(`fixtures/real/${file}`)))
 
     for (const [path, bytes] of container.parts) {
       if (!path.endsWith('.xml') && !path.endsWith('.rels')) continue

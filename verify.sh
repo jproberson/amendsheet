@@ -89,10 +89,10 @@ npx publint --strict > /dev/null 2>&1 || { fail "publint found packaging problem
 npx attw --pack . --format table-flipped > /dev/null 2>&1 || { fail "type resolution is broken for some consumers"; npx attw --pack . 2>&1 | tail -12; }
 
 step "harness regression"
-if [ -d corpus ] && find corpus -name '*.xlsx' -print -quit | grep -q .; then
+if [ -d fixtures ] && find fixtures -name '*.xlsx' -print -quit | grep -q .; then
   npm run --silent harness | tail -n 15
 else
-  printf 'skipped: no corpus present (run npm run corpus && npm run corpus:real)\n'
+  printf 'skipped: no fixtures present (run npm run fixtures && npm run fixtures:real)\n'
 fi
 
 printf '\n=====================================\n'

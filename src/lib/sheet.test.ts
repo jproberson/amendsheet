@@ -121,13 +121,13 @@ test('rejects a number it cannot read', () => {
   assert.throws(() => cells('<row r="1"><c r="A1"><v>banana</v></c></row>'), /A1/)
 })
 
-test('reads every sheet in the corpus', async () => {
-  const files = (await readdir('corpus/real')).filter((name) => name.endsWith('.xlsx'))
+test('reads every sheet in the fixtures', async () => {
+  const files = (await readdir('fixtures/real')).filter((name) => name.endsWith('.xlsx'))
   const failures: string[] = []
   let total = 0
 
   for (const file of files) {
-    const bytes = new Uint8Array(await readFile(`corpus/real/${file}`))
+    const bytes = new Uint8Array(await readFile(`fixtures/real/${file}`))
     const workbook = readWorkbookPart(bytes)
 
     const stringsPart = workbook.container.parts.get('xl/sharedStrings.xml')
@@ -148,7 +148,7 @@ test('reads every sheet in the corpus', async () => {
   }
 
   assert.deepEqual(failures, [])
-  assert.ok(total > 5000, `expected many cells across the corpus, got ${total}`)
+  assert.ok(total > 5000, `expected many cells across the fixtures, got ${total}`)
 })
 
 test('reads a shared formula dependent, which carries no expression', () => {

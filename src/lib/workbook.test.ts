@@ -110,14 +110,14 @@ test('skips a sheet whose relationship does not resolve', () => {
   )
 })
 
-test('opens every workbook in the corpus', async () => {
-  const files = (await readdir('corpus/real')).filter((name) => name.endsWith('.xlsx'))
+test('opens every workbook in the fixtures', async () => {
+  const files = (await readdir('fixtures/real')).filter((name) => name.endsWith('.xlsx'))
   const failures: string[] = []
   let sheets = 0
 
   for (const file of files) {
     try {
-      const workbook = readWorkbookPart(new Uint8Array(await readFile(`corpus/real/${file}`)))
+      const workbook = readWorkbookPart(new Uint8Array(await readFile(`fixtures/real/${file}`)))
       assert.ok(workbook.sheets.length > 0, `${file} reported no sheets`)
       for (const sheet of workbook.sheets) {
         assert.ok(
@@ -132,7 +132,7 @@ test('opens every workbook in the corpus', async () => {
   }
 
   assert.deepEqual(failures, [])
-  assert.ok(sheets > 60, `expected many sheets across the corpus, got ${sheets}`)
+  assert.ok(sheets > 60, `expected many sheets across the fixtures, got ${sheets}`)
 })
 
 test('reads a very hidden sheet', () => {

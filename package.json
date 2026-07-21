@@ -5,10 +5,10 @@
   "type": "module",
   "description": "Read and write .xlsx files without damaging what you did not touch.",
   "scripts": {
-    "corpus": "tsx src/corpus/generate.ts",
-    "corpus:real": "tsx src/corpus/fetch.ts",
+    "fixtures": "tsx src/fixtures/generate.ts",
+    "fixtures:real": "tsx src/fixtures/fetch.ts",
     "harness": "tsx src/harness/run.ts",
-    "bench": "npm run corpus && npm run harness",
+    "bench": "npm run fixtures && npm run harness",
     "format": "biome format --write src",
     "lint": "biome lint src",
     "typecheck": "tsc --noEmit",

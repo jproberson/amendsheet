@@ -73,16 +73,16 @@ test('ignores a redundant current folder segment', () => {
   assert.equal(resolveTarget('xl/workbook.xml', './styles.xml'), 'xl/styles.xml')
 })
 
-test('resolves corpus relationships to package paths, dangling ones included', async () => {
+test('resolves fixtures relationships to package paths, dangling ones included', async () => {
   const { readdir, readFile } = await import('node:fs/promises')
   const { readContainer } = await import('./container.js')
 
-  const files = (await readdir('corpus/real')).filter((name) => name.endsWith('.xlsx'))
+  const files = (await readdir('fixtures/real')).filter((name) => name.endsWith('.xlsx'))
   const dangling: string[] = []
   let checked = 0
 
   for (const file of files) {
-    const container = readContainer(new Uint8Array(await readFile(`corpus/real/${file}`)))
+    const container = readContainer(new Uint8Array(await readFile(`fixtures/real/${file}`)))
 
     for (const [path, bytes] of container.parts) {
       if (!path.endsWith('.rels')) continue

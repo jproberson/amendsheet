@@ -6,7 +6,7 @@ import { exceljsAdapter } from '../adapters/exceljs.js'
 import { xlsxdocAdapter } from '../adapters/xlsxdoc.js'
 import type { Adapter, RoundTripResult } from './types.js'
 
-const CORPUS_DIR = join(process.cwd(), 'corpus')
+const FIXTURES_DIR = join(process.cwd(), 'fixtures')
 
 /** Register additional libraries here to benchmark them side by side. */
 const ADAPTERS: Adapter[] = [xlsxdocAdapter, exceljsAdapter]
@@ -23,9 +23,9 @@ async function findFiles(dir: string): Promise<string[]> {
 }
 
 async function main() {
-  const files = await findFiles(CORPUS_DIR)
+  const files = await findFiles(FIXTURES_DIR)
   if (files.length === 0) {
-    console.error(`No .xlsx files under ${CORPUS_DIR}. Run: npm run corpus`)
+    console.error(`No .xlsx files under ${FIXTURES_DIR}. Run: npm run fixtures`)
     process.exit(1)
   }
 
@@ -36,7 +36,7 @@ async function main() {
     const results: RoundTripResult[] = []
     for (const file of selected) {
       const bytes = new Uint8Array(await readFile(file))
-      results.push(await measureRoundTrip(adapter, relative(CORPUS_DIR, file), bytes))
+      results.push(await measureRoundTrip(adapter, relative(FIXTURES_DIR, file), bytes))
     }
     printReport(adapter.name, results)
   }

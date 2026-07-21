@@ -149,12 +149,12 @@ test('writes back every part it read, including ones it does not understand', ()
   )
 })
 
-test('round trips every corpus file without losing a part', async () => {
-  const files = (await readdir('corpus/real')).filter((name) => name.endsWith('.xlsx'))
+test('round trips every fixtures file without losing a part', async () => {
+  const files = (await readdir('fixtures/real')).filter((name) => name.endsWith('.xlsx'))
   const damaged: string[] = []
 
   for (const file of files) {
-    const original = new Uint8Array(await readFile(`corpus/real/${file}`))
+    const original = new Uint8Array(await readFile(`fixtures/real/${file}`))
     const before = readContainer(original)
     const after = readContainer(readWorkbook(original).toBytes())
 
@@ -170,13 +170,13 @@ test('round trips every corpus file without losing a part', async () => {
   assert.deepEqual(damaged, [])
 })
 
-test('reads cells from every corpus file', async () => {
-  const files = (await readdir('corpus/real')).filter((name) => name.endsWith('.xlsx'))
+test('reads cells from every fixtures file', async () => {
+  const files = (await readdir('fixtures/real')).filter((name) => name.endsWith('.xlsx'))
   let cells = 0
   let dates = 0
 
   for (const file of files) {
-    const workbook = readWorkbook(new Uint8Array(await readFile(`corpus/real/${file}`)))
+    const workbook = readWorkbook(new Uint8Array(await readFile(`fixtures/real/${file}`)))
     for (const sheet of workbook.sheets) {
       for (const cell of sheet.cells()) {
         cells++

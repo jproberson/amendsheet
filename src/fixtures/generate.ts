@@ -4,9 +4,9 @@ import ExcelJS from 'exceljs'
 import { toArrayBuffer } from '../harness/zip.js'
 import { QUIRKS } from './quirks.js'
 
-const CORPUS_DIR = join(process.cwd(), 'corpus')
+const FIXTURES_DIR = join(process.cwd(), 'fixtures')
 
-/** 1x1 transparent PNG, so the corpus needs no binary assets checked in. */
+/** 1x1 transparent PNG, so the fixtures needs no binary assets checked in. */
 const TRANSPARENT_PIXEL_PNG = toArrayBuffer(
   Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
@@ -21,7 +21,7 @@ const TRANSPARENT_PIXEL_PNG = toArrayBuffer(
  */
 async function richWorkbook(): Promise<Uint8Array> {
   const workbook = new ExcelJS.Workbook()
-  workbook.creator = 'corpus-harness'
+  workbook.creator = 'fixtures-harness'
   workbook.created = new Date('2024-01-01T00:00:00Z')
 
   const worksheet = workbook.addWorksheet('Report', {
@@ -109,51 +109,51 @@ async function simpleWorkbook(): Promise<Uint8Array> {
 }
 
 async function main() {
-  await mkdir(join(CORPUS_DIR, 'generated'), { recursive: true })
-  await mkdir(join(CORPUS_DIR, 'quirks'), { recursive: true })
-  await mkdir(join(CORPUS_DIR, 'manual'), { recursive: true })
+  await mkdir(join(FIXTURES_DIR, 'generated'), { recursive: true })
+  await mkdir(join(FIXTURES_DIR, 'quirks'), { recursive: true })
+  await mkdir(join(FIXTURES_DIR, 'manual'), { recursive: true })
 
   const written: string[] = []
 
   const rich = await richWorkbook()
-  await writeFile(join(CORPUS_DIR, 'generated', 'rich-exceljs.xlsx'), rich)
+  await writeFile(join(FIXTURES_DIR, 'generated', 'rich-exceljs.xlsx'), rich)
   written.push('generated/rich-exceljs.xlsx')
 
   const simple = await simpleWorkbook()
-  await writeFile(join(CORPUS_DIR, 'generated', 'simple-exceljs.xlsx'), simple)
+  await writeFile(join(FIXTURES_DIR, 'generated', 'simple-exceljs.xlsx'), simple)
   written.push('generated/simple-exceljs.xlsx')
 
   for (const quirk of QUIRKS) {
-    const file = join(CORPUS_DIR, 'quirks', `${quirk.name}.xlsx`)
+    const file = join(FIXTURES_DIR, 'quirks', `${quirk.name}.xlsx`)
     await writeFile(file, quirk.build())
     written.push(`quirks/${quirk.name}.xlsx`)
   }
 
   await writeFile(
-    join(CORPUS_DIR, 'manual', 'README.md'),
+    join(FIXTURES_DIR, 'manual', 'README.md'),
     [
-      '# Manual corpus',
+      '# Manual fixtures',
       '',
       'Drop real `.xlsx` files here. Diversity of *producer* matters far more than count.',
       '',
       'Aim for at least one of each:',
       '',
-      '- Excel (desktop, current) — save a file with a chart and a pivot table',
+      '- Excel (desktop, current): save a file with a chart and a pivot table',
       '- Excel (older, .xls saved as .xlsx)',
-      '- LibreOffice Calc — export to xlsx',
-      '- Google Sheets — File > Download > Microsoft Excel',
-      '- Apple Numbers — Export to Excel',
+      '- LibreOffice Calc: export to xlsx',
+      '- Google Sheets: File > Download > Microsoft Excel',
+      '- Apple Numbers: Export to Excel',
       '- A server-generated report (openpyxl, Apache POI, a BI tool export)',
-      '- Government open data — search any open data portal for "xlsx"',
+      '- Government open data: search any open data portal for "xlsx"',
       '',
       'Files here are gitignored by default: they may be large or non-redistributable.',
-      'Record provenance in a sibling `.txt` if you plan to publish the corpus.',
+      'Record provenance in a sibling `.txt` if you plan to publish the fixtures.',
     ].join('\n'),
   )
 
-  console.log(`Wrote ${written.length} corpus files to ${CORPUS_DIR}`)
+  console.log(`Wrote ${written.length} fixtures files to ${FIXTURES_DIR}`)
   for (const file of written) console.log(`  ${file}`)
-  console.log('\nAdd real-world files to corpus/manual/ — see its README.')
+  console.log('\nAdd real-world files to fixtures/manual/. See its README.')
 }
 
 main().catch((error) => {

@@ -2,24 +2,24 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 /**
- * Extends corpus/real with more files from the Apache POI test corpus.
+ * Extends fixtures/real with more files from the Apache POI test fixtures.
  *
- * The corpus itself is committed, because a benchmark whose inputs can change
+ * The fixtures itself is committed, because a benchmark whose inputs can change
  * underneath it produces numbers nobody can compare. This script exists to grow
  * or refresh that set, not as a setup step.
  *
  * POI's files matter because no JavaScript library produced them: they were
  * collected from a decade of bug reports, written by real Excel versions,
  * LibreOffice, and third-party generators, and they carry the features a
- * synthetic corpus cannot fake — charts, pivot tables, embedded drawings,
- * threaded comments, themes.
+ * synthetic fixtures cannot fake: charts, pivot tables, embedded
+ * drawings, threaded comments, themes.
  *
  * Pinned to a commit for the same reason the files are committed.
  */
 
 const POI_COMMIT = '0d6d4872c491b1f230f51c6878e57407c60ae697'
 const API = `https://api.github.com/repos/apache/poi/contents/test-data/spreadsheet?ref=${POI_COMMIT}`
-const REAL_CORPUS_DIR = join(process.cwd(), 'corpus', 'real')
+const REAL_FIXTURES_DIR = join(process.cwd(), 'fixtures', 'real')
 const MAX_BYTES = 600_000
 
 /** Names hinting at document features that a round trip is likely to damage. */
@@ -71,7 +71,7 @@ async function main() {
   const limit = Number(process.argv[2] ?? 60)
 
   const listing = await fetch(API, {
-    headers: { accept: 'application/vnd.github+json', 'user-agent': 'xlsx-corpus-harness' },
+    headers: { accept: 'application/vnd.github+json', 'user-agent': 'xlsx-fixtures-harness' },
   })
   if (!listing.ok) {
     console.error(`GitHub API returned ${listing.status}. Rate limited? Try again shortly.`)
@@ -97,7 +97,7 @@ async function main() {
     })
 
   const selected = candidates.slice(0, limit)
-  await mkdir(REAL_CORPUS_DIR, { recursive: true })
+  await mkdir(REAL_FIXTURES_DIR, { recursive: true })
 
   let fetched = 0
   let skipped = 0
@@ -106,7 +106,7 @@ async function main() {
       const file = await fetch(entry.downloadUrl)
       if (!file.ok) throw new Error(`HTTP ${file.status}`)
       const bytes = new Uint8Array(await file.arrayBuffer())
-      await writeFile(join(REAL_CORPUS_DIR, entry.name), bytes)
+      await writeFile(join(REAL_FIXTURES_DIR, entry.name), bytes)
       fetched++
     } catch (error) {
       console.error(`  skipped ${entry.name}: ${describeError(error)}`)
@@ -117,7 +117,7 @@ async function main() {
   console.log(
     `Fetched ${fetched} of ${candidates.length} candidates${skipped ? ` (${skipped} skipped)` : ''}.`,
   )
-  console.log('Commit any new files, and note the count in corpus/real/PROVENANCE.md.')
+  console.log('Commit any new files, and note the count in fixtures/real/PROVENANCE.md.')
 }
 
 main().catch((error) => {

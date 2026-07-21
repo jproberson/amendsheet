@@ -1,9 +1,9 @@
 node_modules/
 dist/
-corpus/generated/
-corpus/quirks/
-corpus/manual/*
-!corpus/manual/README.md
+fixtures/generated/
+fixtures/quirks/
+fixtures/manual/*
+!fixtures/manual/README.md
 CLAUDE.md
 *.log
 *.tgz

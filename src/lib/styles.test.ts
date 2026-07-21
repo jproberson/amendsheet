@@ -119,13 +119,13 @@ test('reads a styles part with no formats at all', () => {
   assert.equal(isDateFormat(parsed, 0), false)
 })
 
-test('reads the styles of every corpus file', async () => {
-  const files = (await readdir('corpus/real')).filter((name) => name.endsWith('.xlsx'))
+test('reads the styles of every fixtures file', async () => {
+  const files = (await readdir('fixtures/real')).filter((name) => name.endsWith('.xlsx'))
   let parts = 0
   let dateFormats = 0
 
   for (const file of files) {
-    const container = readContainer(new Uint8Array(await readFile(`corpus/real/${file}`)))
+    const container = readContainer(new Uint8Array(await readFile(`fixtures/real/${file}`)))
     const part = container.parts.get('xl/styles.xml')
     if (part === undefined) continue
 
@@ -139,7 +139,7 @@ test('reads the styles of every corpus file', async () => {
   }
 
   assert.ok(parts > 40, `expected many styles parts, got ${parts}`)
-  assert.ok(dateFormats > 0, 'expected the corpus to contain date formats')
+  assert.ok(dateFormats > 0, 'expected the fixtures to contain date formats')
 })
 
 test('ignores a number format with no code', () => {

@@ -3,12 +3,12 @@ import { readFile } from 'node:fs/promises'
 import { test } from 'node:test'
 import { readContainer, writeContainer } from './container.js'
 
-async function corpusFile(name: string): Promise<Uint8Array> {
-  return new Uint8Array(await readFile(`corpus/real/${name}`))
+async function fixtureFile(name: string): Promise<Uint8Array> {
+  return new Uint8Array(await readFile(`fixtures/real/${name}`))
 }
 
 test('keeps every part when a file is read and written back', async () => {
-  const original = await corpusFile('WithChart.xlsx')
+  const original = await fixtureFile('WithChart.xlsx')
 
   const container = readContainer(original)
   const rewritten = readContainer(writeContainer(container))
@@ -17,7 +17,7 @@ test('keeps every part when a file is read and written back', async () => {
 })
 
 test('keeps part contents byte for byte', async () => {
-  const original = await corpusFile('WithChart.xlsx')
+  const original = await fixtureFile('WithChart.xlsx')
 
   const container = readContainer(original)
   const rewritten = readContainer(writeContainer(container))

@@ -38,7 +38,7 @@ const XML_FEATURES: Array<[string, RegExp]> = [
 /**
  * Deliberately NOT counted here: entries in the styles.xml registries
  * (numFmt/font/fill/border). Their counts measure the registry, not the
- * document's appearance — a writer that drops an unused format or dedupes
+ * document's appearance. A writer that drops an unused format or dedupes
  * two identical fonts has lost nothing. Formatting that a cell actually
  * uses is compared per-cell instead, via the style fingerprint on CellValue.
  */

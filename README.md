@@ -2,12 +2,12 @@
 
 Read and edit `.xlsx` files in Node and the browser.
 
-Parts it does not interpret — charts, pivot tables, drawings, macros — are
-written back byte for byte, so a file survives being opened, changed and saved
-with everything else intact.
+Anything the library doesn't interpret gets written back byte for byte. Charts,
+pivot tables, drawings and macros all survive a read and a save, so editing one
+cell won't quietly throw away the rest of the workbook.
 
-One dependency: [fflate](https://github.com/101arrowz/fflate), for the ZIP
-container. Nothing else, so there is no transitive tree to audit.
+One dependency, `fflate`, for the ZIP container. There is no transitive tree to
+audit.
 
 ## Use
 
@@ -21,7 +21,7 @@ for (const cell of workbook.sheets[0].cells()) {
 }
 ```
 
-Editing a file leaves everything you did not touch exactly as it was:
+Editing:
 
 ```ts
 const workbook = readWorkbook(bytes)
@@ -33,10 +33,10 @@ workbook.sheets[0].set('D2', new Date('2024-01-01'))
 await writeFile('out.xlsx', workbook.toBytes())
 ```
 
-`set` accepts a number, string, boolean, `Date`, or `null` to clear a cell. It
-creates the cell and its row if they are not there yet, and carries over the
-style of a cell it replaces — which means a `Date` written into a cell with no
-date format will display as a number.
+`set` takes a number, string, boolean, `Date`, or `null` to clear a cell. If the
+cell or its row isn't there yet, both get created. The style of a replaced cell
+is kept, so a `Date` written into a cell with no date format shows up as a
+number.
 
 `cell.value` is a discriminated union:
 
@@ -50,26 +50,25 @@ type CellValue =
   | { kind: 'date'; value: Date; serial: number }
 ```
 
-A date is a number wearing a date number format, so `kind: 'date'` is produced
-by resolving the cell's style. The original `serial` is kept alongside the
-`Date` so the stored value can be written back unchanged.
+There is no date type in the file format. A date is a number with a date number
+format applied, so `kind: 'date'` comes from resolving the cell's style. The
+`serial` is kept so the stored value can go back unchanged.
 
 ## Not done yet
 
-- Text is written as an inline string rather than added to the shared string
-  table, so repeated text costs more bytes than it should.
-- Writing is not streamed: a sheet is patched as one string.
-- Nothing writes charts, pivot tables or drawings. They are preserved, not
-  created.
+- Text is written as an inline string instead of going into the shared string
+  table, so repeated text takes more bytes than it needs to.
+- Writing isn't streamed. A sheet is patched as one string.
+- Charts, pivot tables and drawings are preserved but never created.
 
 ## Layout
 
 ```
-src/lib/       the library
-src/harness/   round-trip measurement rig
-src/adapters/  library implementations the harness measures
-src/corpus/    corpus generation and fetching
-corpus/        the files the harness runs against
+src/lib/        the library
+src/harness/    round-trip measurement
+src/adapters/   libraries the harness measures
+src/fixtures/   builds and fetches test files
+fixtures/       the test files themselves
 ```
 
 ## Verify
@@ -83,22 +82,23 @@ coverage thresholds, and checks the built package. Run it before every commit.
 
 ## Round-trip harness
 
-`npm run harness` reads every file in the corpus, writes it straight back, and
-reports anything that changed: ZIP parts that went missing, markup features whose
-count fell, and cell values that differ. It is the regression gate for the
-preservation guarantee — over the 72 committed files, nothing changes.
+`npm run harness` reads every test file, writes it straight back out, and reports
+what changed: missing ZIP parts, markup features whose count dropped, and cell
+values that differ. Nothing changes across the 72 committed files, and that's the
+regression gate for the preservation guarantee.
 
-## Corpus
+## Fixtures
 
-- `corpus/real/` — 60 files from Apache POI's test data, committed and pinned to
-  a commit. Written by real spreadsheet applications. See `PROVENANCE.md`.
-- `corpus/quirks/` — hand-built files covering legal but unusual constructs:
-  inline strings, omitted cell references, rows out of order, a lying
-  `dimension`, the 1904 epoch, the 1900 leap-year bug, shared formulas, columns
-  past Z, XML entities, boolean and error cells.
-- `corpus/generated/` — feature-rich workbooks built by another library, as a
-  smoke test. Weaker than the real files, which no JavaScript library produced.
-- `corpus/manual/` — drop your own files here. Gitignored.
+- `fixtures/real/` has 60 files from Apache POI's test data, pinned to a commit.
+  Real spreadsheet applications wrote these. See `PROVENANCE.md`.
+- `fixtures/quirks/` holds hand-built files for legal but unusual constructs:
+  inline strings, missing cell references, rows out of order, a `dimension` that
+  lies, the 1904 epoch, the 1900 leap-year bug, shared formulas, columns past Z,
+  XML entities, boolean and error cells.
+- `fixtures/generated/` has feature-rich workbooks from another library, used as
+  a smoke test. Weaker than the real files, since no JavaScript library wrote
+  those.
+- `fixtures/manual/` is for your own files. Gitignored.
 
-`npm run corpus` builds the generated and quirk files. `npm run corpus:real`
+`npm run fixtures` builds the generated and quirk files. `npm run fixtures:real`
 pulls more from the pinned POI commit.

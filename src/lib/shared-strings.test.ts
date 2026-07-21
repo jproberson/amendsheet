@@ -51,13 +51,13 @@ test('reads a table with no entries', () => {
   assert.deepEqual(readSharedStrings(sst('')), [])
 })
 
-test('reads the shared strings of every corpus file that has them', async () => {
-  const files = (await readdir('corpus/real')).filter((name) => name.endsWith('.xlsx'))
+test('reads the shared strings of every fixtures file that has them', async () => {
+  const files = (await readdir('fixtures/real')).filter((name) => name.endsWith('.xlsx'))
   let tables = 0
   let entries = 0
 
   for (const file of files) {
-    const container = readContainer(new Uint8Array(await readFile(`corpus/real/${file}`)))
+    const container = readContainer(new Uint8Array(await readFile(`fixtures/real/${file}`)))
     const part = container.parts.get('xl/sharedStrings.xml')
     if (part === undefined) continue
 
