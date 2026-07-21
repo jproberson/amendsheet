@@ -10,14 +10,8 @@ import {
 } from './reference.js'
 import { type RawCell, readSheet } from './sheet.js'
 import { appendSharedStrings, readSharedStrings } from './shared-strings.js'
-import { ensureDateStyle, ensureNumberFormat } from './styles-writer.js'
-import {
-  type Styles,
-  isDateFormat,
-  isDateFormatCode,
-  numberFormatOf,
-  readStyles,
-} from './styles.js'
+import { type DateStyle, ensureDateStyle, ensureNumberFormat } from './styles-writer.js'
+import { type Styles, isDateFormat, numberFormatOf, readStyles } from './styles.js'
 import { readXml } from './xml.js'
 import { type SheetState, readWorkbookPart } from './workbook.js'
 
@@ -128,12 +122,7 @@ function partText(container: Container, path: string): string | undefined {
   }
 }
 
-function toCellValue(
-  raw: RawCell,
-  styles: Styles,
-  date1904: boolean,
-  requested: string | undefined,
-): CellValue {
+function toCellValue(raw: RawCell, styles: Styles, date1904: boolean): CellValue {
   const value = raw.value
 
   if (value.kind === 'date') {
@@ -142,10 +131,7 @@ function toCellValue(
     return { kind: 'date', value: parsed, serial: dateToSerial(parsed, date1904) }
   }
 
-  const showsDates =
-    requested === undefined ? isDateFormat(styles, raw.styleIndex) : isDateFormatCode(requested)
-
-  if (value.kind === 'number' && showsDates) {
+  if (value.kind === 'number' && isDateFormat(styles, raw.styleIndex)) {
     const serial = value.value
     // A serial outside the range dates cover stays the number it is.
     if (serial >= 0) {
@@ -156,14 +142,9 @@ function toCellValue(
   return value
 }
 
-/**
- * `requested` is a format asked for by a write that has not been applied to the
- * style table yet, so the read reflects it rather than the style the cell still
- * carries.
- */
-function toCell(raw: RawCell, styles: Styles, date1904: boolean, requested?: string): Cell {
-  const numberFormat = requested ?? numberFormatOf(styles, raw.styleIndex)
-  const value = toCellValue(raw, styles, date1904, requested)
+function toCell(raw: RawCell, styles: Styles, date1904: boolean): Cell {
+  const numberFormat = numberFormatOf(styles, raw.styleIndex)
+  const value = toCellValue(raw, styles, date1904)
 
   return {
     address: raw.address,
@@ -185,7 +166,23 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   const sharedStrings = stringsXml === undefined ? [] : readSharedStrings(stringsXml)
 
   const edits = new Map<string, Map<string, CellInput>>()
-  const formats = new Map<string, Map<string, string>>()
+
+  // Which cell format each edited cell lands on is decided by set(), not by
+  // toBytes(). Choosing a style index is what makes a number a date, so it is a
+  // decision about what a cell MEANS; leaving it to write time gave the read
+  // path its own copy of the decision, and the two drifted.
+  const styleOverrides = new Map<string, Map<string, number>>()
+  let workingStyles = stylesXml
+  let parsedStyles = styles
+  let parsedFrom = stylesXml
+
+  const stylesNow = (): Styles => {
+    if (workingStyles !== undefined && workingStyles !== parsedFrom) {
+      parsedStyles = readStyles(workingStyles)
+      parsedFrom = workingStyles
+    }
+    return parsedStyles
+  }
 
   const sheets = part.sheets.map((reference): Worksheet => {
     const sheetXml = partText(container, reference.path)
@@ -193,95 +190,83 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     const patched = () => {
       if (sheetXml === undefined) return undefined
       const pending = edits.get(reference.path)
-      return pending === undefined ? sheetXml : patchSheet(sheetXml, pending, date1904)
+      if (pending === undefined) return sheetXml
+      return patchSheet(sheetXml, pending, date1904, undefined, styleOverrides.get(reference.path))
     }
 
     function* readCells(source?: string): Generator<Cell> {
       const xml = source ?? patched()
       if (xml === undefined) return
+      for (const raw of readSheet(xml, sharedStrings)) yield toCell(raw, stylesNow(), date1904)
+    }
 
-      // A requested format is applied when the file is written, so the read has
-      // to reflect it too or set() would not be visible until toBytes().
-      const requested = formats.get(reference.path)
-      for (const raw of readSheet(xml, sharedStrings)) {
-        yield toCell(raw, styles, date1904, requested?.get(raw.reference))
+    // The style each cell carried when the file was read, keyed canonically so
+    // a file spelling a reference `a1` or `$A$1` still matches an edit to A1.
+    let originalStyles: Map<string, number> | undefined
+    const styleAt = (canonical: string): number | undefined => {
+      const override = styleOverrides.get(reference.path)?.get(canonical)
+      if (override !== undefined) return override
+
+      if (originalStyles === undefined) {
+        originalStyles = new Map()
+        for (const raw of sheetXml === undefined ? [] : readSheet(sheetXml, [])) {
+          if (raw.styleIndex !== undefined) {
+            originalStyles.set(formatReference(raw.address), raw.styleIndex)
+          }
+        }
       }
+      return originalStyles.get(canonical)
     }
 
     /**
-     * What a write produces, without going back to the sheet. A Date with no
-     * requested format is left out, because which format it lands on depends on
-     * what the style table already holds.
+     * What the cell becomes, resolved through the same function a read uses.
+     * Predicting the value independently is how the overlay came to disagree
+     * with the file it was about to write.
      */
-    const predict = (
-      canonical: string,
-      value: CellInput,
-      format: string | undefined,
-      previous: Cell | undefined,
-    ): Cell | undefined => {
-      const numberFormat = format ?? previous?.numberFormat
-      const base = {
-        address: parseReference(canonical),
-        reference: canonical,
-        ...(numberFormat === undefined ? {} : { numberFormat }),
-      }
+    const predict = (canonical: string, value: CellInput, styleIndex: number | undefined): Cell => {
+      const address = parseReference(canonical)
+      const style = styleIndex === undefined ? {} : { styleIndex }
+      const raw = { address, reference: canonical, ...style }
 
-      if (value === null) return { ...base, value: { kind: 'empty' } }
-      if (typeof value === 'number') return { ...base, value: { kind: 'number', value } }
-      if (typeof value === 'boolean') return { ...base, value: { kind: 'boolean', value } }
-      if (typeof value === 'string') return { ...base, value: { kind: 'text', value } }
-      if (value instanceof Date) {
-        if (format === undefined && !isDateFormatCode(previous?.numberFormat)) {
-          return undefined
-        }
-        return {
-          ...base,
-          value: { kind: 'date', value, serial: dateToSerial(value, date1904) },
-        }
+      if (value === null) {
+        return toCell({ ...raw, value: { kind: 'empty' } }, stylesNow(), date1904)
       }
-      return { ...base, value: { kind: 'empty' }, formula: value.formula }
+      if (typeof value === 'number') {
+        return toCell({ ...raw, value: { kind: 'number', value } }, stylesNow(), date1904)
+      }
+      if (typeof value === 'boolean') {
+        return toCell({ ...raw, value: { kind: 'boolean', value } }, stylesNow(), date1904)
+      }
+      if (typeof value === 'string') {
+        return toCell({ ...raw, value: { kind: 'text', value } }, stylesNow(), date1904)
+      }
+      if (value instanceof Date) {
+        // Written as the serial it becomes, so the style decides how it reads.
+        const serial = dateToSerial(value, date1904)
+        return toCell({ ...raw, value: { kind: 'number', value: serial } }, stylesNow(), date1904)
+      }
+      // A formula is written without a cached value, so it reads back empty.
+      const formula = value.formula
+      return toCell({ ...raw, value: { kind: 'empty' }, formula }, stylesNow(), date1904)
     }
 
-    // Built once from the sheet as it was read. Edits go in an overlay rather
-    // than invalidating it, so writing and reading in the same loop does not
-    // reparse the sheet on every write.
+    // Built from the sheet as it was read. Every edit is in the overlay, so the
+    // index never needs rebuilding.
     let byReference: Map<string, Cell> | undefined
     const overlay = new Map<string, Cell>()
-    // Set when a write lands somewhere the overlay cannot describe, so the next
-    // read rebuilds from the patched sheet rather than from the original.
-    let stale = false
-
-    // The previous cell, but only when it is already in hand. Building the
-    // index here would reparse the sheet on every write, so an unknown answer
-    // is reported as such and the write falls back to re-reading later.
-    const peek = (canonical: string): { readonly cell: Cell | undefined } | undefined => {
-      if (stale) return undefined
-      const edited = overlay.get(canonical)
-      if (edited !== undefined) return { cell: edited }
-      if (byReference === undefined) return undefined
-      return { cell: byReference.get(canonical) }
-    }
 
     return {
       name: reference.name,
       state: reference.state,
-      cells: readCells,
+      cells: () => readCells(),
       cell(cellReference: string): Cell | undefined {
         const wanted = formatReference(parseReference(cellReference))
-
-        if (stale) {
-          byReference = undefined
-          overlay.clear()
-          stale = false
-        }
-
         const edited = overlay.get(wanted)
         if (edited !== undefined) return edited
 
         if (byReference === undefined) {
           byReference = new Map()
-          // Patched, so it carries every edit the overlay could not describe.
-          for (const found of readCells()) {
+          for (const found of readCells(sheetXml)) {
             byReference.set(formatReference(found.address), found)
           }
         }
@@ -295,17 +280,31 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         pending.set(canonical, value)
         edits.set(reference.path, pending)
 
-        if (options?.format !== undefined) {
-          const wanted = formats.get(reference.path) ?? new Map<string, string>()
-          wanted.set(canonical, options.format)
-          formats.set(reference.path, wanted)
+        const current = styleAt(canonical)
+        let resolved = current
+
+        if (workingStyles !== undefined) {
+          // An asked-for format wins; a Date only gets one because without one
+          // it displays as the serial number it is stored as.
+          let applied: DateStyle | undefined
+          if (options?.format !== undefined) {
+            applied = ensureNumberFormat(workingStyles, current, options.format)
+          } else if (value instanceof Date) {
+            applied = ensureDateStyle(workingStyles, current)
+          }
+
+          if (applied !== undefined) {
+            workingStyles = applied.xml
+            resolved = applied.index
+            if (applied.index !== current) {
+              const overrides = styleOverrides.get(reference.path) ?? new Map<string, number>()
+              overrides.set(canonical, applied.index)
+              styleOverrides.set(reference.path, overrides)
+            }
+          }
         }
 
-        const known = peek(canonical)
-        const predicted =
-          known === undefined ? undefined : predict(canonical, value, options?.format, known.cell)
-        if (predicted === undefined) stale = true
-        else overlay.set(canonical, predicted)
+        overlay.set(canonical, predict(canonical, value, resolved))
       },
     }
   })
@@ -325,40 +324,9 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       }
     }
 
-    // A Date needs a cell format that displays dates, or it shows as a serial.
-    let workingStyles = stylesXml
-    const dateStyles = new Map<string, Map<string, number>>()
-
-    if (workingStyles !== undefined) {
-      for (const [path, pending] of edits) {
-        const sheetXml = partText(container, path)
-        if (sheetXml === undefined) continue
-
-        const existing = new Map<string, number | undefined>()
-        for (const raw of readSheet(sheetXml, [])) existing.set(raw.reference, raw.styleIndex)
-
-        const wanted = formats.get(path)
-        const overrides = new Map<string, number>()
-
-        for (const [reference, value] of pending) {
-          const format = wanted?.get(reference)
-          const current = existing.get(reference)
-
-          // An asked-for format wins; a Date only gets one because it needs one.
-          let applied: { xml: string; index: number } | undefined
-          if (format !== undefined) applied = ensureNumberFormat(workingStyles, current, format)
-          else if (value instanceof Date) applied = ensureDateStyle(workingStyles, current)
-          if (applied === undefined) continue
-
-          workingStyles = applied.xml
-          if (applied.index !== current) overrides.set(reference, applied.index)
-        }
-        if (overrides.size > 0) dateStyles.set(path, overrides)
-      }
-
-      if (workingStyles !== stylesXml) {
-        parts.set('xl/styles.xml', encoder.encode(workingStyles))
-      }
+    // set() already resolved every style; only the serialising is left.
+    if (workingStyles !== undefined && workingStyles !== stylesXml) {
+      parts.set('xl/styles.xml', encoder.encode(workingStyles))
     }
 
     // Text goes into the shared string table when the file has one, so the same
@@ -383,7 +351,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       if (xml === undefined) continue
       parts.set(
         path,
-        encoder.encode(patchSheet(xml, pending, date1904, indexes, dateStyles.get(path))),
+        encoder.encode(patchSheet(xml, pending, date1904, indexes, styleOverrides.get(path))),
       )
     }
 

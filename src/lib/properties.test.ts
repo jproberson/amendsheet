@@ -312,3 +312,41 @@ test('every patched sheet keeps its structure and its references', async () => {
     }
   }
 })
+
+/**
+ * The other properties all read back from the written bytes, so a decision the
+ * write path makes and the read path does not know about is invisible to them.
+ * This one holds the live workbook against the file it produces.
+ */
+test('an edited workbook reads the same before and after it is written', async () => {
+  const files = await fixtures()
+  const next = randomSource(66778899)
+
+  for (const file of files) {
+    const bytes = new Uint8Array(await readFile(`fixtures/real/${file}`))
+    const edits = makeEdits(next, 10)
+
+    const workbook = readWorkbook(bytes)
+    const sheet = workbook.sheets[0]
+    assert.ok(sheet !== undefined, 'fixture has no sheets')
+
+    let written: Uint8Array
+    try {
+      for (const [reference, value] of edits) sheet.set(reference, value)
+      written = workbook.toBytes()
+    } catch (error) {
+      if (!isRefusal(error)) throw error
+      continue
+    }
+
+    const reopened = readWorkbook(written).sheets[0]
+    for (const [reference] of edits) {
+      const before = sheet.cell(reference)
+      const after = reopened?.cell(reference)
+
+      assert.deepEqual(before?.value, after?.value, `${file} ${reference} value`)
+      assert.equal(before?.formula, after?.formula, `${file} ${reference} formula`)
+      assert.equal(before?.numberFormat, after?.numberFormat, `${file} ${reference} number format`)
+    }
+  }
+})
