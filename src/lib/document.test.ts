@@ -1028,3 +1028,17 @@ test('adds calcPr before the elements the schema puts after it', () => {
     `calcPr must precede pivotCaches: ${book}`,
   )
 })
+
+test('reports which epoch the workbook counts serials from', () => {
+  const plain = readWorkbook(build('<row r="1"/>'))
+  const alternate = readWorkbook(build('<row r="1"/>', { date1904: true }))
+
+  assert.equal(plain.epoch, 1900)
+  assert.equal(alternate.epoch, 1904)
+})
+
+test('reports the sheetId the workbook part gives a sheet', () => {
+  const workbook = readWorkbook(build('<row r="1"/>'))
+
+  assert.equal(workbook.sheets[0]?.sheetId, '1')
+})

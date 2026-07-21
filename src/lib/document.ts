@@ -45,10 +45,17 @@ export interface Worksheet {
   readonly name: string
   readonly state: SheetState
   /**
+   * As the workbook part spells it, so a defined name or a part this library
+   * does not interpret can be matched against the sheet it refers to.
+   */
+  readonly sheetId: string
+  /**
    * Every cell the sheet stores. A cell that was cleared, or that carries only
    * formatting, is still stored, and arrives with a value of `kind: 'empty'`.
+   *
+   * Each call re-reads the sheet, so a call per cell is quadratic.
    */
-  cells(): IterableIterator<Cell>
+  cells(): Iterable<Cell>
   /** Undefined when the sheet stores nothing at that reference. */
   cell(reference: string): Cell | undefined
   /**
@@ -60,10 +67,10 @@ export interface Worksheet {
    * cannot hold, and records nothing when it does, so the rest of a batch of
    * edits still writes.
    */
-  set(reference: string, value: CellInput, options?: WriteOptions): void
+  set(reference: string, value: CellInput, options?: SetOptions): void
 }
 
-export interface WriteOptions {
+export interface SetOptions {
   /** A number format code, applied to the cell being written. */
   readonly numberFormat?: string
 }
@@ -72,7 +79,8 @@ export interface Workbook {
   readonly sheets: readonly Worksheet[]
   /** Undefined when no sheet has that name. Names are compared exactly. */
   sheet(name: string): Worksheet | undefined
-  readonly date1904: boolean
+  /** Which year serials count from. A 1904 workbook is 1462 days behind. */
+  readonly epoch: 1900 | 1904
   /** Parts that were never interpreted are written exactly as they were read. */
   toBytes(): Uint8Array
 }
@@ -319,6 +327,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     return {
       name: reference.name,
       state: reference.state,
+      sheetId: reference.sheetId,
       cells: () => readCells(),
       cell(cellReference: string): Cell | undefined {
         const wanted = canonicalReference(parseReference(cellReference))
@@ -335,7 +344,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         }
         return byReference.get(wanted)
       },
-      set(cellReference: string, value: CellInput, options?: WriteOptions): void {
+      set(cellReference: string, value: CellInput, options?: SetOptions): void {
         // Normalised so `a1`, `$A$1` and `A1` are one edit, and so the file
         // never receives a reference spelled the way the caller typed it.
         const canonical = formatReference(parseWritableReference(cellReference))
@@ -469,7 +478,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   return {
     sheets,
     sheet: (name: string) => sheets.find((candidate) => candidate.name === name),
-    date1904,
+    epoch: date1904 ? 1904 : 1900,
     toBytes,
   }
 }

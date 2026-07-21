@@ -7,7 +7,7 @@ import {
   assertWellFormed,
 } from '../testing/invariants.js'
 import { dateToSerial } from './date.js'
-import { type WriteOptions, readWorkbook } from './document.js'
+import { type SetOptions, readWorkbook } from './document.js'
 import { XlsxError } from './errors.js'
 import type { CellInput } from './patch.js'
 import { indexToColumn } from './reference.js'
@@ -30,7 +30,7 @@ function randomSource(seed: number) {
   }
 }
 
-type Edit = readonly [string, CellInput, WriteOptions?]
+type Edit = readonly [string, CellInput, SetOptions?]
 
 function makeEdits(next: () => number, count: number): Edit[] {
   const values: CellInput[] = [
@@ -60,7 +60,7 @@ function makeEdits(next: () => number, count: number): Edit[] {
 
   // A format is refused after the value itself has been checked, which is the
   // only way to reach a refusal that arrives once the edit is already in hand.
-  const formats: Array<WriteOptions | undefined> = [
+  const formats: Array<SetOptions | undefined> = [
     undefined,
     undefined,
     undefined,
@@ -215,7 +215,7 @@ test('every edited cell reads back as it was written', async () => {
             : cell?.value.kind === 'number'
               ? cell.value.value
               : undefined
-        assert.equal(stored, dateToSerial(value, workbook.date1904), `${file} ${reference}`)
+        assert.equal(stored, dateToSerial(value, workbook.epoch === 1904), `${file} ${reference}`)
       } else {
         // A formula carries no computed result, so only the expression is kept.
         assert.equal(cell?.formula, value.formula, `${file} ${reference}`)
