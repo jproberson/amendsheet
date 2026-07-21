@@ -5,17 +5,33 @@ import { findUnwritableCharacter, readXml } from './xml.js'
  * One string may be split across formatting runs, and `rPh` runs hold phonetic
  * guides that look like text but are not part of the value.
  */
-export function readSharedStrings(xml: string): readonly string[] {
-  const strings: string[] = []
+interface SharedString {
+  readonly text: string
+  /**
+   * A single unformatted `t`. An entry built from runs, or carrying a phonetic
+   * guide, reads as the same text but carries formatting with it, so a write
+   * must not be pointed at one.
+   */
+  readonly plain: boolean
+}
+
+function readEntries(xml: string): readonly SharedString[] {
+  const entries: SharedString[] = []
 
   let current: string[] | null = null
+  let plain = true
   let inPhonetic = false
   let inText = false
 
   for (const event of readXml(xml)) {
     if (event.kind === 'open') {
-      if (event.localName === 'si') current = []
-      else if (event.localName === 'rPh') inPhonetic = true
+      if (event.localName === 'si') {
+        current = []
+        plain = true
+      } else if (event.localName === 'rPh') {
+        inPhonetic = true
+        plain = false
+      } else if (event.localName === 'r') plain = false
       else if (event.localName === 't' && !event.selfClosing) inText = !inPhonetic
       continue
     }
@@ -28,12 +44,16 @@ export function readSharedStrings(xml: string): readonly string[] {
     if (event.localName === 't') inText = false
     else if (event.localName === 'rPh') inPhonetic = false
     else if (event.localName === 'si' && current !== null) {
-      strings.push(current.join(''))
+      entries.push({ text: current.join(''), plain })
       current = null
     }
   }
 
-  return strings
+  return entries
+}
+
+export function readSharedStrings(xml: string): readonly string[] {
+  return readEntries(xml).map((entry) => entry.text)
 }
 
 export interface AppendedStrings {
@@ -75,10 +95,10 @@ function bumpAttribute(openTag: string, name: string, by: number): string {
  * string lives. Existing entries are copied through untouched.
  */
 export function appendSharedStrings(xml: string, strings: readonly string[]): AppendedStrings {
-  const existing = readSharedStrings(xml)
+  const existing = readEntries(xml)
   const indexes = new Map<string, number>()
-  for (const [index, value] of existing.entries()) {
-    if (!indexes.has(value)) indexes.set(value, index)
+  for (const [index, entry] of existing.entries()) {
+    if (entry.plain && !indexes.has(entry.text)) indexes.set(entry.text, index)
   }
 
   let openTag = ''

@@ -216,3 +216,20 @@ test('counts references even when uniqueCount comes first', () => {
   assert.match(result.xml, /count="2"/)
   assert.match(result.xml, /uniqueCount="2"/)
 })
+
+test('does not reuse an entry whose text is assembled from formatted runs', () => {
+  // Reusing it would give the newly written cell the bold run's formatting,
+  // which nothing the caller did asked for.
+  const xml = sst('<si><r><rPr><b/></rPr><t>To</t></r><r><t>tal</t></r></si>')
+
+  const appended = appendSharedStrings(xml, ['Total'])
+
+  assert.equal(appended.indexes.get('Total'), 1)
+  assert.match(appended.xml, /<si><t>Total<\/t><\/si>/)
+})
+
+test('does not reuse an entry carrying a phonetic guide', () => {
+  const xml = sst('<si><t>Total</t><rPh sb="0" eb="2"><t>guide</t></rPh></si>')
+
+  assert.equal(appendSharedStrings(xml, ['Total']).indexes.get('Total'), 1)
+})
