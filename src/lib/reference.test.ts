@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { XlsxError } from './errors.js'
 import {
   columnToIndex,
   formatReference,
@@ -92,4 +93,20 @@ test('refuses to write to row zero', () => {
 
 test('still reads a row zero reference, which real files contain', () => {
   assert.deepEqual(parseReference('A0'), { row: 0, column: 1 })
+})
+
+test('refuses letters that do not name a column', () => {
+  for (const letters of ['', 'a1', '1', ' A', 'A ']) {
+    assert.throws(
+      () => columnToIndex(letters),
+      (error: unknown) =>
+        error instanceof XlsxError && error.code === 'bad-reference' && error.reference === letters,
+      `"${letters}" is not a column`,
+    )
+  }
+})
+
+test('still converts a column past the last one a sheet can hold', () => {
+  // parseReference is lenient on purpose, and it converts through here.
+  assert.equal(columnToIndex('XFE'), 16385)
 })

@@ -1042,3 +1042,18 @@ test('reports the sheetId the workbook part gives a sheet', () => {
 
   assert.equal(workbook.sheets[0]?.sheetId, '1')
 })
+
+test('reports a cell reference canonically however the file spelled it', () => {
+  // The file's own spelling made cell.reference disagree with what set() and
+  // formatReference produce, so a caller keying a map on it missed.
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="$a$1"><v>1</v></c><c r="B1"><v>2</v></c></row>'),
+  )
+  const cells = [...(workbook.sheets[0]?.cells() ?? [])]
+
+  assert.deepEqual(
+    cells.map((cell) => cell.reference),
+    ['A1', 'B1'],
+  )
+  assert.equal(workbook.sheets[0]?.cell('A1')?.reference, 'A1')
+})

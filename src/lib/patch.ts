@@ -21,10 +21,25 @@ const escapeXml = (text: string) =>
     .replace(/\r/g, '&#13;')
 
 /**
- * Every refusal writing a cell can make, so `set()` can make it at the call
- * instead of leaving a workbook that only fails once it is saved.
+ * A formula, or a refusal. Types stop a TypeScript caller passing anything
+ * else; a JS caller, a JSON payload or an `any` at a boundary reach here, and
+ * reading `.formula` off them threw outside the error contract.
  */
-export function checkWritable(reference: string, value: CellInput, date1904: boolean): void {
+function formulaOf(value: object, reference: string): string {
+  if ('formula' in value && typeof value.formula === 'string') return value.formula
+  throw new XlsxError(
+    'unwritable-value',
+    `Cell ${reference} was given an object that names no string formula`,
+    { reference },
+  )
+}
+
+/**
+ * Every refusal writing a cell can make, so `set()` can make it at the call
+ * instead of leaving a workbook that only fails once it is saved. Takes
+ * `unknown` because it is the boundary the value has to get past.
+ */
+export function checkWritable(reference: string, value: unknown, date1904: boolean): void {
   if (value === null || typeof value === 'boolean') return
 
   if (typeof value === 'number') {
@@ -41,7 +56,17 @@ export function checkWritable(reference: string, value: CellInput, date1904: boo
     return
   }
 
-  const unwritable = findUnwritableCharacter(typeof value === 'string' ? value : value.formula)
+  if (typeof value !== 'string' && (typeof value !== 'object' || value === null)) {
+    throw new XlsxError(
+      'unwritable-value',
+      `Cell ${reference} cannot hold a value of type ${typeof value}`,
+      { reference },
+    )
+  }
+
+  const unwritable = findUnwritableCharacter(
+    typeof value === 'string' ? value : formulaOf(value, reference),
+  )
   if (unwritable !== undefined) {
     throw new XlsxError(
       'unwritable-value',

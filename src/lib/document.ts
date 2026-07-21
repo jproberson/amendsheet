@@ -35,6 +35,11 @@ export type CellValue =
 
 export interface Cell {
   readonly address: CellAddress
+  /**
+   * Canonical, so it always equals `formatReference(cell.address)`. The one
+   * exception is an address no column letter can name, which a lenient read
+   * accepts and which keeps the spelling the file gave it.
+   */
   readonly reference: string
   readonly value: CellValue
   readonly formula?: string
@@ -221,7 +226,9 @@ function toCell(raw: RawCell, styles: Styles, date1904: boolean): Cell {
 
   return {
     address: raw.address,
-    reference: raw.reference,
+    // Not the file's spelling: $A$1 and a1 are the same cell, and a caller that
+    // cross-references this against set() or formatReference needs one answer.
+    reference: canonicalReference(raw.address) ?? raw.reference,
     value,
     ...(raw.formula === undefined ? {} : { formula: raw.formula }),
     ...(numberFormat === undefined ? {} : { numberFormat }),

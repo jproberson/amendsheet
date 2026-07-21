@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { type CellInput, patchSheet } from './patch.js'
+import { type CellInput, checkWritable, patchSheet } from './patch.js'
+import { XlsxError } from './errors.js'
 
 const sheet = (rows: string) =>
   `<?xml version="1.0"?><worksheet xmlns="http://x"><cols><col min="1" max="1" width="20"/></cols>` +
@@ -320,4 +321,17 @@ test('allows writing a cell inside an array range that is not the anchor', () =>
   )
 
   assert.match(patchSheet(spilling, new Map<string, CellInput>([['B1', 5]]), false), /<v>5<\/v>/)
+})
+
+test('refuses an object that is not a date and names no formula', () => {
+  // A JS caller, a JSON payload or an any at a boundary reaches here, and
+  // reading .formula off it threw a TypeError, outside the error contract.
+  for (const value of [{}, { formula: 5 }, []]) {
+    assert.throws(
+      () => checkWritable('A1', value, false),
+      (error: unknown) =>
+        error instanceof XlsxError && error.code === 'unwritable-value' && error.reference === 'A1',
+      `${JSON.stringify(value)} is not a cell value`,
+    )
+  }
 })

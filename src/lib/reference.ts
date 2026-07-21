@@ -16,8 +16,18 @@ const isLetter = (character: string) =>
 
 const isDigit = (character: string) => character >= '0' && character <= '9'
 
-/** Bijective base 26: there is no zero digit, so A-Z then AA, not A-Z then BA. */
+/**
+ * Bijective base 26: there is no zero digit, so A-Z then AA, not A-Z then BA.
+ * The result may be past the last column a sheet can hold, because reading is
+ * lenient and this is the conversion reading goes through.
+ */
 export function columnToIndex(letters: string): number {
+  if (letters === '' || !Array.from(letters).every(isLetter)) {
+    throw new XlsxError('bad-reference', `"${letters}" does not name a column`, {
+      reference: letters,
+    })
+  }
+
   let index = 0
   for (const letter of letters.toUpperCase()) {
     index = index * 26 + (letter.charCodeAt(0) - LETTER_A + 1)
