@@ -25,12 +25,13 @@ const ROOT_RELATIONSHIPS = `<?xml version="1.0" encoding="UTF-8" standalone="yes
 
 const WORKBOOK_RELATIONSHIPS = (
   hasSharedStrings: boolean,
+  extra = '',
 ) => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
 <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
 <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
 ${hasSharedStrings ? '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>' : ''}
-</Relationships>`
+${extra}</Relationships>`
 
 const WORKBOOK = (date1904: boolean) => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
@@ -61,21 +62,27 @@ function buildWorkbook(options: {
   sheetXml: string
   sharedStrings?: string
   date1904?: boolean
+  /** Extra content type declarations, and the parts they describe. */
+  contentTypes?: string
+  extraRelationships?: string
+  extraParts?: Record<string, Uint8Array>
 }): Uint8Array {
   const { sharedStrings } = options
+  const declared = (sharedStrings ? SHARED_STRINGS_CONTENT_TYPE : '') + (options.contentTypes ?? '')
   const parts: Record<string, Uint8Array> = {
-    '[Content_Types].xml': encodeText(
-      CONTENT_TYPES(sharedStrings ? SHARED_STRINGS_CONTENT_TYPE : ''),
-    ),
+    '[Content_Types].xml': encodeText(CONTENT_TYPES(declared)),
     '_rels/.rels': encodeText(ROOT_RELATIONSHIPS),
     'xl/workbook.xml': encodeText(WORKBOOK(options.date1904 ?? false)),
-    'xl/_rels/workbook.xml.rels': encodeText(WORKBOOK_RELATIONSHIPS(sharedStrings !== undefined)),
+    'xl/_rels/workbook.xml.rels': encodeText(
+      WORKBOOK_RELATIONSHIPS(sharedStrings !== undefined, options.extraRelationships ?? ''),
+    ),
     'xl/styles.xml': encodeText(STYLES),
     'xl/worksheets/sheet1.xml': encodeText(options.sheetXml),
   }
   if (sharedStrings !== undefined) {
     parts['xl/sharedStrings.xml'] = encodeText(sharedStrings)
   }
+  for (const [path, bytes] of Object.entries(options.extraParts ?? {})) parts[path] = bytes
   return writeParts(parts)
 }
 
@@ -84,7 +91,34 @@ const sharedStringTable = (items: string[]) =>
 <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="${items.length}" uniqueCount="${items.length}">
 ${items.map((s) => `<si><t>${s}</t></si>`).join('')}</sst>`
 
-export const QUIRKS: Array<{ name: string; description: string; build: () => Uint8Array }> = [
+export const QUIRKS: Array<{
+  name: string
+  description: string
+  /** Defaults to xlsx. A macro-bearing workbook has to be xlsm to be legal. */
+  extension?: string
+  build: () => Uint8Array
+}> = [
+  {
+    name: 'macro-enabled',
+    description: 'A macro project, which is a binary part the library never interprets',
+    extension: 'xlsm',
+    build: () =>
+      buildWorkbook({
+        sheetXml: sheet(`<row r="1"><c r="A1"><v>1</v></c></row>`, 'A1:A1'),
+        contentTypes:
+          '<Default Extension="bin" ContentType="application/vnd.ms-office.vbaProject"/>\n' +
+          '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.ms-excel.sheet.macroEnabled.main+xml"/>\n',
+        extraRelationships:
+          '<Relationship Id="rId9" Type="http://schemas.microsoft.com/office/2006/relationships/vbaProject" Target="vbaProject.bin"/>\n',
+        // Not a real compiled project. What is being measured is that a binary
+        // part the library has no opinion about survives byte for byte.
+        extraParts: {
+          'xl/vbaProject.bin': new Uint8Array([
+            0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0x00, 0x01, 0x02, 0x03, 0xfe, 0xff,
+          ]),
+        },
+      }),
+  },
   {
     name: 'inline-strings',
     description: 'Text stored as t="inlineStr" rather than in the shared string table',

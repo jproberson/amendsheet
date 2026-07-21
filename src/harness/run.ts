@@ -17,7 +17,7 @@ async function findFiles(dir: string): Promise<string[]> {
   for (const entry of entries) {
     const full = join(dir, entry.name)
     if (entry.isDirectory()) found.push(...(await findFiles(full)))
-    else if (entry.name.endsWith('.xlsx') && !entry.name.startsWith('~$')) found.push(full)
+    else if (/\.xlsm?x?$/.test(entry.name) && !entry.name.startsWith('~$')) found.push(full)
   }
   return found.sort()
 }

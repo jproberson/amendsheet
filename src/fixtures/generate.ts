@@ -124,9 +124,10 @@ async function main() {
   written.push('generated/simple-exceljs.xlsx')
 
   for (const quirk of QUIRKS) {
-    const file = join(FIXTURES_DIR, 'quirks', `${quirk.name}.xlsx`)
+    const extension = quirk.extension ?? 'xlsx'
+    const file = join(FIXTURES_DIR, 'quirks', `${quirk.name}.${extension}`)
     await writeFile(file, quirk.build())
-    written.push(`quirks/${quirk.name}.xlsx`)
+    written.push(`quirks/${quirk.name}.${extension}`)
   }
 
   await writeFile(
