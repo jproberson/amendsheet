@@ -15,7 +15,7 @@ const PHANTOM_LEAP_DAY = 60
 
 export function serialToDate(serial: number, date1904: boolean): Date {
   if (!Number.isFinite(serial) || serial < 0) {
-    throw new XlsxError(`Serial ${serial} is not a date`)
+    throw new XlsxError('unwritable-value', `Serial ${serial} is not a date`)
   }
 
   if (date1904) {
@@ -28,7 +28,7 @@ export function serialToDate(serial: number, date1904: boolean): Date {
 
 export function dateToSerial(date: Date, date1904: boolean): number {
   const time = date.getTime()
-  if (Number.isNaN(time)) throw new XlsxError('Invalid date cannot be written')
+  if (Number.isNaN(time)) throw new XlsxError('unwritable-value', 'Invalid date cannot be written')
 
   if (date1904) return (time - EPOCH_1904) / MILLISECONDS_PER_DAY
 

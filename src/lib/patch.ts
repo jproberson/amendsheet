@@ -32,7 +32,11 @@ function cellElement(
     }
     const unwritable = findUnwritableCharacter(value)
     if (unwritable !== undefined) {
-      throw new XlsxError(`Cell ${reference} holds ${unwritable}, which cannot be written to xml`)
+      throw new XlsxError(
+        'unwritable-value',
+        `Cell ${reference} holds ${unwritable}, which cannot be written to xml`,
+        { reference },
+      )
     }
     const space = value === value.trim() ? '' : ' xml:space="preserve"'
     return (
@@ -47,7 +51,7 @@ function cellElement(
     return `<${c} r="${reference}"${attributes}><${v}>${dateToSerial(value, date1904)}</${v}></${c}>`
   }
   if (!Number.isFinite(value)) {
-    throw new XlsxError(`Cell ${reference} cannot hold ${value}`)
+    throw new XlsxError('unwritable-value', `Cell ${reference} cannot hold ${value}`, { reference })
   }
   return `<${c} r="${reference}"${attributes}><${v}>${value}</${v}></${c}>`
 }
@@ -184,7 +188,8 @@ function readShape(xml: string): SheetShape {
     }
   }
 
-  if (dataStart === -1) throw new XlsxError('Sheet has no sheetData element to write into')
+  if (dataStart === -1)
+    throw new XlsxError('malformed-xml', 'Sheet has no sheetData element to write into')
 
   return { prefix, dimension, rows, contentEnd, selfClosing, dataStart, dataEnd }
 }

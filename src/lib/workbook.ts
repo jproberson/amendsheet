@@ -27,24 +27,29 @@ export interface WorkbookPart {
 
 function partText(container: Container, path: string): string {
   const bytes = container.parts.get(path)
-  if (bytes === undefined) throw new XlsxError(`Missing part ${path}`, { part: path })
+  if (bytes === undefined)
+    throw new XlsxError('missing-part', `Missing part ${path}`, { part: path })
   try {
     return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
   } catch (cause) {
-    throw new XlsxError(`Part ${path} is not valid utf-8`, { part: path, cause })
+    throw new XlsxError('unreadable-part', `Part ${path} is not valid utf-8`, { part: path, cause })
   }
 }
 
 function findWorkbookPath(container: Container): string {
   if (!container.parts.has(ROOT_RELATIONSHIPS)) {
-    throw new XlsxError(`Missing part ${ROOT_RELATIONSHIPS}`, { part: ROOT_RELATIONSHIPS })
+    throw new XlsxError('missing-part', `Missing part ${ROOT_RELATIONSHIPS}`, {
+      part: ROOT_RELATIONSHIPS,
+    })
   }
 
   for (const relationship of readRelationships(partText(container, ROOT_RELATIONSHIPS)).values()) {
     if (relationship.type === OFFICE_DOCUMENT) return resolveTarget('', relationship.target)
   }
 
-  throw new XlsxError('Package declares no workbook part', { part: ROOT_RELATIONSHIPS })
+  throw new XlsxError('missing-part', 'Package declares no workbook part', {
+    part: ROOT_RELATIONSHIPS,
+  })
 }
 
 function toSheetState(value: string | undefined): SheetState {

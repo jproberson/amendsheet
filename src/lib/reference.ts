@@ -27,7 +27,9 @@ export function columnToIndex(letters: string): number {
 
 export function indexToColumn(index: number): string {
   if (index < 1 || index > LAST_COLUMN) {
-    throw new XlsxError(`Column ${index} is outside the sheet`)
+    throw new XlsxError('bad-reference', `Column ${index} is outside the sheet`, {
+      reference: String(index),
+    })
   }
 
   let letters = ''
@@ -56,7 +58,7 @@ export function parseReference(reference: string): CellAddress {
   const digits = reference.slice(digitsStart, index)
 
   if (letters === '' || digits === '' || index !== reference.length) {
-    throw new XlsxError(`"${reference}" is not a cell reference`)
+    throw new XlsxError('bad-reference', `"${reference}" is not a cell reference`, { reference })
   }
 
   return { row: Number(digits), column: columnToIndex(letters) }
@@ -71,7 +73,7 @@ export function parseWritableReference(reference: string): CellAddress {
   const address = parseReference(reference)
   const { row, column } = address
   if (row < 1 || row > LAST_ROW || column < 1 || column > LAST_COLUMN) {
-    throw new XlsxError(`"${reference}" is outside the sheet`)
+    throw new XlsxError('bad-reference', `"${reference}" is outside the sheet`, { reference })
   }
   return address
 }

@@ -82,14 +82,20 @@ function parseAttributes(source: string, tagStart: number): ReadonlyMap<string, 
 
     while (index < source.length && isWhitespace(source.charAt(index))) index++
     if (source.charAt(index) !== '=') {
-      throw new XlsxError(`Attribute "${name}" has no value, at offset ${tagStart}`)
+      throw new XlsxError(
+        'malformed-xml',
+        `Attribute "${name}" has no value, at offset ${tagStart}`,
+      )
     }
     index++
 
     while (index < source.length && isWhitespace(source.charAt(index))) index++
     const quote = source.charAt(index)
     if (quote !== '"' && quote !== "'") {
-      throw new XlsxError(`Attribute "${name}" is not quoted, at offset ${tagStart}`)
+      throw new XlsxError(
+        'malformed-xml',
+        `Attribute "${name}" is not quoted, at offset ${tagStart}`,
+      )
     }
     index++
 
@@ -136,33 +142,40 @@ export function* readXml(source: string): Generator<XmlEvent> {
 
     if (source.startsWith('<![CDATA[', position)) {
       const end = source.indexOf(']]>', position)
-      if (end === -1) throw new XlsxError(`Unterminated CDATA at offset ${position}`)
+      if (end === -1)
+        throw new XlsxError('malformed-xml', `Unterminated CDATA at offset ${position}`)
       yield { kind: 'text', text: source.slice(position + 9, end), start: position, end: end + 3 }
       position = end + 3
       continue
     }
     if (source.startsWith('<!--', position)) {
       const end = source.indexOf('-->', position)
-      if (end === -1) throw new XlsxError(`Unterminated comment at offset ${position}`)
+      if (end === -1)
+        throw new XlsxError('malformed-xml', `Unterminated comment at offset ${position}`)
       position = end + 3
       continue
     }
     if (source.startsWith('<?', position)) {
       const end = source.indexOf('?>', position)
       if (end === -1)
-        throw new XlsxError(`Unterminated processing instruction at offset ${position}`)
+        throw new XlsxError(
+          'malformed-xml',
+          `Unterminated processing instruction at offset ${position}`,
+        )
       position = end + 2
       continue
     }
     if (source.startsWith('<!', position)) {
       const end = findTagEnd(source, position)
-      if (end === -1) throw new XlsxError(`Unterminated declaration at offset ${position}`)
+      if (end === -1)
+        throw new XlsxError('malformed-xml', `Unterminated declaration at offset ${position}`)
       position = end + 1
       continue
     }
 
     const tagEnd = findTagEnd(source, position)
-    if (tagEnd === -1) throw new XlsxError(`Unclosed tag starting at offset ${position}`)
+    if (tagEnd === -1)
+      throw new XlsxError('malformed-xml', `Unclosed tag starting at offset ${position}`)
 
     const inner = source.slice(position + 1, tagEnd)
     position = tagEnd + 1

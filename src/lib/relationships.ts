@@ -17,10 +17,11 @@ export function readRelationships(xml: string): ReadonlyMap<string, Relationship
     if (event.kind !== 'open' || event.localName !== 'Relationship') continue
 
     const id = event.attributes.get('Id')
-    if (id === undefined) throw new XlsxError('Relationship is missing Id')
+    if (id === undefined) throw new XlsxError('malformed-xml', 'Relationship is missing Id')
 
     const target = event.attributes.get('Target')
-    if (target === undefined) throw new XlsxError(`Relationship ${id} is missing Target`)
+    if (target === undefined)
+      throw new XlsxError('malformed-xml', `Relationship ${id} is missing Target`)
 
     relationships.set(id, {
       id,

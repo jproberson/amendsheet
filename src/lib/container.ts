@@ -11,7 +11,9 @@ export function readContainer(bytes: Uint8Array): Container {
   try {
     entries = unzipSync(bytes)
   } catch (cause) {
-    throw new XlsxError('File is not a zip archive, so it cannot be an .xlsx file', { cause })
+    throw new XlsxError('not-a-zip', 'File is not a zip archive, so it cannot be an .xlsx file', {
+      cause,
+    })
   }
 
   const parts = new Map<string, Uint8Array>()

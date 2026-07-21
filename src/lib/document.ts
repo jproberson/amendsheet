@@ -39,7 +39,7 @@ export interface Worksheet {
    * Every cell the sheet stores. A cell that was cleared, or that carries only
    * formatting, is still stored, and arrives with a value of `kind: 'empty'`.
    */
-  cells(): Generator<Cell>
+  cells(): IterableIterator<Cell>
   /** Undefined when the sheet stores nothing at that reference. */
   cell(reference: string): Cell | undefined
   /** Visible to `cells()` and `cell()` immediately, written by `toBytes()`. */
@@ -76,7 +76,7 @@ function partText(container: Container, path: string): string | undefined {
   try {
     return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
   } catch (cause) {
-    throw new XlsxError(`Part ${path} is not valid utf-8`, { part: path, cause })
+    throw new XlsxError('unreadable-part', `Part ${path} is not valid utf-8`, { part: path, cause })
   }
 }
 

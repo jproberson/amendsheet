@@ -3,6 +3,7 @@ import { readFile, readdir } from 'node:fs/promises'
 import { test } from 'node:test'
 import { readContainer, writeContainer } from './container.js'
 import { readWorkbook } from './document.js'
+import { XlsxError } from './errors.js'
 
 const encode = (text: string) => new TextEncoder().encode(text)
 
@@ -522,4 +523,30 @@ test('reports which part is not valid utf-8 when it is not the workbook', () => 
   ])
 
   assert.throws(() => readWorkbook(writeContainer({ parts })), /sharedStrings\.xml is not valid/)
+})
+
+test('an error carries a code and the part it came from', () => {
+  const parts = new Map([['xl/workbook.xml', encode('<workbook/>')]])
+
+  try {
+    readWorkbook(writeContainer({ parts }))
+    assert.fail('expected a failure')
+  } catch (error) {
+    assert.ok(error instanceof XlsxError)
+    assert.equal(error.code, 'missing-part')
+    assert.equal(error.part, '_rels/.rels')
+  }
+})
+
+test('a bad reference names itself', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+
+  try {
+    workbook.sheets[0]?.set('nonsense', 1)
+    assert.fail('expected a failure')
+  } catch (error) {
+    assert.ok(error instanceof XlsxError)
+    assert.equal(error.code, 'bad-reference')
+    assert.equal(error.reference, 'nonsense')
+  }
 })

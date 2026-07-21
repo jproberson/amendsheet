@@ -48,7 +48,10 @@ const escapeXml = (text: string) =>
 function entryFor(value: string): string {
   const unwritable = findUnwritableCharacter(value)
   if (unwritable !== undefined) {
-    throw new XlsxError(`A string holds ${unwritable}, which cannot be written to xml`)
+    throw new XlsxError(
+      'unwritable-value',
+      `A string holds ${unwritable}, which cannot be written to xml`,
+    )
   }
   const needsPreserve = value !== value.trim()
   const attributes = needsPreserve ? ' xml:space="preserve"' : ''
@@ -108,7 +111,8 @@ export function appendSharedStrings(xml: string, strings: readonly string[]): Ap
     }
   }
 
-  if (insertAt === -1) throw new XlsxError('Shared string table has no sst element')
+  if (insertAt === -1)
+    throw new XlsxError('malformed-xml', 'Shared string table has no sst element')
 
   const updatedTag = bumpAttribute(
     bumpAttribute(openTag, 'uniqueCount', additions.length),
