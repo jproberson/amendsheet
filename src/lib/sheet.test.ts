@@ -195,3 +195,18 @@ test('does not take phonetic guides as inline string content', () => {
 
   assert.deepEqual(cell?.value, { kind: 'text', value: '東京' })
 })
+
+test('reads a sheet whose elements carry a namespace prefix', () => {
+  const xml =
+    '<x:worksheet><x:sheetData><x:row r="1">' +
+    '<x:c r="A1"><x:v>1</x:v></x:c><x:c r="B1" t="inlineStr"><x:is><x:t>hi</x:t></x:is></x:c>' +
+    '</x:row></x:sheetData></x:worksheet>'
+
+  const found = [...readSheet(xml, [])]
+
+  assert.deepEqual(
+    found.map((cell) => cell.reference),
+    ['A1', 'B1'],
+  )
+  assert.deepEqual(found[1]?.value, { kind: 'text', value: 'hi' })
+})

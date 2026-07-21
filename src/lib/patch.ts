@@ -18,32 +18,38 @@ function cellElement(
   style: string | undefined,
   date1904: boolean,
   sharedStrings: ReadonlyMap<string, number> | undefined,
+  prefix: string,
 ): string {
   const attributes = style === undefined ? '' : ` s="${style}"`
+  const c = `${prefix}c`
+  const v = `${prefix}v`
 
-  if (value === null) return `<c r="${reference}"${attributes}/>`
+  if (value === null) return `<${c} r="${reference}"${attributes}/>`
   if (typeof value === 'string') {
     const shared = sharedStrings?.get(value)
     if (shared !== undefined) {
-      return `<c r="${reference}"${attributes} t="s"><v>${shared}</v></c>`
+      return `<${c} r="${reference}"${attributes} t="s"><${v}>${shared}</${v}></${c}>`
     }
     const unwritable = findUnwritableCharacter(value)
     if (unwritable !== undefined) {
       throw new XlsxError(`Cell ${reference} holds ${unwritable}, which cannot be written to xml`)
     }
     const space = value === value.trim() ? '' : ' xml:space="preserve"'
-    return `<c r="${reference}"${attributes} t="inlineStr"><is><t${space}>${escapeXml(value)}</t></is></c>`
+    return (
+      `<${c} r="${reference}"${attributes} t="inlineStr">` +
+      `<${prefix}is><${prefix}t${space}>${escapeXml(value)}</${prefix}t></${prefix}is></${c}>`
+    )
   }
   if (typeof value === 'boolean') {
-    return `<c r="${reference}"${attributes} t="b"><v>${value ? 1 : 0}</v></c>`
+    return `<${c} r="${reference}"${attributes} t="b"><${v}>${value ? 1 : 0}</${v}></${c}>`
   }
   if (value instanceof Date) {
-    return `<c r="${reference}"${attributes}><v>${dateToSerial(value, date1904)}</v></c>`
+    return `<${c} r="${reference}"${attributes}><${v}>${dateToSerial(value, date1904)}</${v}></${c}>`
   }
   if (!Number.isFinite(value)) {
     throw new XlsxError(`Cell ${reference} cannot hold ${value}`)
   }
-  return `<c r="${reference}"${attributes}><v>${value}</v></c>`
+  return `<${c} r="${reference}"${attributes}><${v}>${value}</${v}></${c}>`
 }
 
 interface CellSpan {
@@ -71,6 +77,8 @@ interface DimensionSpan {
 }
 
 interface SheetShape {
+  /** Namespace prefix the document writes its elements with, `x:` or empty. */
+  readonly prefix: string
   readonly dimension: DimensionSpan | undefined
   readonly rows: RowSpan[]
   /** Offset just before `</sheetData>`, where a new row is appended. */
@@ -88,6 +96,7 @@ function readShape(xml: string): SheetShape {
   let dataEnd = -1
   let selfClosing = false
 
+  let prefix = ''
   let currentRow: { row: number; start: number } | undefined
   let currentCells: CellSpan[] = []
   let cellStart = -1
@@ -97,12 +106,14 @@ function readShape(xml: string): SheetShape {
 
   for (const event of readXml(xml)) {
     if (event.kind === 'open') {
-      if (event.name === 'dimension') {
+      if (event.localName === 'dimension') {
         const ref = event.attributes.get('ref')
         if (ref !== undefined) dimension = { start: event.start, end: event.end, ref }
         continue
       }
-      if (event.name === 'sheetData') {
+      if (event.localName === 'sheetData') {
+        const colon = event.name.indexOf(':')
+        prefix = colon === -1 ? '' : event.name.slice(0, colon + 1)
         dataStart = event.start
         selfClosing = event.selfClosing
         if (selfClosing) {
@@ -111,7 +122,7 @@ function readShape(xml: string): SheetShape {
         }
         continue
       }
-      if (event.name === 'row') {
+      if (event.localName === 'row') {
         const declared = event.attributes.get('r')
         currentRow = {
           row: declared === undefined ? rows.length + 1 : Number(declared),
@@ -131,7 +142,7 @@ function readShape(xml: string): SheetShape {
         }
         continue
       }
-      if (event.name === 'c') {
+      if (event.localName === 'c') {
         const reference = event.attributes.get('r')
         cellColumn = reference === undefined ? cellColumn + 1 : parseReference(reference).column
         cellStyle = event.attributes.get('s')
@@ -151,12 +162,12 @@ function readShape(xml: string): SheetShape {
 
     if (event.kind !== 'close') continue
 
-    if (event.name === 'c' && openCell) {
+    if (event.localName === 'c' && openCell) {
       currentCells.push({ column: cellColumn, start: cellStart, end: event.end, style: cellStyle })
       openCell = false
       continue
     }
-    if (event.name === 'row' && currentRow !== undefined) {
+    if (event.localName === 'row' && currentRow !== undefined) {
       rows.push({
         ...currentRow,
         contentEnd: event.start,
@@ -167,7 +178,7 @@ function readShape(xml: string): SheetShape {
       currentRow = undefined
       continue
     }
-    if (event.name === 'sheetData') {
+    if (event.localName === 'sheetData') {
       contentEnd = event.start
       dataEnd = event.end
     }
@@ -175,7 +186,7 @@ function readShape(xml: string): SheetShape {
 
   if (dataStart === -1) throw new XlsxError('Sheet has no sheetData element to write into')
 
-  return { dimension, rows, contentEnd, selfClosing, dataStart, dataEnd }
+  return { prefix, dimension, rows, contentEnd, selfClosing, dataStart, dataEnd }
 }
 
 interface Splice {
@@ -214,7 +225,14 @@ export function patchSheet(
     if (existingRow === undefined) {
       const pending = newRows.get(row) ?? []
       pending.push(
-        cellElement(reference, value, styleFor(reference, undefined), date1904, sharedStrings),
+        cellElement(
+          reference,
+          value,
+          styleFor(reference, undefined),
+          date1904,
+          sharedStrings,
+          shape.prefix,
+        ),
       )
       newRows.set(row, pending)
       continue
@@ -231,6 +249,7 @@ export function patchSheet(
           styleFor(reference, existingCell.style),
           date1904,
           sharedStrings,
+          shape.prefix,
         ),
         order: column,
       })
@@ -243,6 +262,7 @@ export function patchSheet(
       styleFor(reference, undefined),
       date1904,
       sharedStrings,
+      shape.prefix,
     )
 
     if (existingRow.selfClosing) {
@@ -250,7 +270,7 @@ export function patchSheet(
       splices.push({
         start: existingRow.start,
         end: existingRow.end,
-        text: `${openTag.slice(0, -2)}>${cell}</row>`,
+        text: `${openTag.slice(0, -2)}>${cell}</${shape.prefix}row>`,
         order: column,
       })
       continue
@@ -267,7 +287,7 @@ export function patchSheet(
       .sort((a, b) => a.column - b.column)
       .map((entry) => entry.text)
       .join('')
-    return `<row r="${row}">${ordered}</row>`
+    return `<${shape.prefix}row r="${row}">${ordered}</${shape.prefix}row>`
   }
 
   if (shape.selfClosing && newRows.size > 0) {
@@ -278,7 +298,7 @@ export function patchSheet(
     splices.push({
       start: shape.dataStart,
       end: shape.dataEnd,
-      text: `<sheetData>${body}</sheetData>`,
+      text: `<${shape.prefix}sheetData>${body}</${shape.prefix}sheetData>`,
       order: 0,
     })
   } else {
@@ -294,7 +314,7 @@ export function patchSheet(
     splices.push({
       start: shape.dimension.start,
       end: shape.dimension.end,
-      text: `<dimension ref="${widened}"/>`,
+      text: `<${shape.prefix}dimension ref="${widened}"/>`,
       order: -1,
     })
   }

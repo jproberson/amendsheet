@@ -14,9 +14,9 @@ export function readSharedStrings(xml: string): readonly string[] {
 
   for (const event of readXml(xml)) {
     if (event.kind === 'open') {
-      if (event.name === 'si') current = []
-      else if (event.name === 'rPh') inPhonetic = true
-      else if (event.name === 't' && !event.selfClosing) inText = !inPhonetic
+      if (event.localName === 'si') current = []
+      else if (event.localName === 'rPh') inPhonetic = true
+      else if (event.localName === 't' && !event.selfClosing) inText = !inPhonetic
       continue
     }
 
@@ -25,9 +25,9 @@ export function readSharedStrings(xml: string): readonly string[] {
       continue
     }
 
-    if (event.name === 't') inText = false
-    else if (event.name === 'rPh') inPhonetic = false
-    else if (event.name === 'si' && current !== null) {
+    if (event.localName === 't') inText = false
+    else if (event.localName === 'rPh') inPhonetic = false
+    else if (event.localName === 'si' && current !== null) {
       strings.push(current.join(''))
       current = null
     }
@@ -94,7 +94,7 @@ export function appendSharedStrings(xml: string, strings: readonly string[]): Ap
   let closeLength = 0
 
   for (const event of readXml(xml)) {
-    if (event.kind === 'open' && event.name === 'sst') {
+    if (event.kind === 'open' && event.localName === 'sst') {
       openTag = xml.slice(event.start, event.end)
       if (event.selfClosing) {
         insertAt = event.end
@@ -102,7 +102,7 @@ export function appendSharedStrings(xml: string, strings: readonly string[]): Ap
       }
       continue
     }
-    if (event.kind === 'close' && event.name === 'sst') {
+    if (event.kind === 'close' && event.localName === 'sst') {
       insertAt = event.start
       closeLength = 0
     }

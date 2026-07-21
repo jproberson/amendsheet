@@ -9,12 +9,15 @@ interface Span {
 export type XmlEvent =
   | (Span & {
       kind: 'open'
+      /** As written, prefix included, so the original can be reproduced. */
       name: string
+      /** Without the namespace prefix, which is the file's choice. */
+      localName: string
       attributes: ReadonlyMap<string, string>
       selfClosing: boolean
     })
   | (Span & { kind: 'text'; text: string })
-  | (Span & { kind: 'close'; name: string })
+  | (Span & { kind: 'close'; name: string; localName: string })
 
 const ENTITY = /&(?:#x([0-9a-fA-F]+)|#(\d+)|([a-zA-Z][a-zA-Z0-9]*));/g
 
@@ -100,6 +103,11 @@ function parseAttributes(source: string, tagStart: number): ReadonlyMap<string, 
   return attributes
 }
 
+const localNameOf = (name: string) => {
+  const colon = name.indexOf(':')
+  return colon === -1 ? name : name.slice(colon + 1)
+}
+
 /** Emits events rather than building a tree, so large sheets stream. */
 export function* readXml(source: string): Generator<XmlEvent> {
   let position = 0
@@ -160,7 +168,8 @@ export function* readXml(source: string): Generator<XmlEvent> {
     position = tagEnd + 1
 
     if (inner.startsWith('/')) {
-      yield { kind: 'close', name: inner.slice(1).trim(), start: tagStart, end: position }
+      const name = inner.slice(1).trim()
+      yield { kind: 'close', name, localName: localNameOf(name), start: tagStart, end: position }
       continue
     }
 
@@ -170,9 +179,11 @@ export function* readXml(source: string): Generator<XmlEvent> {
     let nameEnd = 0
     while (nameEnd < body.length && !isWhitespace(body.charAt(nameEnd))) nameEnd++
 
+    const name = body.slice(0, nameEnd)
     yield {
       kind: 'open',
-      name: body.slice(0, nameEnd),
+      name,
+      localName: localNameOf(name),
       attributes: parseAttributes(body.slice(nameEnd), tagStart),
       selfClosing,
       start: tagStart,

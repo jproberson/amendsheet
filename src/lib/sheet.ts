@@ -55,7 +55,7 @@ export function* readSheet(xml: string, sharedStrings: readonly string[]): Gener
 
   for (const event of readXml(xml)) {
     if (event.kind === 'open') {
-      switch (event.name) {
+      switch (event.localName) {
         case 'row': {
           const declared = event.attributes.get('r')
           row = declared === undefined ? row + 1 : Number(declared)
@@ -102,7 +102,7 @@ export function* readSheet(xml: string, sharedStrings: readonly string[]): Gener
       continue
     }
 
-    switch (event.name) {
+    switch (event.localName) {
       case 'v':
         inValue = false
         break

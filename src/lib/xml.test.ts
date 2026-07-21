@@ -6,10 +6,14 @@ import { type XmlEvent, readXml } from './xml.js'
 
 const events = (source: string): XmlEvent[] => [...readXml(source)]
 
-/** Offsets are asserted separately; this keeps shape assertions readable. */
+/** Offsets and local names are asserted separately; this keeps shapes readable. */
 function withoutSpan(event: XmlEvent | undefined) {
   if (event === undefined) return undefined
-  const { start: _start, end: _end, ...rest } = event
+  if (event.kind === 'text') {
+    const { start: _start, end: _end, ...rest } = event
+    return rest
+  }
+  const { start: _start, end: _end, localName: _localName, ...rest } = event
   return rest
 }
 
@@ -199,4 +203,23 @@ test('offsets cover cdata including its wrapper', () => {
   const [, text] = events(source)
 
   assert.equal(source.slice(text?.start, text?.end), '<![CDATA[x]]>')
+})
+
+test('separates a namespace prefix from the local name', () => {
+  const [first] = events('<x:sheetData r="1"/>')
+
+  assert.equal(first?.kind === 'open' && first.name, 'x:sheetData')
+  assert.equal(first?.kind === 'open' && first.localName, 'sheetData')
+})
+
+test('reports the local name on a closing tag too', () => {
+  const [, close] = events('<x:row></x:row>')
+
+  assert.equal(close?.kind === 'close' && close.localName, 'row')
+})
+
+test('leaves an unprefixed name as its own local name', () => {
+  const [first] = events('<row/>')
+
+  assert.equal(first?.kind === 'open' && first.localName, 'row')
 })

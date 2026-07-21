@@ -14,7 +14,7 @@ export function readRelationships(xml: string): ReadonlyMap<string, Relationship
   const relationships = new Map<string, Relationship>()
 
   for (const event of readXml(xml)) {
-    if (event.kind !== 'open' || event.name !== 'Relationship') continue
+    if (event.kind !== 'open' || event.localName !== 'Relationship') continue
 
     const id = event.attributes.get('Id')
     if (id === undefined) throw new XlsxError('Relationship is missing Id')

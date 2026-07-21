@@ -78,11 +78,11 @@ export function readWorkbookPart(bytes: Uint8Array): WorkbookPart {
   for (const event of readXml(workbookXml)) {
     if (event.kind !== 'open') continue
 
-    if (event.name === 'workbookPr') {
+    if (event.localName === 'workbookPr') {
       date1904 = isTrue(event.attributes.get('date1904'))
       continue
     }
-    if (event.name !== 'sheet') continue
+    if (event.localName !== 'sheet') continue
 
     const id = relationshipId(event.attributes)
     const relationship = id === undefined ? undefined : relationships.get(id)

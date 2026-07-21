@@ -134,3 +134,27 @@ test('editing a real fixture changes only the sheet and the tables it appends to
 
   assert.deepEqual(unexpected, [])
 })
+
+const PREFIXED =
+  '<x:worksheet><x:sheetData><x:row r="1"><x:c r="A1"><x:v>1</x:v></x:c></x:row></x:sheetData></x:worksheet>'
+
+test('an edit to a prefixed document keeps the prefix', () => {
+  const patched = patchSheet(PREFIXED, new Map<string, CellInput>([['A1', 2]]), false)
+
+  assertWellFormed(patched, 'prefixed replace')
+  assert.match(patched, /<x:c r="A1"><x:v>2<\/x:v><\/x:c>/)
+})
+
+test('a cell added to a prefixed document keeps the prefix', () => {
+  const patched = patchSheet(PREFIXED, new Map<string, CellInput>([['B1', 5]]), false)
+
+  assertWellFormed(patched, 'prefixed insert')
+  assert.match(patched, /<x:c r="B1"><x:v>5<\/x:v><\/x:c>/)
+})
+
+test('a row added to a prefixed document keeps the prefix', () => {
+  const patched = patchSheet(PREFIXED, new Map<string, CellInput>([['A3', 7]]), false)
+
+  assertWellFormed(patched, 'prefixed new row')
+  assert.match(patched, /<x:row r="3"><x:c r="A3"><x:v>7<\/x:v><\/x:c><\/x:row>/)
+})

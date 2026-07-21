@@ -47,29 +47,29 @@ export function readStyles(xml: string): Styles {
 
   for (const event of readXml(xml)) {
     if (event.kind === 'close') {
-      if (event.name === 'cellXfs') inCellFormats = false
-      if (event.name === 'numFmts') inNumberFormats = false
+      if (event.localName === 'cellXfs') inCellFormats = false
+      if (event.localName === 'numFmts') inNumberFormats = false
       continue
     }
     if (event.kind !== 'open') continue
 
-    if (event.name === 'numFmts') {
+    if (event.localName === 'numFmts') {
       inNumberFormats = !event.selfClosing
       continue
     }
     // dxfs carry their own numFmt elements, which would overwrite the real ones.
-    if (event.name === 'numFmt' && inNumberFormats) {
+    if (event.localName === 'numFmt' && inNumberFormats) {
       const id = Number(event.attributes.get('numFmtId'))
       const code = event.attributes.get('formatCode')
       if (!Number.isNaN(id) && code !== undefined) numberFormats.set(id, code)
       continue
     }
     // cellStyleXfs holds the same element name, so only read inside cellXfs.
-    if (event.name === 'cellXfs') {
+    if (event.localName === 'cellXfs') {
       inCellFormats = !event.selfClosing
       continue
     }
-    if (event.name === 'xf' && inCellFormats) {
+    if (event.localName === 'xf' && inCellFormats) {
       cellFormats.push(Number(event.attributes.get('numFmtId') ?? 0))
     }
   }

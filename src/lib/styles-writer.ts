@@ -31,7 +31,7 @@ function readCellFormats(xml: string): CellFormats | undefined {
   const elements: string[] = []
 
   for (const event of readXml(xml)) {
-    if (event.kind === 'open' && event.name === 'cellXfs') {
+    if (event.kind === 'open' && event.localName === 'cellXfs') {
       openTag = xml.slice(event.start, event.end)
       openStart = event.start
       openEnd = event.end
@@ -40,12 +40,12 @@ function readCellFormats(xml: string): CellFormats | undefined {
       if (selfClosing) insertAt = event.end
       continue
     }
-    if (event.kind === 'close' && event.name === 'cellXfs') {
+    if (event.kind === 'close' && event.localName === 'cellXfs') {
       insertAt = event.start
       inside = false
       continue
     }
-    if (inside && event.kind === 'open' && event.name === 'xf') {
+    if (inside && event.kind === 'open' && event.localName === 'xf') {
       elements.push(xml.slice(event.start, event.end))
     }
   }
