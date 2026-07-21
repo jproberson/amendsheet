@@ -98,7 +98,25 @@ done
 
 step "harness regression"
 if [ -d fixtures ] && find fixtures -name '*.xlsx' -print -quit | grep -q .; then
-  npm run --silent harness | tail -n 15
+  harness_output=$(npm run --silent harness)
+  printf '%s\n' "$harness_output" | grep -E 'ROUND-TRIP|SUMMARY'
+
+  # Only this library's line gates the build. The comparison adapter is printed
+  # for context and is expected to be lossy; reading the wrong summary is why
+  # this step went blind once already.
+  ours=$(printf '%s\n' "$harness_output" |
+    awk '/^ROUND-TRIP FIDELITY: amendsheet/ {mine=1; next}
+         /^ROUND-TRIP FIDELITY:/ {mine=0}
+         mine && /^SUMMARY/ {print; exit}')
+
+  if [ -z "$ours" ]; then
+    fail "harness printed no summary for amendsheet"
+  else
+    lost=$(printf '%s\n' "$ours" | sed -n 's/.*| *\([0-9][0-9]*\) lossy.*/\1/p')
+    unread=$(printf '%s\n' "$ours" | sed -n 's/.*| *\([0-9][0-9]*\) failed to process.*/\1/p')
+    [ "$lost" = "0" ] || fail "harness: $lost file(s) lost something on round trip"
+    [ "$unread" = "0" ] || fail "harness: $unread file(s) could not be processed"
+  fi
 else
   printf 'skipped: no fixtures present (run npm run fixtures && npm run fixtures:real)\n'
 fi
