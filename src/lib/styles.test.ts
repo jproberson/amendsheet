@@ -40,10 +40,16 @@ test('resolves a built in format code', () => {
 })
 
 test('treats the built in date formats as dates', () => {
-  for (const id of [14, 15, 16, 17, 18, 19, 20, 21, 22, 45, 46, 47]) {
+  for (const id of [14, 15, 16, 17, 18, 19, 20, 21, 22, 45, 47]) {
     const parsed = withFormats([], [id])
     assert.equal(isDateFormat(parsed, 0), true, `format ${id} should be a date`)
   }
+})
+
+test('treats the built in elapsed time format as a duration', () => {
+  const parsed = withFormats([], [46])
+
+  assert.equal(isDateFormat(parsed, 0), false)
 })
 
 test('treats the built in number formats as numbers', () => {
@@ -59,12 +65,11 @@ test('treats a custom format with date tokens as a date', () => {
       [164, 'yyyy-mm-dd'],
       [165, 'd mmm yyyy'],
       [166, 'hh:mm:ss'],
-      [167, '[h]:mm:ss'],
     ],
-    [164, 165, 166, 167],
+    [164, 165, 166],
   )
 
-  for (let index = 0; index < 4; index++) {
+  for (let index = 0; index < 3; index++) {
     assert.equal(isDateFormat(parsed, index), true, `cell format ${index} should be a date`)
   }
 })
@@ -192,5 +197,24 @@ test('treats an unknown format id as a number', () => {
   const parsed = withFormats([], [999])
 
   assert.equal(numberFormatOf(parsed, 0), undefined)
+  assert.equal(isDateFormat(parsed, 0), false)
+})
+
+test('ignores number formats declared inside differential formats', () => {
+  const parsed = readStyles(
+    styles(
+      '<numFmts><numFmt numFmtId="164" formatCode="yyyy-mm-dd"/></numFmts>' +
+        '<cellXfs count="1"><xf numFmtId="164"/></cellXfs>' +
+        '<dxfs><dxf><numFmt numFmtId="164" formatCode="0.00"/></dxf></dxfs>',
+    ),
+  )
+
+  assert.equal(parsed.numberFormats.get(164), 'yyyy-mm-dd')
+  assert.equal(isDateFormat(parsed, 0), true)
+})
+
+test('treats an elapsed time format as a duration, not a date', () => {
+  const parsed = withFormats([[165, '[h]:mm:ss']], [165])
+
   assert.equal(isDateFormat(parsed, 0), false)
 })

@@ -181,3 +181,17 @@ test('numbers rows that carry no reference after one that does', () => {
     ['A5', 'A6'],
   )
 })
+
+test('reads an ISO date cell rather than failing on it', () => {
+  const [cell] = cells('<row r="1"><c r="A1" t="d"><v>2024-01-01T00:00:00</v></c></row>')
+
+  assert.deepEqual(cell?.value, { kind: 'date', value: '2024-01-01T00:00:00' })
+})
+
+test('does not take phonetic guides as inline string content', () => {
+  const [cell] = cells(
+    '<row r="1"><c r="A1" t="inlineStr"><is><t>東京</t><rPh sb="0" eb="2"><t>トウキョウ</t></rPh></is></c></row>',
+  )
+
+  assert.deepEqual(cell?.value, { kind: 'text', value: '東京' })
+})

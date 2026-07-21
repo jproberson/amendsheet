@@ -4,6 +4,8 @@ import { readXml } from './xml.js'
 
 export type RawCellValue =
   | { readonly kind: 'number'; readonly value: number }
+  /** An ISO-8601 date written literally, which ECMA-376 permits. */
+  | { readonly kind: 'date'; readonly value: string }
   | { readonly kind: 'text'; readonly value: string }
   | { readonly kind: 'boolean'; readonly value: boolean }
   | { readonly kind: 'error'; readonly value: string }
@@ -35,6 +37,7 @@ export function* readSheet(xml: string, sharedStrings: readonly string[]): Gener
   let inValue = false
   let inFormula = false
   let inInlineText = false
+  let inPhonetic = false
 
   const finishCell = (): RawCell => {
     const address = reference === undefined ? { row, column } : parseReference(reference)
@@ -67,6 +70,7 @@ export function* readSheet(xml: string, sharedStrings: readonly string[]): Gener
           rawValue = null
           formula = null
           inlineText = null
+          inPhonetic = false
           column++
           // A self closing cell gets no close event.
           if (event.selfClosing) yield finishCell()
@@ -80,9 +84,12 @@ export function* readSheet(xml: string, sharedStrings: readonly string[]): Gener
           formula = []
           inFormula = !event.selfClosing
           break
+        case 'rPh':
+          inPhonetic = true
+          break
         case 't':
           inlineText ??= []
-          inInlineText = !event.selfClosing
+          inInlineText = !event.selfClosing && !inPhonetic
           break
       }
       continue
@@ -104,6 +111,9 @@ export function* readSheet(xml: string, sharedStrings: readonly string[]): Gener
         break
       case 't':
         inInlineText = false
+        break
+      case 'rPh':
+        inPhonetic = false
         break
       case 'c':
         yield finishCell()
@@ -133,6 +143,8 @@ function toValue(
     }
     case 'str':
       return { kind: 'text', value: raw }
+    case 'd':
+      return { kind: 'date', value: raw }
     case 'b':
       return { kind: 'boolean', value: raw === '1' }
     case 'e':

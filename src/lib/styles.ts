@@ -43,15 +43,22 @@ export function readStyles(xml: string): Styles {
   const numberFormats = new Map<number, string>()
   const cellFormats: number[] = []
   let inCellFormats = false
+  let inNumberFormats = false
 
   for (const event of readXml(xml)) {
     if (event.kind === 'close') {
       if (event.name === 'cellXfs') inCellFormats = false
+      if (event.name === 'numFmts') inNumberFormats = false
       continue
     }
     if (event.kind !== 'open') continue
 
-    if (event.name === 'numFmt') {
+    if (event.name === 'numFmts') {
+      inNumberFormats = !event.selfClosing
+      continue
+    }
+    // dxfs carry their own numFmt elements, which would overwrite the real ones.
+    if (event.name === 'numFmt' && inNumberFormats) {
       const id = Number(event.attributes.get('numFmtId'))
       const code = event.attributes.get('formatCode')
       if (!Number.isNaN(id) && code !== undefined) numberFormats.set(id, code)
@@ -115,9 +122,13 @@ function stripLiterals(code: string): string {
 
 const DATE_TOKEN = /[ymdhs]/i
 
+/** `[h]`, `[m]` and `[s]` mark elapsed time, which is a duration rather than a date. */
+const ELAPSED_TIME = /\[[hms]+\]/i
+
 export function isDateFormat(styles: Styles, styleIndex: number | undefined): boolean {
   const code = numberFormatOf(styles, styleIndex)
   if (code === undefined || code === 'General') return false
+  if (ELAPSED_TIME.test(code)) return false
 
   return DATE_TOKEN.test(stripLiterals(code))
 }

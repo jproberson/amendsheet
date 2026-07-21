@@ -1,5 +1,5 @@
 import { type Container, writeContainer } from './container.js'
-import { serialToDate } from './date.js'
+import { dateToSerial, serialToDate } from './date.js'
 import { type CellInput, patchSheet } from './patch.js'
 import { type CellAddress, formatReference, parseReference } from './reference.js'
 import { type RawCell, readSheet } from './sheet.js'
@@ -55,13 +55,29 @@ function partText(container: Container, path: string): string | undefined {
   return bytes === undefined ? undefined : new TextDecoder().decode(bytes)
 }
 
+function toCellValue(raw: RawCell, styles: Styles, date1904: boolean): CellValue {
+  const value = raw.value
+
+  if (value.kind === 'date') {
+    const parsed = new Date(value.value)
+    if (Number.isNaN(parsed.getTime())) return { kind: 'text', value: value.value }
+    return { kind: 'date', value: parsed, serial: dateToSerial(parsed, date1904) }
+  }
+
+  if (value.kind === 'number' && isDateFormat(styles, raw.styleIndex)) {
+    const serial = value.value
+    // A serial outside the range dates cover stays the number it is.
+    if (serial >= 0) {
+      return { kind: 'date', value: serialToDate(serial, date1904), serial }
+    }
+  }
+
+  return value
+}
+
 function toCell(raw: RawCell, styles: Styles, date1904: boolean): Cell {
   const numberFormat = numberFormatOf(styles, raw.styleIndex)
-
-  const value: CellValue =
-    raw.value.kind === 'number' && isDateFormat(styles, raw.styleIndex)
-      ? { kind: 'date', value: serialToDate(raw.value.value, date1904), serial: raw.value.value }
-      : raw.value
+  const value = toCellValue(raw, styles, date1904)
 
   return {
     address: raw.address,
