@@ -1192,3 +1192,12 @@ test('a write past a gap below a table does not grow it', () => {
 
   assert.match(tablePartOf(workbook.toBytes()), /<table[^>]*\sref="A1:B2"/)
 })
+
+test('a write just right of a table grows it and adds a column', () => {
+  const workbook = readWorkbook(tableBook(TABLE_ROWS))
+  workbook.sheets[0]?.set('C1', 9)
+
+  const table = tablePartOf(workbook.toBytes())
+  assert.match(table, /<table[^>]*\sref="A1:C2"/)
+  assert.match(table, /<tableColumns count="3">/)
+})

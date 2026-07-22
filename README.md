@@ -145,9 +145,10 @@ What a minor release is allowed to do, so you know which branches are safe:
 - Charts, pivot tables and drawings are preserved but never created.
 - Nothing reads or writes cell formatting beyond number formats, so fonts,
   fills and borders can be preserved but not set.
-- Ranges that name cells are copied, not adjusted. Tables, chart ranges,
-  defined names and conditional formatting keep the extent they had, so writing
-  past the end of a table leaves the new row outside it.
+- A table grows to include a cell written directly below or to the right of it,
+  the way Excel would, adding a column when it grows sideways. Other ranges that
+  name cells are still copied, not adjusted: chart ranges, defined names and
+  conditional formatting keep the extent they had.
 - Chartsheets and dialogsheets aren't listed in `sheets`, since they hold no
   cells. They're still written back untouched.
 

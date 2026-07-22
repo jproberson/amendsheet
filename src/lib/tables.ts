@@ -1,7 +1,7 @@
 import type { Container } from './container.js'
 import { formatReference, parseReference } from './reference.js'
 import { readRelationships, resolveTarget } from './relationships.js'
-import { readXml } from './xml.js'
+import { readXml, withAttribute } from './xml.js'
 
 /** A rewritten table part, ready to replace the one that was read. */
 export interface TableExtension {
@@ -17,9 +17,9 @@ interface Range {
 }
 
 /**
- * Excel grows a table to cover a cell written directly below it. Returns the
- * rewritten parts for a sheet's tables that an edit extended; a table no edit
- * reaches, or one this slice does not handle, is left exactly as it was.
+ * Excel grows a table to cover a cell written directly below or to the right of
+ * it. Returns the rewritten parts for a sheet's tables that an edit extended; a
+ * table no edit reaches, or one with a totals row, is left exactly as it was.
  */
 export function extendTables(
   sheetXml: string,
@@ -38,7 +38,7 @@ export function extendTables(
 
   const extensions: TableExtension[] = []
   for (const table of tables) {
-    const grown = growDown(table, cells, ranges)
+    const grown = grow(table, cells, ranges)
     if (grown !== undefined) extensions.push({ path: table.path, xml: grown })
   }
   return extensions
@@ -50,6 +50,9 @@ interface DecodedTable {
   readonly range: Range
   /** A totals row sits below the data, so the row below the table is not free. */
   readonly hasTotalsRow: boolean
+  /** Existing column names and ids, so an added column can avoid both. */
+  readonly columnNames: string[]
+  readonly columnIds: number[]
 }
 
 function tablePartPaths(sheetXml: string, sheetPath: string, container: Container): string[] {
@@ -86,18 +89,32 @@ function decodeTable(container: Container, path: string): DecodedTable | undefin
     return undefined
   }
 
+  let range: Range | undefined
+  let hasTotalsRow = false
+  const columnNames: string[] = []
+  const columnIds: number[] = []
+
   for (const event of readXml(xml)) {
-    if (event.kind !== 'open' || event.localName !== 'table') continue
-    const ref = event.attributes.get('ref')
-    const range = ref === undefined ? undefined : parseRange(ref)
-    if (range === undefined) return undefined
-    // totalsRowShown defaults to true and only says the row was once visible;
-    // the count is what says a totals row exists and occupies the row below.
-    const totals = event.attributes.get('totalsRowCount')
-    const hasTotalsRow = totals !== undefined && totals !== '0'
-    return { path, xml, range, hasTotalsRow }
+    if (event.kind !== 'open') continue
+    if (event.localName === 'table') {
+      const ref = event.attributes.get('ref')
+      range = ref === undefined ? undefined : parseRange(ref)
+      if (range === undefined) return undefined
+      // totalsRowShown defaults to true and only says the row was once visible;
+      // the count is what says a totals row exists and occupies the row below.
+      const totals = event.attributes.get('totalsRowCount')
+      hasTotalsRow = totals !== undefined && totals !== '0'
+    }
+    if (event.localName === 'tableColumn') {
+      const name = event.attributes.get('name')
+      if (name !== undefined) columnNames.push(name)
+      const id = Number(event.attributes.get('id'))
+      if (Number.isInteger(id)) columnIds.push(id)
+    }
   }
-  return undefined
+
+  if (range === undefined) return undefined
+  return { path, xml, range, hasTotalsRow, columnNames, columnIds }
 }
 
 function parseRange(ref: string): Range | undefined {
@@ -113,38 +130,113 @@ function parseRange(ref: string): Range | undefined {
   }
 }
 
-function growDown(
+function grow(
   table: DecodedTable,
   written: Set<string>,
   all: readonly Range[],
 ): string | undefined {
+  // A totals row, or an added column beside one, needs a totals cell we do not
+  // write, so a table that has one is left exactly as it was.
   if (table.hasTotalsRow) return undefined
   const { range } = table
-
-  const columnWritten = (row: number) => {
-    for (let column = range.minColumn; column <= range.maxColumn; column++) {
-      if (written.has(formatReference({ row, column }))) return true
-    }
-    return false
-  }
-  // A grown row must not land inside another table that shares any column.
   const others = all.filter((candidate) => candidate !== range)
-  const collides = (row: number) =>
+
+  const rowWritten = (row: number) =>
+    spanWritten(written, row, row, range.minColumn, range.maxColumn)
+  const columnHasWrite = (column: number) =>
+    spanWritten(written, range.minRow, range.maxRow, column, column)
+  const overlaps = (r: Range) =>
     others.some(
       (other) =>
-        row >= other.minRow &&
-        row <= other.maxRow &&
-        range.minColumn <= other.maxColumn &&
-        range.maxColumn >= other.minColumn,
+        r.minRow <= other.maxRow &&
+        r.maxRow >= other.minRow &&
+        r.minColumn <= other.maxColumn &&
+        r.maxColumn >= other.minColumn,
     )
+  const downTo = (row: number) => ({ ...range, maxRow: row })
+  const rightTo = (column: number) => ({ ...range, maxColumn: column })
 
   let maxRow = range.maxRow
-  while (columnWritten(maxRow + 1) && !collides(maxRow + 1)) maxRow++
-  if (maxRow === range.maxRow) return undefined
+  while (rowWritten(maxRow + 1) && !overlaps(downTo(maxRow + 1))) maxRow++
+  let maxColumn = range.maxColumn
+  while (columnHasWrite(maxColumn + 1) && !overlaps(rightTo(maxColumn + 1))) maxColumn++
 
-  const oldRef = `${formatReference({ row: range.minRow, column: range.minColumn })}:${formatReference({ row: range.maxRow, column: range.maxColumn })}`
-  const newRef = `${formatReference({ row: range.minRow, column: range.minColumn })}:${formatReference({ row: maxRow, column: range.maxColumn })}`
-  return rewriteRefs(table.xml, oldRef, newRef)
+  if (maxRow === range.maxRow && maxColumn === range.maxColumn) return undefined
+
+  const oldRef = refOf(range)
+  const newRef = refOf({ ...range, maxRow, maxColumn })
+  let xml = rewriteRefs(table.xml, oldRef, newRef)
+  if (maxColumn > range.maxColumn) {
+    xml = addColumns(xml, maxColumn - range.maxColumn, table.columnIds, table.columnNames)
+  }
+  return xml
+}
+
+const refOf = (range: Range) =>
+  `${formatReference({ row: range.minRow, column: range.minColumn })}:${formatReference({ row: range.maxRow, column: range.maxColumn })}`
+
+function spanWritten(
+  written: Set<string>,
+  minRow: number,
+  maxRow: number,
+  minColumn: number,
+  maxColumn: number,
+): boolean {
+  for (let row = minRow; row <= maxRow; row++) {
+    for (let column = minColumn; column <= maxColumn; column++) {
+      if (written.has(formatReference({ row, column }))) return true
+    }
+  }
+  return false
+}
+
+/** Excel names a fresh column `ColumnN`, so we take the first N free of both. */
+function freshColumnName(taken: Set<string>): string {
+  let n = 1
+  while (taken.has(`column${n}`)) n++
+  return `Column${n}`
+}
+
+/**
+ * Appends `count` empty columns to the table's tableColumns, each with an id and
+ * a name no existing column uses, and raises the declared count to match.
+ */
+function addColumns(xml: string, count: number, ids: number[], names: string[]): string {
+  const taken = new Set(names.map((name) => name.toLowerCase()))
+  let nextId = Math.max(0, ...ids) + 1
+
+  const added: string[] = []
+  for (let index = 0; index < count; index++) {
+    const name = freshColumnName(taken)
+    taken.add(name.toLowerCase())
+    added.push(`<tableColumn id="${nextId++}" name="${name}"/>`)
+  }
+  const elements = added.join('')
+
+  let prefix = ''
+  let insertAt = -1
+  let countStart = -1
+  let countEnd = -1
+  for (const event of readXml(xml)) {
+    if (event.kind === 'open' && event.localName === 'tableColumns') {
+      const colon = event.name.indexOf(':')
+      prefix = colon === -1 ? '' : event.name.slice(0, colon + 1)
+      countStart = event.start
+      countEnd = event.end
+    }
+    if (event.kind === 'close' && event.localName === 'tableColumns') insertAt = event.start
+  }
+  if (insertAt === -1 || countStart === -1) return xml
+
+  const openTag = withAttribute(xml.slice(countStart, countEnd), 'count', names.length + count)
+  const prefixed = elements.replace(/<tableColumn /g, `<${prefix}tableColumn `)
+  return (
+    xml.slice(0, countStart) +
+    openTag +
+    xml.slice(countEnd, insertAt) +
+    prefixed +
+    xml.slice(insertAt)
+  )
 }
 
 /**

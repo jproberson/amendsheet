@@ -55,6 +55,54 @@ test('does not grow a table across a gap', () => {
   assert.deepEqual(extend(withOneTable('A1:B2'), ['A5']), [])
 })
 
+test('grows a table right to a cell written just past it, adding a column', () => {
+  const [result] = extend(withOneTable('A1:B2'), ['C1'])
+
+  assert.match(result?.xml ?? '', /<table[^>]*\sref="A1:C2"/)
+  assert.match(result?.xml ?? '', /<autoFilter ref="A1:C2"\/>/)
+  assert.match(result?.xml ?? '', /<tableColumns count="3">/)
+  assert.match(result?.xml ?? '', /<tableColumn id="3" name="[^"]+"\/>/)
+})
+
+test('contiguous writes to the right add a column each', () => {
+  const [result] = extend(withOneTable('A1:B2'), ['C1', 'D2'])
+
+  assert.match(result?.xml ?? '', /ref="A1:D2"/)
+  assert.match(result?.xml ?? '', /<tableColumns count="4">/)
+})
+
+test('does not grow right across a gap', () => {
+  assert.deepEqual(extend(withOneTable('A1:B2'), ['D1']), [])
+})
+
+test('names an added column so it collides with none that exist', () => {
+  const taken = table('A1:B2').replace('name="a"', 'name="Column1"').replace('name="b"', 'name="x"')
+  const [result] = extend(withOneTable('A1:B2', { 'xl/tables/table1.xml': taken }), ['C1'])
+
+  const names = [...(result?.xml ?? '').matchAll(/<tableColumn [^>]*name="([^"]+)"/g)].map(
+    (m) => m[1],
+  )
+  assert.equal(names.length, 3)
+  assert.equal(new Set(names).size, 3, `names must be unique: ${names.join(', ')}`)
+})
+
+test('grows right even when existing columns declare no name or id', () => {
+  const bare =
+    '<table xmlns="http://x" ref="A1:B2"><autoFilter ref="A1:B2"/>' +
+    '<tableColumns count="2"><tableColumn/><tableColumn/></tableColumns></table>'
+  const [result] = extend(withOneTable('A1:B2', { 'xl/tables/table1.xml': bare }), ['C1'])
+
+  assert.match(result?.xml ?? '', /ref="A1:C2"/)
+  assert.match(result?.xml ?? '', /<tableColumn id="1" name="Column1"\/>/)
+})
+
+test('grows the ref right even for a table with no tableColumns element', () => {
+  const noColumns = '<table xmlns="http://x" ref="A1:B2"><autoFilter ref="A1:B2"/></table>'
+  const [result] = extend(withOneTable('A1:B2', { 'xl/tables/table1.xml': noColumns }), ['C1'])
+
+  assert.match(result?.xml ?? '', /ref="A1:C2"/)
+})
+
 test('does not grow a table with a totals row', () => {
   const parts = withOneTable('A1:B3', {
     'xl/tables/table1.xml': table('A1:B3', ' totalsRowCount="1"'),

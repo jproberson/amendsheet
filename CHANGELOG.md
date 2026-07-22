@@ -8,9 +8,11 @@ and the API is still free to change.
 
 ### Added
 
-- A cell written directly below a table grows the table to include it, the way
-  Excel does, so the new row is inside the table rather than stranded next to it.
-  A table with a totals row, or one another table sits below, is left as it was.
+- A cell written directly below or to the right of a table grows the table to
+  include it, the way Excel does, so the new row or column is inside the table
+  rather than stranded next to it. Growing sideways adds a column, named so it
+  collides with none the table already has. A table with a totals row, or one
+  another table sits against, is left as it was.
 - `error.sheet`, the worksheet name a failure happened on, alongside `part` and
   `reference`. Every error now carries the tightest location it knows: a refused
   write names the sheet it was aimed at, and an unreadable cell value names the
