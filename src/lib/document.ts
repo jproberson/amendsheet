@@ -23,7 +23,13 @@ import { resolveTarget } from './relationships.js'
 import { type RawCell, readSheet } from './sheet.js'
 import { appendSharedStrings, readSharedStrings } from './shared-strings.js'
 import { extendTables } from './tables.js'
-import { type DateStyle, ensureDateStyle, ensureNumberFormat } from './styles-writer.js'
+import {
+  type DateStyle,
+  type FontFormat,
+  ensureDateStyle,
+  ensureFontStyle,
+  ensureNumberFormat,
+} from './styles-writer.js'
 import { type Styles, isDateFormat, numberFormatOf, readStyles } from './styles.js'
 import { readXml } from './xml.js'
 import { type SheetState, readWorkbookPart } from './workbook.js'
@@ -98,6 +104,8 @@ export interface Worksheet {
 export interface SetOptions {
   /** A number format code, applied to the cell being written. */
   readonly numberFormat?: string
+  /** Font to apply, merged onto the font the cell already carries. */
+  readonly font?: FontFormat
 }
 
 export interface Workbook {
@@ -433,21 +441,29 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         // write the value it claimed to reject.
         let applied: DateStyle | undefined
         if (workingStyles === undefined) {
-          if (options?.numberFormat !== undefined) {
+          if (options?.numberFormat !== undefined || options?.font !== undefined) {
             throw new XlsxError(
               'missing-part',
-              `Cannot apply a number format to ${canonical}: the package has no style table`,
+              `Cannot format ${canonical}: the package has no style table`,
               { part: 'xl/styles.xml', reference: canonical },
             )
           }
         } else {
+          // Each step lands on the one before it, so a number format and a font
+          // set at once compose into a single cell format.
+          let xml = workingStyles
+          let base = current
+          const step = (next: DateStyle) => {
+            xml = next.xml
+            base = next.index
+            applied = next
+          }
           // An asked-for format wins; a Date only gets one because without one
           // it displays as the serial number it is stored as.
-          if (options?.numberFormat !== undefined) {
-            applied = ensureNumberFormat(workingStyles, current, options.numberFormat)
-          } else if (value instanceof Date) {
-            applied = ensureDateStyle(workingStyles, current)
-          }
+          if (options?.numberFormat !== undefined)
+            step(ensureNumberFormat(xml, base, options.numberFormat))
+          else if (value instanceof Date) step(ensureDateStyle(xml, base))
+          if (options?.font !== undefined) step(ensureFontStyle(xml, base, options.font))
         }
 
         const pending = edits.get(reference.path) ?? new Map<string, CellInput>()

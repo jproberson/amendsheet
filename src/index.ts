@@ -1,5 +1,6 @@
 export { readWorkbook } from './lib/document.js'
 export type { CellInput, FormulaInput } from './lib/patch.js'
+export type { FontFormat } from './lib/styles-writer.js'
 export type {
   Cell,
   CellFormula,

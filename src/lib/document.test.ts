@@ -243,6 +243,41 @@ test('writes a date into a cell that already has a date format', () => {
 const withStrings = (sheetBody: string, sst: string) =>
   build(sheetBody, { extra: { 'xl/sharedStrings.xml': sst } })
 
+test('set applies a font, adding it to the styles and pointing the cell at it', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.set('A1', 'bold', { font: { bold: true, color: 'FF0000' } })
+
+  const parts = readContainer(workbook.toBytes()).parts
+  const styles = new TextDecoder().decode(parts.get('xl/styles.xml') ?? new Uint8Array())
+  const sheet = new TextDecoder().decode(parts.get('xl/worksheets/sheet1.xml') ?? new Uint8Array())
+
+  assert.match(styles, /<font><b\/><color rgb="FFFF0000"\/><\/font>/)
+  assert.match(sheet, /<c r="A1"[^>]* s="\d+"/)
+})
+
+test('set composes a number format and a font into one cell format', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.set('A1', 5, { numberFormat: '0.00', font: { italic: true } })
+
+  const styles = new TextDecoder().decode(
+    readContainer(workbook.toBytes()).parts.get('xl/styles.xml') ?? new Uint8Array(),
+  )
+
+  assert.match(styles, /<font><i\/><\/font>/)
+  const xf = [...styles.matchAll(/<xf [^>]*\/>/g)].map((match) => match[0]).at(-1) ?? ''
+  assert.match(xf, /applyNumberFormat="1"/)
+  assert.match(xf, /applyFont="1"/)
+})
+
+test('set refuses a font colour that is not hex, before recording anything', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  const sheet = workbook.sheets[0]
+
+  assert.throws(() => sheet?.set('A1', 'x', { font: { color: 'nope' } }), /hex/)
+  // The refused edit left no trace: A1 still reads its original number.
+  assert.deepEqual(sheet?.cell('A1')?.value, { kind: 'number', value: 1 })
+})
+
 test('puts new text in the shared string table when the file has one', () => {
   const workbook = readWorkbook(
     withStrings(
