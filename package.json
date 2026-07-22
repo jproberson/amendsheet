@@ -27,7 +27,8 @@
     "check:package": "publint --strict && attw --pack .",
     "mutate": "node scripts/mutate.mjs",
     "external": "node scripts/external.mjs",
-    "browser": "node scripts/browser-smoke.mjs"
+    "browser": "node scripts/browser-smoke.mjs",
+    "validate": "node --import tsx scripts/validate-opc.mjs"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",

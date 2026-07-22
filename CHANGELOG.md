@@ -35,6 +35,11 @@ and the API is still free to change.
   inside a headless Chrome, so the browser-support claim is checked by execution
   rather than by a grep for Node APIs. It drives Chrome over the DevTools
   protocol, so it adds no dependency, and `verify.sh` runs it.
+- `npm run validate` edits every fixture and checks the output against the
+  integrity rules a spreadsheet application repairs a file for — a dangling
+  relationship, a part with no content type, a table whose shape is
+  inconsistent. It reports only a problem an edit introduces, and `verify.sh`
+  runs it.
 - The round-trip harness measures an edited file as well as an untouched one,
   and reports parts rewritten separately from data lost.
 

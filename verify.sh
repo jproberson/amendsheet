@@ -88,6 +88,19 @@ npm run --silent build > /dev/null || fail "build failed"
 npx publint --strict > /dev/null 2>&1 || { fail "publint found packaging problems"; npx publint --strict 2>&1 | tail -8; }
 npx attw --pack . --format table-flipped > /dev/null 2>&1 || { fail "type resolution is broken for some consumers"; npx attw --pack . 2>&1 | tail -12; }
 
+step "package integrity"
+# Excel offers to repair a file with a dangling relationship, a part with no
+# content type, or a table whose shape is inconsistent. No Excel here checks
+# that, so this does, over every fixture edited two ways. Only a problem our
+# edit introduces, not one the source file already had, fails.
+if [ -d fixtures ] && find fixtures -name '*.xls[xm]' -print -quit | grep -q .; then
+  validate_output=$(node --import tsx scripts/validate-opc.mjs 2>&1)
+  printf '%s\n' "$validate_output" | tail -1
+  printf '%s' "$validate_output" | grep -q '^FAIL' && { fail "package integrity"; printf '%s\n' "$validate_output" | grep '^FAIL\|^     ' | head -20; }
+else
+  printf 'skipped: no fixtures present\n'
+fi
+
 step "browser"
 # We claim browser support, and the grep above only proves no Node API is named.
 # This runs the built bundle in a real browser end to end. It skips cleanly on a
