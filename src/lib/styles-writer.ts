@@ -17,7 +17,13 @@ export interface DateStyle {
   readonly index: number
 }
 
-interface CellFormats {
+const prefixOf = (name: string) => {
+  const colon = name.indexOf(':')
+  return colon === -1 ? '' : name.slice(0, colon + 1)
+}
+
+/** One of the styles sub-tables — `fonts`, `fills`, `borders`, `cellXfs`. */
+interface StyleTable {
   readonly elements: string[]
   /** Namespace prefix the file writes its elements with, `x:` or empty. */
   readonly prefix: string
@@ -28,7 +34,9 @@ interface CellFormats {
   readonly selfClosing: boolean
 }
 
-function readCellFormats(xml: string): CellFormats | undefined {
+/** Reads the direct `child` elements of `container`, each kept whole so a clone
+ * carries its own children (an xf's alignment, a font's parts) with it. */
+function readTable(xml: string, container: string, child: string): StyleTable | undefined {
   let openTag = ''
   let openStart = -1
   let openEnd = -1
@@ -40,9 +48,8 @@ function readCellFormats(xml: string): CellFormats | undefined {
   const elements: string[] = []
 
   for (const event of readXml(xml)) {
-    if (event.kind === 'open' && event.localName === 'cellXfs') {
-      const colon = event.name.indexOf(':')
-      prefix = colon === -1 ? '' : event.name.slice(0, colon + 1)
+    if (event.kind === 'open' && event.localName === container) {
+      prefix = prefixOf(event.name)
       openTag = xml.slice(event.start, event.end)
       openStart = event.start
       openEnd = event.end
@@ -51,19 +58,17 @@ function readCellFormats(xml: string): CellFormats | undefined {
       if (selfClosing) insertAt = event.end
       continue
     }
-    if (event.kind === 'close' && event.localName === 'cellXfs') {
+    if (event.kind === 'close' && event.localName === container) {
       insertAt = event.start
       inside = false
       continue
     }
-    if (inside && event.kind === 'open' && event.localName === 'xf') {
+    if (inside && event.kind === 'open' && event.localName === child) {
       if (event.selfClosing) elements.push(xml.slice(event.start, event.end))
       else openElement = event.start
       continue
     }
-    // A style may carry alignment or protection children, which have to come
-    // along or the cloned element is an unclosed tag.
-    if (inside && event.kind === 'close' && event.localName === 'xf' && openElement !== -1) {
+    if (inside && event.kind === 'close' && event.localName === child && openElement !== -1) {
       elements.push(xml.slice(openElement, event.end))
       openElement = -1
     }
@@ -71,6 +76,67 @@ function readCellFormats(xml: string): CellFormats | undefined {
 
   if (openStart === -1) return undefined
   return { elements, prefix, openTag, openStart, openEnd, insertAt, selfClosing }
+}
+
+/** Where a new sub-table is opened: before `cellXfs` so fonts/fills/borders keep
+ * their place ahead of it, or before the closing tag when there is no cellXfs. */
+function tableInsertPoint(xml: string): { position: number; prefix: string } {
+  let cellXfsStart = -1
+  let closeStart = -1
+  let prefix = ''
+  for (const event of readXml(xml)) {
+    if (event.kind === 'open' && event.localName === 'cellXfs' && cellXfsStart === -1) {
+      cellXfsStart = event.start
+    }
+    if (event.kind === 'close' && event.localName === 'styleSheet') {
+      closeStart = event.start
+      prefix = prefixOf(event.name)
+    }
+  }
+  if (closeStart === -1) {
+    throw new XlsxError('malformed-xml', 'Style table has no styleSheet element', {
+      part: 'xl/styles.xml',
+    })
+  }
+  return { position: cellXfsStart === -1 ? closeStart : cellXfsStart, prefix }
+}
+
+/** Adds `element` to `container`, or returns the index of an identical one. */
+function ensureInTable(
+  xml: string,
+  container: string,
+  child: string,
+  element: string,
+): { xml: string; id: number } {
+  const table = readTable(xml, container, child)
+  if (table === undefined) {
+    const { position, prefix } = tableInsertPoint(xml)
+    const prefixed = element.replace(/^<[^\s/>]+/, `<${prefix}${child}`)
+    const created = `<${prefix}${container} count="1">${prefixed}</${prefix}${container}>`
+    return { xml: xml.slice(0, position) + created + xml.slice(position), id: 0 }
+  }
+
+  const prefixed = element.replace(/^<[^\s/>]+/, `<${table.prefix}${child}`)
+  const existing = table.elements.indexOf(prefixed)
+  if (existing !== -1) return { xml, id: existing }
+
+  const id = table.elements.length
+  const openTag = withAttribute(table.openTag, 'count', id + 1)
+
+  if (table.selfClosing) {
+    const opened = `${openTag.slice(0, -2)}>`
+    return {
+      xml:
+        xml.slice(0, table.openStart) +
+        `${opened}${prefixed}</${table.prefix}${container}>` +
+        xml.slice(table.openEnd),
+      id,
+    }
+  }
+
+  const head = xml.slice(0, table.openStart) + openTag
+  const body = xml.slice(table.openEnd, table.insertAt)
+  return { xml: `${head}${body}${prefixed}${xml.slice(table.insertAt)}`, id }
 }
 
 const DEFAULT_XF = '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
@@ -139,55 +205,120 @@ function applyCellFormat(
   basedOn: number | undefined,
   overrides: CellOverrides,
 ): DateStyle {
-  const formats = readCellFormats(stylesXml)
+  const formats = readTable(stylesXml, 'cellXfs', 'xf')
   const base = basedOn === undefined ? DEFAULT_XF : (formats?.elements[basedOn] ?? DEFAULT_XF)
   const wanted = withOverrides(base, overrides)
+  const { xml, id } = ensureInTable(stylesXml, 'cellXfs', 'xf', wanted)
+  return { xml, index: id }
+}
 
-  if (formats === undefined) {
-    let closeStart = -1
-    let rootPrefix = ''
-    for (const event of readXml(stylesXml)) {
-      if (event.kind === 'close' && event.localName === 'styleSheet') {
-        closeStart = event.start
-        const colon = event.name.indexOf(':')
-        rootPrefix = colon === -1 ? '' : event.name.slice(0, colon + 1)
+export interface FontFormat {
+  readonly bold?: boolean
+  readonly italic?: boolean
+  readonly underline?: boolean
+  readonly size?: number
+  /** An `RRGGBB` or `AARRGGBB` hex colour; a six-digit value is stored opaque. */
+  readonly color?: string
+  readonly name?: string
+}
+
+/** ECMA-376 stores a colour as eight hex digits, alpha first; a six-digit value
+ * is the colour at full opacity. */
+export function normalizeColor(color: string): string {
+  const hex = color.startsWith('#') ? color.slice(1) : color
+  if (!/^[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(hex)) {
+    throw new XlsxError('unwritable-value', `Colour "${color}" is not a 6 or 8 digit hex value`, {})
+  }
+  return (hex.length === 6 ? `FF${hex}` : hex).toUpperCase()
+}
+
+/** A `<b val="0"/>` turns bold off, so presence alone is not the whole story. */
+const flagOn = (value: string | undefined) => value !== '0' && value !== 'false'
+
+function parseFont(element: string): FontFormat {
+  const font: {
+    bold?: boolean
+    italic?: boolean
+    underline?: boolean
+    size?: number
+    color?: string
+    name?: string
+  } = {}
+  for (const event of readXml(element)) {
+    if (event.kind !== 'open') continue
+    switch (event.localName) {
+      case 'b':
+        font.bold = flagOn(event.attributes.get('val'))
+        break
+      case 'i':
+        font.italic = flagOn(event.attributes.get('val'))
+        break
+      case 'u':
+        font.underline = flagOn(event.attributes.get('val'))
+        break
+      case 'sz': {
+        const size = Number(event.attributes.get('val'))
+        if (!Number.isNaN(size)) font.size = size
+        break
+      }
+      case 'color': {
+        const rgb = event.attributes.get('rgb')
+        if (rgb !== undefined) font.color = rgb
+        break
+      }
+      case 'name': {
+        const name = event.attributes.get('val')
+        if (name !== undefined) font.name = name
+        break
       }
     }
-    if (closeStart === -1) {
-      throw new XlsxError('malformed-xml', 'Style table has no styleSheet element', {
-        part: 'xl/styles.xml',
-      })
-    }
+  }
+  return font
+}
 
-    const element = wanted.replace(/^<[^\s/>]+/, `<${rootPrefix}xf`)
-    const table = `<${rootPrefix}cellXfs count="1">${element}</${rootPrefix}cellXfs>`
-    return {
-      xml: `${stylesXml.slice(0, closeStart)}${table}${stylesXml.slice(closeStart)}`,
-      index: 0,
-    }
+function buildFontElement(font: FontFormat): string {
+  let inner = ''
+  if (font.bold === true) inner += '<b/>'
+  if (font.italic === true) inner += '<i/>'
+  if (font.underline === true) inner += '<u/>'
+  if (font.size !== undefined) inner += `<sz val="${font.size}"/>`
+  if (font.color !== undefined) inner += `<color rgb="${normalizeColor(font.color)}"/>`
+  if (font.name !== undefined) inner += `<name val="${escapeXml(font.name)}"/>`
+  return `<font>${inner}</font>`
+}
+
+/** The font id a cell format points at, or 0 (the default font) when it names none. */
+function fontIdOf(stylesXml: string, basedOn: number | undefined): number {
+  if (basedOn === undefined) return 0
+  const element = readTable(stylesXml, 'cellXfs', 'xf')?.elements[basedOn]
+  const match = element?.match(/\bfontId\s*=\s*["'](\d+)["']/)
+  return match?.[1] === undefined ? 0 : Number(match[1])
+}
+
+/**
+ * Applies `font` to a cell, merging onto the font it already has so setting bold
+ * does not reset its size or colour. The merged font is added if the file has no
+ * identical one, and a cell format pointing at it is returned.
+ */
+export function ensureFontStyle(
+  stylesXml: string,
+  basedOn: number | undefined,
+  font: FontFormat,
+): DateStyle {
+  const current = parseFont(
+    readTable(stylesXml, 'fonts', 'font')?.elements[fontIdOf(stylesXml, basedOn)] ?? '',
+  )
+  const merged: FontFormat = {
+    bold: font.bold ?? current.bold,
+    italic: font.italic ?? current.italic,
+    underline: font.underline ?? current.underline,
+    size: font.size ?? current.size,
+    color: font.color ?? current.color,
+    name: font.name ?? current.name,
   }
 
-  const prefixed = wanted.replace(/^<[^\s/>]+/, `<${formats.prefix}xf`)
-  const existing = formats.elements.indexOf(prefixed)
-  if (existing !== -1) return { xml: stylesXml, index: existing }
-
-  const index = formats.elements.length
-  const openTag = withAttribute(formats.openTag, 'count', index + 1)
-
-  if (formats.selfClosing) {
-    const opened = `${openTag.slice(0, -2)}>`
-    return {
-      xml:
-        stylesXml.slice(0, formats.openStart) +
-        `${opened}${prefixed}</${formats.prefix}cellXfs>` +
-        stylesXml.slice(formats.openEnd),
-      index,
-    }
-  }
-
-  const head = stylesXml.slice(0, formats.openStart) + openTag
-  const body = stylesXml.slice(formats.openEnd, formats.insertAt)
-  return { xml: `${head}${body}${prefixed}${stylesXml.slice(formats.insertAt)}`, index }
+  const { xml, id } = ensureInTable(stylesXml, 'fonts', 'font', buildFontElement(merged))
+  return applyCellFormat(xml, basedOn, { fontId: id })
 }
 
 function tablePrefix(xml: string): string {

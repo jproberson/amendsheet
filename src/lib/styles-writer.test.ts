@@ -1,9 +1,129 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { ensureDateStyle } from './styles-writer.js'
+import { ensureDateStyle, ensureFontStyle } from './styles-writer.js'
 import { assertWellFormed } from '../testing/invariants.js'
 import { ensureNumberFormat } from './styles-writer.js'
 import { isDateFormat, numberFormatOf, readStyles } from './styles.js'
+
+const xfAt = (xml: string, index: number) =>
+  [...xml.matchAll(/<xf [^>]*(?:\/>|>[\s\S]*?<\/xf>)/g)].map((match) => match[0])[index] ?? ''
+
+const fontsTable = '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>'
+
+const fontStyles = (cellXfs: string) =>
+  `<styleSheet>${fontsTable}<cellXfs count="${(cellXfs.match(/<xf/g) ?? []).length}">${cellXfs}</cellXfs></styleSheet>`
+
+test('applying bold adds a font and a cell format that uses it', () => {
+  const source = fontStyles('<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>')
+
+  const result = ensureFontStyle(source, 0, { bold: true })
+
+  assert.match(result.xml, /<fonts count="2">/)
+  assert.match(result.xml, /<font><b\/><sz val="11"\/><name val="Calibri"\/><\/font><\/fonts>/)
+  assert.match(xfAt(result.xml, result.index), /fontId="1"/)
+  assert.match(xfAt(result.xml, result.index), /applyFont="1"/)
+})
+
+test('a font change merges onto the cell font rather than replacing it', () => {
+  const source =
+    '<styleSheet><fonts count="1"><font><b/><sz val="14"/><color rgb="FFFF0000"/>' +
+    '<name val="Arial"/></font></fonts>' +
+    '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs></styleSheet>'
+
+  const result = ensureFontStyle(source, 0, { italic: true })
+
+  // bold, size, colour and name all survive; italic is added.
+  assert.match(
+    result.xml,
+    /<font><b\/><i\/><sz val="14"\/><color rgb="FFFF0000"\/><name val="Arial"\/><\/font>/,
+  )
+})
+
+test('a six digit colour is stored as opaque argb', () => {
+  const source = fontStyles('<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>')
+
+  const result = ensureFontStyle(source, 0, { color: '00FF00' })
+
+  assert.match(result.xml, /<color rgb="FF00FF00"\/>/)
+})
+
+test('the same font is not added twice', () => {
+  const source = fontStyles('<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>')
+
+  const once = ensureFontStyle(source, 0, { bold: true })
+  const twice = ensureFontStyle(once.xml, 0, { bold: true })
+
+  assert.equal(once.index, twice.index)
+  assert.equal(once.xml, twice.xml)
+})
+
+test('rejects a colour that is not hex', () => {
+  const source = fontStyles('<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>')
+
+  assert.throws(() => ensureFontStyle(source, 0, { color: 'red' }), /hex/)
+})
+
+test('accepts a colour written with a leading hash', () => {
+  const source = fontStyles('<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>')
+
+  const result = ensureFontStyle(source, 0, { color: '#123456' })
+
+  assert.match(result.xml, /<color rgb="FF123456"\/>/)
+})
+
+test('refuses to add a font to a document with no styleSheet', () => {
+  const source = '<other><cellXfs count="1"><xf numFmtId="0" fontId="0"/></cellXfs></other>'
+
+  assert.throws(() => ensureFontStyle(source, 0, { bold: true }), /styleSheet/)
+})
+
+test('a bold flag explicitly off is read as not bold', () => {
+  const source =
+    '<styleSheet><fonts count="1"><font><b val="0"/><sz val="11"/></font></fonts>' +
+    '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs></styleSheet>'
+
+  const result = ensureFontStyle(source, 0, { italic: true })
+
+  assert.match(result.xml, /<font><i\/><sz val="11"\/><\/font>/)
+})
+
+test('formats a cell that has no style yet against the default font', () => {
+  const source = fontStyles('')
+
+  const result = ensureFontStyle(source, undefined, { underline: true, name: 'Courier' })
+
+  assert.match(result.xml, /<font><u\/><sz val="11"\/><name val="Courier"\/><\/font>/)
+})
+
+test('creates a fonts table when the file has none', () => {
+  const source =
+    '<styleSheet><cellXfs count="1">' +
+    '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs></styleSheet>'
+
+  const result = ensureFontStyle(source, 0, { bold: true })
+
+  assert.match(result.xml, /<fonts count="1"><font><b\/><\/font><\/fonts><cellXfs/)
+})
+
+test('ignores a themed colour and an unparseable size in the base font', () => {
+  const source =
+    '<styleSheet><fonts count="1"><font><sz/><color theme="1"/><name val="Calibri"/></font></fonts>' +
+    '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs></styleSheet>'
+
+  const result = ensureFontStyle(source, 0, { bold: true })
+
+  assert.match(result.xml, /<font><b\/><name val="Calibri"\/><\/font>/)
+})
+
+test('treats a cell format with no fontId as using the default font', () => {
+  const source =
+    '<styleSheet><fonts count="1"><font><sz val="11"/></font></fonts>' +
+    '<cellXfs count="1"><xf numFmtId="0"/></cellXfs></styleSheet>'
+
+  const result = ensureFontStyle(source, 0, { bold: true })
+
+  assert.match(result.xml, /<font><b\/><sz val="11"\/><\/font>/)
+})
 
 const styles = (cellXfs: string, extra = '') =>
   `<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${extra}<cellXfs count="${(cellXfs.match(/<xf/g) ?? []).length}">${cellXfs}</cellXfs></styleSheet>`
