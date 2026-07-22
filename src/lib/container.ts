@@ -1,5 +1,5 @@
-import { type Zippable, unzipSync, zipSync } from 'fflate'
 import { XlsxError } from './errors.js'
+import { type ZipEntry, deflate, inflate, readZip, writeZip } from './zip.js'
 
 /** Every part of the file, including the ones nothing here interprets. */
 export interface Container {
@@ -24,19 +24,11 @@ export function readContainer(bytes: Uint8Array): Container {
     )
   }
 
-  let entries: Record<string, Uint8Array>
-  try {
-    entries = unzipSync(bytes)
-  } catch (cause) {
-    throw new XlsxError('not-a-zip', 'File is not a zip archive, so it cannot be an .xlsx file', {
-      cause,
-    })
-  }
-
   const parts = new Map<string, Uint8Array>()
-  for (const [path, content] of Object.entries(entries)) {
-    if (path.endsWith('/')) continue
-    parts.set(path, content)
+  for (const entry of readZip(bytes)) {
+    // A directory entry is an artifact of how the zip was produced, not a part.
+    if (entry.name.endsWith('/')) continue
+    parts.set(entry.name, inflate(entry))
   }
 
   return { parts }
@@ -67,13 +59,8 @@ export function decodeXmlPart(bytes: Uint8Array, path: string): string {
   }
 }
 
-/** The ZIP epoch. A fixed stamp keeps the same parts producing the same bytes. */
-const FIXED_TIMESTAMP = new Date(1980, 0, 1)
-
 export function writeContainer(container: Container): Uint8Array {
-  const entries: Zippable = {}
-  for (const [path, content] of container.parts) {
-    entries[path] = [content, { mtime: FIXED_TIMESTAMP }]
-  }
-  return zipSync(entries, { level: 6 })
+  const entries: ZipEntry[] = []
+  for (const [path, content] of container.parts) entries.push(deflate(path, content))
+  return writeZip(entries)
 }
