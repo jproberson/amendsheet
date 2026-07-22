@@ -115,6 +115,30 @@ const localNameOf = (name: string) => {
   return colon === -1 ? name : name.slice(colon + 1)
 }
 
+function interpretTag(inner: string, start: number, end: number): XmlEvent {
+  if (inner.startsWith('/')) {
+    const name = inner.slice(1).trim()
+    return { kind: 'close', name, localName: localNameOf(name), start, end }
+  }
+
+  const selfClosing = inner.endsWith('/')
+  const body = selfClosing ? inner.slice(0, -1) : inner
+
+  let nameEnd = 0
+  while (nameEnd < body.length && !isWhitespace(body.charAt(nameEnd))) nameEnd++
+
+  const name = body.slice(0, nameEnd)
+  return {
+    kind: 'open',
+    name,
+    localName: localNameOf(name),
+    attributes: parseAttributes(body.slice(nameEnd), start),
+    selfClosing,
+    start,
+    end,
+  }
+}
+
 /** Emits events rather than building a tree, so large sheets stream. */
 export function* readXml(source: string): Generator<XmlEvent> {
   let position = 0
@@ -172,29 +196,125 @@ export function* readXml(source: string): Generator<XmlEvent> {
 
     const inner = source.slice(position + 1, tagEnd)
     position = tagEnd + 1
+    yield interpretTag(inner, tagStart, position)
+  }
+}
 
-    if (inner.startsWith('/')) {
-      const name = inner.slice(1).trim()
-      yield { kind: 'close', name, localName: localNameOf(name), start: tagStart, end: position }
+const LESS_THAN = 0x3c
+const QUOTE = 0x22
+const APOSTROPHE = 0x27
+const GREATER_THAN = 0x3e
+
+const utf8 = new TextDecoder('utf-8', { fatal: true })
+
+// The ASCII case is most of a spreadsheet, and building it directly is faster
+// than a TextDecoder call per cell.
+function decodeSpan(bytes: Uint8Array, start: number, end: number): string {
+  for (let index = start; index < end; index++) {
+    const byte = bytes[index]
+    if (byte !== undefined && byte >= 0x80) return utf8.decode(bytes.subarray(start, end))
+  }
+  let text = ''
+  for (let index = start; index < end; index += 8192) {
+    text += String.fromCharCode(...bytes.subarray(index, Math.min(end, index + 8192)))
+  }
+  return text
+}
+
+function indexOfSequence(bytes: Uint8Array, ascii: string, from: number): number {
+  const first = ascii.charCodeAt(0)
+  for (let at = bytes.indexOf(first, from); at !== -1; at = bytes.indexOf(first, at + 1)) {
+    if (startsWithAscii(bytes, ascii, at)) return at
+  }
+  return -1
+}
+
+function startsWithAscii(bytes: Uint8Array, ascii: string, at: number): boolean {
+  for (let index = 0; index < ascii.length; index++) {
+    if (bytes[at + index] !== ascii.charCodeAt(index)) return false
+  }
+  return true
+}
+
+function findTagEndByte(bytes: Uint8Array, start: number): number {
+  let quote = 0
+  for (let index = start; index < bytes.length; index++) {
+    const byte = bytes[index]
+    if (quote !== 0) {
+      if (byte === quote) quote = 0
+    } else if (byte === QUOTE || byte === APOSTROPHE) {
+      quote = byte
+    } else if (byte === GREATER_THAN) {
+      return index
+    }
+  }
+  return -1
+}
+
+/** Like readXml but over UTF-8 bytes, so a large sheet is never decoded whole.
+ * Offsets are byte positions, so a splice lands on the right bytes. */
+export function* readXmlBytes(source: Uint8Array): Generator<XmlEvent> {
+  let position = 0
+
+  while (position < source.length) {
+    const tagStart = source.indexOf(LESS_THAN, position)
+
+    if (tagStart === -1) {
+      yield {
+        kind: 'text',
+        text: decodeEntities(decodeSpan(source, position, source.length)),
+        start: position,
+        end: source.length,
+      }
+      return
+    }
+    if (tagStart > position) {
+      yield {
+        kind: 'text',
+        text: decodeEntities(decodeSpan(source, position, tagStart)),
+        start: position,
+        end: tagStart,
+      }
+    }
+    position = tagStart
+
+    if (startsWithAscii(source, '<![CDATA[', position)) {
+      const end = indexOfSequence(source, ']]>', position)
+      if (end === -1) throw parseError(`Unterminated CDATA at offset ${position}`)
+      yield {
+        kind: 'text',
+        text: decodeSpan(source, position + 9, end),
+        start: position,
+        end: end + 3,
+      }
+      position = end + 3
+      continue
+    }
+    if (startsWithAscii(source, '<!--', position)) {
+      const end = indexOfSequence(source, '-->', position)
+      if (end === -1) throw parseError(`Unterminated comment at offset ${position}`)
+      position = end + 3
+      continue
+    }
+    if (startsWithAscii(source, '<?', position)) {
+      const end = indexOfSequence(source, '?>', position)
+      if (end === -1) throw parseError(`Unterminated processing instruction at offset ${position}`)
+      position = end + 2
+      continue
+    }
+    if (startsWithAscii(source, '<!', position)) {
+      const end = findTagEndByte(source, position)
+      if (end === -1) throw parseError(`Unterminated declaration at offset ${position}`)
+      position = end + 1
       continue
     }
 
-    const selfClosing = inner.endsWith('/')
-    const body = selfClosing ? inner.slice(0, -1) : inner
+    const tagEnd = findTagEndByte(source, position)
+    if (tagEnd === -1) throw parseError(`Unclosed tag starting at offset ${position}`)
 
-    let nameEnd = 0
-    while (nameEnd < body.length && !isWhitespace(body.charAt(nameEnd))) nameEnd++
-
-    const name = body.slice(0, nameEnd)
-    yield {
-      kind: 'open',
-      name,
-      localName: localNameOf(name),
-      attributes: parseAttributes(body.slice(nameEnd), tagStart),
-      selfClosing,
-      start: tagStart,
-      end: position,
-    }
+    const inner = decodeSpan(source, position + 1, tagEnd)
+    position = tagEnd + 1
+    yield interpretTag(inner, tagStart, position)
   }
 }
 
