@@ -145,8 +145,12 @@ What a minor release is allowed to do, so you know which branches are safe:
 - Nothing evaluates formulas, so a written one has no value until a spreadsheet
   application opens the file.
 - A part the edit does not touch is copied through still compressed, so a large
-  workbook is not fully decompressed to change one cell. A single sheet is still
-  patched as one string, though, so an enormous sheet is held whole.
+  workbook is not fully decompressed to change one cell. A sheet is read and
+  patched in its bytes rather than decoded to one string, so the ceiling on a
+  single sheet is the largest buffer this runtime allocates rather than V8's
+  ~512MB string limit; past that a part is refused with `part-too-large`.
+  Nothing streams a sheet through in chunks, though, so it is still held whole
+  in memory.
 - Charts, pivot tables and drawings are preserved but never created.
 - Nothing reads or writes cell formatting beyond number formats, so fonts,
   fills and borders can be preserved but not set.
