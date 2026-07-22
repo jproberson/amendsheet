@@ -1,6 +1,6 @@
 import { dateToSerial } from './date.js'
 import { XlsxError } from './errors.js'
-import { formatReference, parseReference } from './reference.js'
+import { canonicalReference, formatReference, parseReference } from './reference.js'
 import { findUnwritableCharacter, readXmlBytes } from './xml.js'
 
 /**
@@ -147,7 +147,10 @@ export function indexSheet(bytes: Uint8Array): SheetIndex {
   for (const row of shape.rows) {
     for (const cell of row.cells) {
       if (cell.style === undefined && cell.spillingFormula === undefined) continue
-      const reference = formatReference({ row: row.row, column: cell.column })
+      // A cell no column letter can name is one set() could never target either,
+      // so it is skipped rather than allowed to throw the whole index away.
+      const reference = canonicalReference({ row: row.row, column: cell.column })
+      if (reference === undefined) continue
       if (cell.style !== undefined) styles.set(reference, Number(cell.style))
       if (cell.spillingFormula !== undefined) {
         sharedFormulas.set(reference, cell.spillingFormula)

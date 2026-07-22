@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { type CellInput, checkWritable, patchSheet as patchSheetBytes } from './patch.js'
+import {
+  type CellInput,
+  checkWritable,
+  indexSheet,
+  patchSheet as patchSheetBytes,
+} from './patch.js'
 import { XlsxError } from './errors.js'
 
 const encode = (text: string) => new TextEncoder().encode(text)
@@ -28,6 +33,18 @@ test('returns the source untouched when there is nothing to do', () => {
   const source = sheet(ROWS)
 
   assert.equal(patchSheet(source, new Map(), false), source)
+})
+
+test('a styled cell no column letter can name does not break the index', () => {
+  // XFE is column 16385, past the last a sheet can hold; the reader accepts it
+  // leniently, so indexing must skip it rather than throw and take set() down.
+  const source = sheet(
+    '<row r="1"><c r="XFE1" s="1"><v>1</v></c><c r="A1" s="2"><v>2</v></c></row>',
+  )
+
+  const index = indexSheet(new TextEncoder().encode(source))
+
+  assert.equal(index.styles.get('A1'), 2)
 })
 
 test('replaces the value of a cell', () => {
