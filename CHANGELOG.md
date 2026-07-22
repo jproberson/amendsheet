@@ -83,6 +83,12 @@ and the API is still free to change.
 
 ### Fixed
 
+- An OLE2 compound file — a password-protected `.xlsx` or a legacy `.xls` — is
+  reported as what it is, naming decryption or conversion, rather than as a bare
+  "not a zip archive" that pointed at the wrong problem.
+- A UTF-16 part is refused with a clear message instead of decoding to
+  interleaved-null garbage. A UTF-16 part with no byte-order mark used to read as
+  an empty part with no error, since its nulls are valid UTF-8.
 - Writing into a merged cell that is not the anchor is refused, the way an array
   or shared-formula anchor already was. A value stored on any other member of a
   merge never shows in any reader, so the write was silently lost.

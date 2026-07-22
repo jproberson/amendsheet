@@ -1,4 +1,4 @@
-import { type Container, writeContainer } from './container.js'
+import { type Container, decodeXmlPart, writeContainer } from './container.js'
 import { XlsxError } from './errors.js'
 import { LAST_SERIAL, dateToSerial, serialToDate } from './date.js'
 import {
@@ -211,11 +211,7 @@ function withoutOverride(xml: string, part: string): string {
 function partText(container: Container, path: string): string | undefined {
   const bytes = container.parts.get(path)
   if (bytes === undefined) return undefined
-  try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
-  } catch (cause) {
-    throw new XlsxError('unreadable-part', `Part ${path} is not valid utf-8`, { part: path, cause })
-  }
+  return decodeXmlPart(bytes, path)
 }
 
 function toCellValue(raw: RawCell, styles: Styles, date1904: boolean): CellValue {

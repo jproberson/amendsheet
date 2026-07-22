@@ -1,4 +1,4 @@
-import { type Container, readContainer } from './container.js'
+import { type Container, decodeXmlPart, readContainer } from './container.js'
 import { XlsxError } from './errors.js'
 import { readRelationships, resolveTarget } from './relationships.js'
 import { readXml } from './xml.js'
@@ -35,11 +35,7 @@ function partText(container: Container, path: string): string {
   const bytes = container.parts.get(path)
   if (bytes === undefined)
     throw new XlsxError('missing-part', `Missing part ${path}`, { part: path })
-  try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
-  } catch (cause) {
-    throw new XlsxError('unreadable-part', `Part ${path} is not valid utf-8`, { part: path, cause })
-  }
+  return decodeXmlPart(bytes, path)
 }
 
 function findWorkbookPath(container: Container): string {
