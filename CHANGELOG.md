@@ -50,8 +50,11 @@ and the API is still free to change.
   sheets no longer pays to decompress and recompress them: over ~86MB of
   untouched parts, a one-cell edit went from 2.2s to 3ms and about 90MB less
   peak memory. The ZIP layer is now ours; fflate only deflates and inflates the
-  parts that change. ZIP64 archives (over 4GB or 65535+ entries) are refused
-  with a clear message rather than misread.
+  parts that change.
+- ZIP64 is read and written, so a workbook with more than 65535 parts, or a part
+  or archive past 4GB, is handled rather than refused. A package within the plain
+  ZIP limits — every ordinary workbook — comes out byte for byte as before; the
+  ZIP64 records only appear when a count, size or offset needs them.
 - `cell.formula` is a union rather than a string. A cell following a shared
   formula reported `''`, which is falsy, so `if (cell.formula)` treated it as a
   cell holding a literal. It now reports `{ kind: 'shared', master }`, naming the

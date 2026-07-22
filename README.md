@@ -144,8 +144,6 @@ What a minor release is allowed to do, so you know which branches are safe:
 - A part the edit does not touch is copied through still compressed, so a large
   workbook is not fully decompressed to change one cell. A single sheet is still
   patched as one string, though, so an enormous sheet is held whole.
-- ZIP64 archives — over 4GB, or more than 65535 parts — are refused rather than
-  read. Ordinary workbooks are far below both limits.
 - Charts, pivot tables and drawings are preserved but never created.
 - Nothing reads or writes cell formatting beyond number formats, so fonts,
   fills and borders can be preserved but not set.
