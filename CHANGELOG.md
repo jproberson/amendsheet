@@ -8,6 +8,10 @@ and the API is still free to change.
 
 ### Added
 
+- `error.sheet`, the worksheet name a failure happened on, alongside `part` and
+  `reference`. Every error now carries the tightest location it knows: a refused
+  write names the sheet it was aimed at, and an unreadable cell value names the
+  sheet and part it sits in rather than nothing.
 - `worksheet.sheetId`, as the workbook part spells it, so a sheet can be matched
   against a defined name or a part this library does not interpret.
 - `invalid-content`, for a part that is well formed xml but says something no
@@ -68,6 +72,10 @@ and the API is still free to change.
   only the date.
 
 ### Fixed
+
+- Writing into a merged cell that is not the anchor is refused, the way an array
+  or shared-formula anchor already was. A value stored on any other member of a
+  merge never shows in any reader, so the write was silently lost.
 
 - A `Date` written and read back is now identical to the millisecond. A serial
   is a count of days, so the conversion back was fractional and the `Date`

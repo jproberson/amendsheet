@@ -10,7 +10,7 @@ const RELS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 </Relationships>`
 
 test('reads relationships by id', () => {
-  const relationships = readRelationships(RELS)
+  const relationships = readRelationships(RELS, 'rels')
 
   assert.equal(relationships.size, 3)
   assert.deepEqual(relationships.get('rId1'), {
@@ -22,27 +22,28 @@ test('reads relationships by id', () => {
 })
 
 test('marks external relationships', () => {
-  const relationships = readRelationships(RELS)
+  const relationships = readRelationships(RELS, 'rels')
 
   assert.equal(relationships.get('rId3')?.external, true)
 })
 
 test('ignores elements that are not relationships', () => {
-  const relationships = readRelationships('<Relationships><Other Id="x"/></Relationships>')
+  const relationships = readRelationships('<Relationships><Other Id="x"/></Relationships>', 'rels')
 
   assert.equal(relationships.size, 0)
 })
 
 test('rejects a relationship with no id', () => {
   assert.throws(
-    () => readRelationships('<Relationships><Relationship Target="a.xml"/></Relationships>'),
+    () =>
+      readRelationships('<Relationships><Relationship Target="a.xml"/></Relationships>', 'rels'),
     /Relationship is missing Id/,
   )
 })
 
 test('rejects a relationship with no target', () => {
   assert.throws(
-    () => readRelationships('<Relationships><Relationship Id="rId1"/></Relationships>'),
+    () => readRelationships('<Relationships><Relationship Id="rId1"/></Relationships>', 'rels'),
     /rId1 is missing Target/,
   )
 })
@@ -90,7 +91,10 @@ test('resolves fixtures relationships to package paths, dangling ones included',
       // xl/_rels/workbook.xml.rels describes xl/workbook.xml
       const owner = path.replace('_rels/', '').replace(/\.rels$/, '')
 
-      for (const relationship of readRelationships(new TextDecoder().decode(bytes)).values()) {
+      for (const relationship of readRelationships(
+        new TextDecoder().decode(bytes),
+        'rels',
+      ).values()) {
         if (relationship.external) continue
 
         const resolved = resolveTarget(owner, relationship.target)

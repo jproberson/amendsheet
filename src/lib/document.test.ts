@@ -1080,3 +1080,65 @@ test('a dependent whose master is nowhere in the sheet still says it shares', ()
 
   assert.deepEqual(workbook.sheets[0]?.cell('A2')?.formula, { kind: 'shared' })
 })
+
+test('a refused write names the sheet it was aimed at', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+
+  assert.throws(
+    () => workbook.sheets[0]?.set('A1', Number.NaN),
+    (error: unknown) =>
+      error instanceof XlsxError &&
+      error.reference === 'A1' &&
+      error.sheet === 'Data' &&
+      error.part === 'xl/worksheets/sheet1.xml',
+  )
+})
+
+test('a refused date write names the sheet too', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+
+  assert.throws(
+    () => workbook.sheets[0]?.set('A1', new Date(1800, 0, 1)),
+    (error: unknown) => error instanceof XlsxError && error.sheet === 'Data',
+  )
+})
+
+test('an unreadable cell value names the sheet and part it is in', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>banana</v></c></row>'))
+
+  assert.throws(
+    () => [...(workbook.sheets[0]?.cells() ?? [])],
+    (error: unknown) =>
+      error instanceof XlsxError &&
+      error.code === 'invalid-content' &&
+      error.reference === 'A1' &&
+      error.sheet === 'Data' &&
+      error.part === 'xl/worksheets/sheet1.xml',
+  )
+})
+
+test('writing into a merged cell that is not the anchor is refused', () => {
+  const merged =
+    '<worksheet><sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData>' +
+    // The second ref has no colon, which is not a range and is ignored.
+    '<mergeCells count="2"><mergeCell ref="A1:B2"/><mergeCell ref="D4"/></mergeCells></worksheet>'
+  const workbook = readWorkbook(build('', { extra: { 'xl/worksheets/sheet1.xml': merged } }))
+  const sheet = workbook.sheets[0]
+
+  assert.throws(
+    () => sheet?.set('B2', 5),
+    (error: unknown) =>
+      error instanceof XlsxError &&
+      error.code === 'unwritable-value' &&
+      error.reference === 'B2' &&
+      error.sheet === 'Data' &&
+      /A1/.test(error.message),
+  )
+  // The anchor is the one member a value shows in, so it stays writable.
+  sheet?.set('A1', 9)
+  assert.equal(sheet?.cell('A1')?.value.kind, 'number')
+  // A cell outside every merge is free, and so is the ignored colon-less one.
+  sheet?.set('Z9', 1)
+  sheet?.set('D4', 2)
+  assert.equal(sheet?.cell('Z9')?.value.kind, 'number')
+})

@@ -21,23 +21,34 @@ export type XlsxErrorCode =
   | 'unwritable-value'
   | (string & {})
 
+/**
+ * Where a failure happened, as tightly as the throw site knows it. A cell
+ * failure carries all three of `part`, `sheet` and `reference`; a part-level
+ * failure carries `part`; only a whole-file failure with nowhere finer to point
+ * (a non-zip, a low-level parse offset already in the message) carries just
+ * `cause`. The argument is required so no throw can silently drop the location.
+ */
 export interface XlsxErrorContext {
   readonly part?: string
+  /** The worksheet name, when a cell or sheet is the locus. */
+  readonly sheet?: string
   readonly reference?: string
   readonly cause?: unknown
 }
 
 export class XlsxError extends Error {
   readonly code: XlsxErrorCode
-  /** Where in the document the failure was, when that is known. */
+  /** Where in the document the failure was, as tightly as it was known. */
   readonly part: string | undefined
+  readonly sheet: string | undefined
   readonly reference: string | undefined
 
-  constructor(code: XlsxErrorCode, message: string, context: XlsxErrorContext = {}) {
+  constructor(code: XlsxErrorCode, message: string, context: XlsxErrorContext) {
     super(message, { cause: context.cause })
     this.name = 'XlsxError'
     this.code = code
     this.part = context.part
+    this.sheet = context.sheet
     this.reference = context.reference
   }
 }

@@ -1,4 +1,4 @@
-import { XlsxError } from './errors.js'
+import { type XlsxErrorContext, XlsxError } from './errors.js'
 
 const MILLISECONDS_PER_DAY = 86_400_000
 
@@ -25,9 +25,9 @@ export const LAST_SERIAL = 2_958_465
  * timestamp. Arithmetic on timestamps drifts by an hour whenever the date and
  * the epoch sit on opposite sides of a daylight saving change.
  */
-export function serialToDate(serial: number, date1904: boolean): Date {
+export function serialToDate(serial: number, date1904: boolean, at: XlsxErrorContext = {}): Date {
   if (!Number.isFinite(serial) || serial < 0 || serial > LAST_SERIAL) {
-    throw new XlsxError('invalid-content', `Serial ${serial} is not a date`)
+    throw new XlsxError('invalid-content', `Serial ${serial} is not a date`, at)
   }
 
   const corrected = !date1904 && serial > PHANTOM_LEAP_DAY ? serial - 1 : serial
@@ -49,11 +49,11 @@ export function serialToDate(serial: number, date1904: boolean): Date {
   )
 }
 
-export function dateToSerial(date: Date, date1904: boolean, reference?: string): number {
-  const where = reference === undefined ? '' : ` to cell ${reference}`
+export function dateToSerial(date: Date, date1904: boolean, at: XlsxErrorContext = {}): number {
+  const where = at.reference === undefined ? '' : ` to cell ${at.reference}`
 
   if (Number.isNaN(date.getTime())) {
-    throw new XlsxError('unwritable-value', `Cannot write an invalid date${where}`, { reference })
+    throw new XlsxError('unwritable-value', `Cannot write an invalid date${where}`, at)
   }
 
   // Some zones move the clock forward at midnight, so the first moment of a
@@ -79,7 +79,7 @@ export function dateToSerial(date: Date, date1904: boolean, reference?: string):
       'unwritable-value',
       `Cannot write ${date.toDateString()}${where}: it is before ` +
         `${date1904 ? 1904 : 1900}, which this workbook cannot hold`,
-      { reference },
+      at,
     )
   }
 
@@ -89,7 +89,7 @@ export function dateToSerial(date: Date, date1904: boolean, reference?: string):
       'unwritable-value',
       `Cannot write ${date.toDateString()}${where}: it is after 9999, ` +
         'which this workbook cannot hold',
-      { reference },
+      at,
     )
   }
   return serial

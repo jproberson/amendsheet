@@ -134,9 +134,9 @@ What a minor release is allowed to do, so you know which branches are safe:
 ## Not done yet
 
 - Overwriting the anchor of a shared formula, an array formula or a data table
-  is refused rather than breaking the cells that spill from it.
-- Writing into a merged cell is not stopped. A value in any but the top-left
-  member of a merge is stored but never shown, and nothing warns.
+  is refused rather than breaking the cells that spill from it. Writing into a
+  merged cell that is not the anchor is refused for the same reason: a value
+  there would never show.
 - A digital signature survives as a part but any edit invalidates it, since the
   package is rebuilt and the bytes it signed change.
 - Nothing evaluates formulas, so a written one has no value until a spreadsheet

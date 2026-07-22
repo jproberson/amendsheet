@@ -3,6 +3,16 @@ import { XlsxError } from './errors.js'
 import { formatReference, parseReference } from './reference.js'
 import { findUnwritableCharacter, readXml } from './xml.js'
 
+/**
+ * Where a write-path error points, past the cell reference the throw site
+ * already knows. `set()` fills it in from the sheet the edit is on, so a
+ * refusal names the sheet and part and not just the cell.
+ */
+export interface SheetLocation {
+  readonly sheet?: string
+  readonly part?: string
+}
+
 /** An expression without the leading `=`, so text starting with `=` stays text. */
 export interface FormulaInput {
   readonly formula: string
@@ -25,12 +35,12 @@ const escapeXml = (text: string) =>
  * else; a JS caller, a JSON payload or an `any` at a boundary reach here, and
  * reading `.formula` off them threw outside the error contract.
  */
-function formulaOf(value: object, reference: string): string {
+function formulaOf(value: object, reference: string, at: SheetLocation): string {
   if ('formula' in value && typeof value.formula === 'string') return value.formula
   throw new XlsxError(
     'unwritable-value',
     `Cell ${reference} was given an object that names no string formula`,
-    { reference },
+    { ...at, reference },
   )
 }
 
@@ -39,12 +49,18 @@ function formulaOf(value: object, reference: string): string {
  * instead of leaving a workbook that only fails once it is saved. Takes
  * `unknown` because it is the boundary the value has to get past.
  */
-export function checkWritable(reference: string, value: unknown, date1904: boolean): void {
+export function checkWritable(
+  reference: string,
+  value: unknown,
+  date1904: boolean,
+  at: SheetLocation = {},
+): void {
   if (value === null || typeof value === 'boolean') return
 
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) {
       throw new XlsxError('unwritable-value', `Cell ${reference} cannot hold ${value}`, {
+        ...at,
         reference,
       })
     }
@@ -52,7 +68,7 @@ export function checkWritable(reference: string, value: unknown, date1904: boole
   }
 
   if (value instanceof Date) {
-    dateToSerial(value, date1904, reference)
+    dateToSerial(value, date1904, { ...at, reference })
     return
   }
 
@@ -60,18 +76,18 @@ export function checkWritable(reference: string, value: unknown, date1904: boole
     throw new XlsxError(
       'unwritable-value',
       `Cell ${reference} cannot hold a value of type ${typeof value}`,
-      { reference },
+      { ...at, reference },
     )
   }
 
   const unwritable = findUnwritableCharacter(
-    typeof value === 'string' ? value : formulaOf(value, reference),
+    typeof value === 'string' ? value : formulaOf(value, reference, at),
   )
   if (unwritable !== undefined) {
     throw new XlsxError(
       'unwritable-value',
       `Cell ${reference} holds ${unwritable}, which cannot be written to xml`,
-      { reference },
+      { ...at, reference },
     )
   }
 }
@@ -87,20 +103,48 @@ export interface SpillingFormula {
   readonly name: string
 }
 
-/** Both keyed by canonical reference, so `a1` and `$A$1` find the same cell. */
+/** A merged region, as a rectangle so a whole-column merge costs no per-cell store. */
+interface MergeRange {
+  /** Canonical top-left, the one member a written value would actually show in. */
+  readonly anchor: string
+  readonly minRow: number
+  readonly maxRow: number
+  readonly minColumn: number
+  readonly maxColumn: number
+}
+
+function parseMergeRange(ref: string): MergeRange | undefined {
+  const colon = ref.indexOf(':')
+  if (colon === -1) return undefined
+  const start = parseReference(ref.slice(0, colon))
+  const end = parseReference(ref.slice(colon + 1))
+  const minRow = Math.min(start.row, end.row)
+  const minColumn = Math.min(start.column, end.column)
+  return {
+    anchor: formatReference({ row: minRow, column: minColumn }),
+    minRow,
+    maxRow: Math.max(start.row, end.row),
+    minColumn,
+    maxColumn: Math.max(start.column, end.column),
+  }
+}
+
+/** All keyed by canonical reference, so `a1` and `$A$1` find the same cell. */
 export interface SheetIndex {
   /** The style index a cell carried when the file was read. */
   readonly styles: ReadonlyMap<string, number>
   /** Cells that other cells depend on for their formula. */
   readonly sharedFormulas: ReadonlyMap<string, SpillingFormula>
+  readonly merges: readonly MergeRange[]
 }
 
-/** One pass, because set() needs both of these before it accepts an edit. */
+/** One pass, because set() needs all of these before it accepts an edit. */
 export function indexSheet(xml: string): SheetIndex {
   const styles = new Map<string, number>()
   const sharedFormulas = new Map<string, SpillingFormula>()
+  const shape = readShape(xml)
 
-  for (const row of readShape(xml).rows) {
+  for (const row of shape.rows) {
     for (const cell of row.cells) {
       if (cell.style === undefined && cell.spillingFormula === undefined) continue
       const reference = formatReference({ row: row.row, column: cell.column })
@@ -111,10 +155,28 @@ export function indexSheet(xml: string): SheetIndex {
     }
   }
 
-  return { styles, sharedFormulas }
+  return { styles, sharedFormulas, merges: shape.merges }
 }
 
-export function sharedFormulaRefusal(reference: string, master: SpillingFormula): XlsxError {
+/** The anchor of a merge `reference` is buried inside, or undefined if it is free. */
+export function mergeAnchorFor(index: SheetIndex, reference: string): string | undefined {
+  const { row, column } = parseReference(reference)
+  for (const merge of index.merges) {
+    const inside =
+      row >= merge.minRow &&
+      row <= merge.maxRow &&
+      column >= merge.minColumn &&
+      column <= merge.maxColumn
+    if (inside && merge.anchor !== reference) return merge.anchor
+  }
+  return undefined
+}
+
+export function sharedFormulaRefusal(
+  reference: string,
+  master: SpillingFormula,
+  at: SheetLocation = {},
+): XlsxError {
   const what =
     master.kind === 'shared'
       ? `defines shared formula ${master.name}`
@@ -122,7 +184,15 @@ export function sharedFormulaRefusal(reference: string, master: SpillingFormula)
   return new XlsxError(
     'unwritable-value',
     `Cell ${reference} ${what}; overwriting it would break the cells that depend on it`,
-    { reference },
+    { ...at, reference },
+  )
+}
+
+export function mergeRefusal(reference: string, anchor: string, at: SheetLocation = {}): XlsxError {
+  return new XlsxError(
+    'unwritable-value',
+    `Cell ${reference} is merged into ${anchor}; a value there would never show, so write ${anchor} instead`,
+    { ...at, reference },
   )
 }
 
@@ -137,8 +207,9 @@ function cellElement(
   date1904: boolean,
   sharedStrings: ReadonlyMap<string, number> | undefined,
   prefix: string,
+  at: SheetLocation,
 ): string {
-  checkWritable(reference, value, date1904)
+  checkWritable(reference, value, date1904, at)
 
   const attributes = style === undefined ? '' : ` s="${style}"`
   const c = `${prefix}c`
@@ -202,6 +273,7 @@ interface SheetShape {
   readonly prefix: string
   readonly dimension: DimensionSpan | undefined
   readonly rows: RowSpan[]
+  readonly merges: MergeRange[]
   /** Offset just before `</sheetData>`, where a new row is appended. */
   readonly contentEnd: number
   readonly selfClosing: boolean
@@ -209,8 +281,9 @@ interface SheetShape {
   readonly dataEnd: number
 }
 
-function readShape(xml: string): SheetShape {
+function readShape(xml: string, at: SheetLocation = {}): SheetShape {
   const rows: RowSpan[] = []
+  const merges: MergeRange[] = []
   let dimension: DimensionSpan | undefined
   let contentEnd = -1
   let dataStart = -1
@@ -286,6 +359,12 @@ function readShape(xml: string): SheetShape {
           })
         }
       }
+      if (event.localName === 'mergeCell') {
+        const ref = event.attributes.get('ref')
+        const merge = ref === undefined ? undefined : parseMergeRange(ref)
+        if (merge !== undefined) merges.push(merge)
+        continue
+      }
       // Only the cell carrying ref owns the range. A shared dependent names the
       // si alone, and any of them may be written self closing.
       if (event.localName === 'f') {
@@ -340,9 +419,9 @@ function readShape(xml: string): SheetShape {
   }
 
   if (dataStart === -1)
-    throw new XlsxError('malformed-xml', 'Sheet has no sheetData element to write into')
+    throw new XlsxError('malformed-xml', 'Sheet has no sheetData element to write into', at)
 
-  return { prefix, dimension, rows, contentEnd, selfClosing, dataStart, dataEnd }
+  return { prefix, dimension, rows, merges, contentEnd, selfClosing, dataStart, dataEnd }
 }
 
 interface Splice {
@@ -359,10 +438,11 @@ export function patchSheet(
   date1904: boolean,
   sharedStrings?: ReadonlyMap<string, number>,
   styleOverrides?: ReadonlyMap<string, number>,
+  at: SheetLocation = {},
 ): string {
   if (edits.size === 0) return xml
 
-  const shape = readShape(xml)
+  const shape = readShape(xml, at)
   const splices: Splice[] = []
   const newRows = new Map<number, string[]>()
   const filledRows = new Map<RowSpan, Array<{ column: number; cell: string }>>()
@@ -404,6 +484,7 @@ export function patchSheet(
           date1904,
           sharedStrings,
           shape.prefix,
+          at,
         ),
       )
       newRows.set(row, pending)
@@ -412,7 +493,7 @@ export function patchSheet(
 
     const existingCell = cellsOf(existingRow).get(column)
     if (existingCell?.spillingFormula !== undefined) {
-      throw sharedFormulaRefusal(reference, existingCell.spillingFormula)
+      throw sharedFormulaRefusal(reference, existingCell.spillingFormula, at)
     }
     if (existingCell !== undefined) {
       splices.push({
@@ -425,6 +506,7 @@ export function patchSheet(
           date1904,
           sharedStrings,
           shape.prefix,
+          at,
         ),
         order: column,
       })
@@ -438,6 +520,7 @@ export function patchSheet(
       date1904,
       sharedStrings,
       shape.prefix,
+      at,
     )
 
     if (existingRow.selfClosing) {
@@ -450,8 +533,8 @@ export function patchSheet(
     }
 
     const next = existingRow.cells.find((candidate) => candidate.column > column)
-    const at = next === undefined ? existingRow.contentEnd : next.start
-    splices.push({ start: at, end: at, text: cell, order: column })
+    const insertAt = next === undefined ? existingRow.contentEnd : next.start
+    splices.push({ start: insertAt, end: insertAt, text: cell, order: column })
   }
 
   for (const [row, cells] of filledRows) {
@@ -492,12 +575,12 @@ export function patchSheet(
     // Existing rows come out of readShape in document order, so walking them
     // once alongside the sorted new rows places every one without rescanning
     // the sheet per row.
-    let at = 0
-    let next = shape.rows[at]
+    let cursor = 0
+    let next = shape.rows[cursor]
     for (const [row, cells] of [...newRows].sort(([left], [right]) => left - right)) {
       while (next !== undefined && next.row <= row) {
-        at++
-        next = shape.rows[at]
+        cursor++
+        next = shape.rows[cursor]
       }
       const offset = next === undefined ? shape.contentEnd : next.start
       splices.push({ start: offset, end: offset, text: buildRow(row, cells), order: row })

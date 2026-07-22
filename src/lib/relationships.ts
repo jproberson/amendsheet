@@ -10,18 +10,19 @@ export interface Relationship {
   readonly external: boolean
 }
 
-export function readRelationships(xml: string): ReadonlyMap<string, Relationship> {
+export function readRelationships(xml: string, part: string): ReadonlyMap<string, Relationship> {
   const relationships = new Map<string, Relationship>()
 
   for (const event of readXml(xml)) {
     if (event.kind !== 'open' || event.localName !== 'Relationship') continue
 
     const id = event.attributes.get('Id')
-    if (id === undefined) throw new XlsxError('malformed-xml', 'Relationship is missing Id')
+    if (id === undefined)
+      throw new XlsxError('malformed-xml', 'Relationship is missing Id', { part })
 
     const target = event.attributes.get('Target')
     if (target === undefined)
-      throw new XlsxError('malformed-xml', `Relationship ${id} is missing Target`)
+      throw new XlsxError('malformed-xml', `Relationship ${id} is missing Target`, { part })
 
     relationships.set(id, {
       id,

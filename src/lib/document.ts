@@ -4,10 +4,13 @@ import { LAST_SERIAL, dateToSerial, serialToDate } from './date.js'
 import {
   type CellInput,
   checkWritable,
+  mergeAnchorFor,
+  mergeRefusal,
   patchSheet,
   indexSheet,
   sharedFormulaRefusal,
   type SheetIndex,
+  type SheetLocation,
 } from './patch.js'
 import {
   type CellAddress,
@@ -296,12 +299,20 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
 
   const sheets = part.sheets.map((reference): Worksheet => {
     const sheetXml = partText(container, reference.path)
+    const at: SheetLocation = { sheet: reference.name, part: reference.path }
 
     const patched = () => {
       if (sheetXml === undefined) return undefined
       const pending = edits.get(reference.path)
       if (pending === undefined) return sheetXml
-      return patchSheet(sheetXml, pending, date1904, undefined, styleOverrides.get(reference.path))
+      return patchSheet(
+        sheetXml,
+        pending,
+        date1904,
+        undefined,
+        styleOverrides.get(reference.path),
+        at,
+      )
     }
 
     function* readCells(source?: string): Generator<Cell> {
@@ -312,7 +323,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       // this in as the sheet streams resolves every one of them.
       const masters: SharedMasters = new Map()
 
-      for (const raw of readSheet(xml, sharedStrings)) {
+      for (const raw of readSheet(xml, sharedStrings, at)) {
         if (raw.ownsSharedRange === true && raw.sharedIndex !== undefined) {
           masters.set(raw.sharedIndex, canonicalReference(raw.address) ?? raw.reference)
         }
@@ -404,13 +415,19 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           throw new XlsxError(
             'missing-part',
             `Sheet ${reference.name} is not in the package, so ${canonical} cannot be written`,
-            { part: reference.path, reference: canonical },
+            { ...at, reference: canonical },
           )
         }
 
-        checkWritable(canonical, value, date1904)
-        const si = indexed()?.sharedFormulas.get(canonical)
-        if (si !== undefined) throw sharedFormulaRefusal(canonical, si)
+        checkWritable(canonical, value, date1904, at)
+        // sheetXml is present, so indexed() is too; the guard is for the type.
+        const index = indexed()
+        if (index !== undefined) {
+          const si = index.sharedFormulas.get(canonical)
+          if (si !== undefined) throw sharedFormulaRefusal(canonical, si, at)
+          const anchor = mergeAnchorFor(index, canonical)
+          if (anchor !== undefined) throw mergeRefusal(canonical, anchor, at)
+        }
 
         const current = styleAt(canonical)
 
@@ -503,9 +520,13 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     for (const [path, pending] of edits) {
       const xml = partText(container, path)
       if (xml === undefined) continue
+      const at: SheetLocation = {
+        sheet: part.sheets.find((s) => s.path === path)?.name,
+        part: path,
+      }
       parts.set(
         path,
-        encoder.encode(patchSheet(xml, pending, date1904, indexes, styleOverrides.get(path))),
+        encoder.encode(patchSheet(xml, pending, date1904, indexes, styleOverrides.get(path), at)),
       )
     }
 

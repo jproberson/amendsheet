@@ -49,7 +49,10 @@ function findWorkbookPath(container: Container): string {
     })
   }
 
-  for (const relationship of readRelationships(partText(container, ROOT_RELATIONSHIPS)).values()) {
+  for (const relationship of readRelationships(
+    partText(container, ROOT_RELATIONSHIPS),
+    ROOT_RELATIONSHIPS,
+  ).values()) {
     if (relationship.type === OFFICE_DOCUMENT) return resolveTarget('', relationship.target)
   }
 
@@ -84,7 +87,7 @@ export function readWorkbookPart(bytes: Uint8Array): WorkbookPart {
 
   const relationshipsPath = workbookPath.replace(/([^/]+)$/, '_rels/$1.rels')
   const relationships = container.parts.has(relationshipsPath)
-    ? readRelationships(partText(container, relationshipsPath))
+    ? readRelationships(partText(container, relationshipsPath), relationshipsPath)
     : new Map()
 
   const sheets: SheetRef[] = []

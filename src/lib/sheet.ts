@@ -1,4 +1,4 @@
-import { XlsxError } from './errors.js'
+import { type XlsxErrorContext, XlsxError } from './errors.js'
 import { type CellAddress, formatReference, parseReference } from './reference.js'
 import { readXml } from './xml.js'
 
@@ -26,7 +26,11 @@ export interface RawCell {
 }
 
 /** No dates: a date is a number with a date format, which needs the style table. */
-export function* readSheet(xml: string, sharedStrings: readonly string[]): Generator<RawCell> {
+export function* readSheet(
+  xml: string,
+  sharedStrings: readonly string[],
+  at: XlsxErrorContext = {},
+): Generator<RawCell> {
   let row = 0
   let column = 0
 
@@ -53,7 +57,7 @@ export function* readSheet(xml: string, sharedStrings: readonly string[]): Gener
     return {
       address,
       reference: written,
-      value: toValue(type, rawValue, inlineText, sharedStrings, written),
+      value: toValue(type, rawValue, inlineText, sharedStrings, written, at),
       ...(formula === null ? {} : { formula: formula.join('') }),
       ...(sharedIndex === undefined ? {} : { sharedIndex, ownsSharedRange }),
       ...(styleIndex === undefined ? {} : { styleIndex }),
@@ -143,6 +147,7 @@ function toValue(
   inlineText: string[] | null,
   sharedStrings: readonly string[],
   reference: string,
+  at: XlsxErrorContext,
 ): RawCellValue {
   if (type === 'inlineStr') {
     return { kind: 'text', value: inlineText === null ? '' : inlineText.join('') }
@@ -171,9 +176,7 @@ function toValue(
         throw new XlsxError(
           'invalid-content',
           `Cell ${reference} holds "${raw}", which is not a number`,
-          {
-            reference,
-          },
+          { ...at, reference },
         )
       }
       return { kind: 'number', value }
