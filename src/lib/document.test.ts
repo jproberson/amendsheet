@@ -1142,3 +1142,53 @@ test('writing into a merged cell that is not the anchor is refused', () => {
   sheet?.set('D4', 2)
   assert.equal(sheet?.cell('Z9')?.value.kind, 'number')
 })
+
+const TABLE_ROWS =
+  '<row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>2</v></c></row>' +
+  '<row r="2"><c r="A2"><v>3</v></c><c r="B2"><v>4</v></c></row>'
+
+function tableBook(
+  sheetData: string,
+  tableRef = 'A1:B2',
+  table = `<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="1" name="T" displayName="T" ref="${tableRef}" totalsRowShown="0"><autoFilter ref="${tableRef}"/><tableColumns count="2"><tableColumn id="1" name="a"/><tableColumn id="2" name="b"/></tableColumns><tableStyleInfo name="TableStyleMedium9"/></table>`,
+) {
+  return build('', {
+    extra: {
+      'xl/worksheets/sheet1.xml':
+        `<worksheet><dimension ref="${tableRef}"/><sheetData>${sheetData}</sheetData>` +
+        '<tableParts count="1"><tablePart r:id="rId1"/></tableParts></worksheet>',
+      'xl/worksheets/_rels/sheet1.xml.rels':
+        '<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/></Relationships>',
+      'xl/tables/table1.xml': table,
+    },
+  })
+}
+
+const tablePartOf = (bytes: Uint8Array) =>
+  new TextDecoder().decode(
+    readContainer(bytes).parts.get('xl/tables/table1.xml') ?? new Uint8Array(),
+  )
+
+test('a write directly below a table grows the table to include it', () => {
+  const workbook = readWorkbook(tableBook(TABLE_ROWS))
+  workbook.sheets[0]?.set('A3', 5)
+
+  const table = tablePartOf(workbook.toBytes())
+  assert.match(table, /<table[^>]*\sref="A1:B3"/)
+  assert.match(table, /<autoFilter ref="A1:B3"\/>/)
+})
+
+test('contiguous writes below a table grow it to the furthest one', () => {
+  const workbook = readWorkbook(tableBook(TABLE_ROWS))
+  workbook.sheets[0]?.set('B3', 5)
+  workbook.sheets[0]?.set('A4', 6)
+
+  assert.match(tablePartOf(workbook.toBytes()), /<table[^>]*\sref="A1:B4"/)
+})
+
+test('a write past a gap below a table does not grow it', () => {
+  const workbook = readWorkbook(tableBook(TABLE_ROWS))
+  workbook.sheets[0]?.set('A5', 5)
+
+  assert.match(tablePartOf(workbook.toBytes()), /<table[^>]*\sref="A1:B2"/)
+})

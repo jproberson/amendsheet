@@ -26,6 +26,9 @@ const EDIT_MAY_CHANGE = [
   // The calculation chain is dropped on an edit, so the relationship naming it
   // has to go with it. Leaving it behind is an invalid package.
   /^xl\/_rels\/workbook\.xml\.rels$/,
+  // A cell written just past a table grows it, so its part changes. Loss would
+  // still show as a dropped table part or a changed cell, which are caught.
+  /^xl\/tables\/[^/]+\.xml$/,
 ]
 
 const isWorksheet = (path: string) => /^xl\/worksheets\/[^/]+\.xml$/.test(path)

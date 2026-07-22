@@ -22,6 +22,7 @@ import {
 import { resolveTarget } from './relationships.js'
 import { type RawCell, readSheet } from './sheet.js'
 import { appendSharedStrings, readSharedStrings } from './shared-strings.js'
+import { extendTables } from './tables.js'
 import { type DateStyle, ensureDateStyle, ensureNumberFormat } from './styles-writer.js'
 import { type Styles, isDateFormat, numberFormatOf, readStyles } from './styles.js'
 import { readXml } from './xml.js'
@@ -528,6 +529,10 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         path,
         encoder.encode(patchSheet(xml, pending, date1904, indexes, styleOverrides.get(path), at)),
       )
+      // A cell written just past a table grows it, the way Excel would.
+      for (const extension of extendTables(xml, path, container, pending.keys())) {
+        parts.set(extension.path, encoder.encode(extension.xml))
+      }
     }
 
     const wroteFormula = [...edits.values()].some((pending) =>
