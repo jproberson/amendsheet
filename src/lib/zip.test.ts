@@ -83,6 +83,23 @@ test('reports a part that cannot be inflated', () => {
   )
 })
 
+test('reports a part too large to hold in memory rather than crashing', () => {
+  const huge: ZipEntry = {
+    name: 'xl/worksheets/sheet1.xml',
+    method: 8,
+    crc: 0,
+    compressed: enc('x'),
+    uncompressedSize: 2 ** 48,
+  }
+  assert.throws(
+    () => inflate(huge),
+    (error: unknown) =>
+      error instanceof XlsxError &&
+      error.code === 'part-too-large' &&
+      error.part === 'xl/worksheets/sheet1.xml',
+  )
+})
+
 test('rejects bytes with no end-of-central-directory record', () => {
   assert.throws(() => readZip(enc('nowhere near a zip archive')), isNotAZip)
 })

@@ -17,6 +17,8 @@ export type XlsxErrorCode =
   | 'malformed-xml'
   /** Well formed xml that says something no reader can honour. */
   | 'invalid-content'
+  /** A part decompresses to more bytes than this runtime can hold at once. */
+  | 'part-too-large'
   | 'bad-reference'
   | 'unwritable-value'
   | (string & {})

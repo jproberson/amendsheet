@@ -155,8 +155,18 @@ const DEFLATED = 8
 export function inflate(entry: ZipEntry): Uint8Array {
   if (entry.method === STORED) return entry.compressed
   if (entry.method === DEFLATED) {
+    let out: Uint8Array
     try {
-      return inflateSync(entry.compressed, { out: new Uint8Array(entry.uncompressedSize) })
+      out = new Uint8Array(entry.uncompressedSize)
+    } catch (cause) {
+      throw new XlsxError(
+        'part-too-large',
+        `Part ${entry.name} decompresses to ${entry.uncompressedSize} bytes, too large to hold in memory`,
+        { part: entry.name, cause },
+      )
+    }
+    try {
+      return inflateSync(entry.compressed, { out })
     } catch (cause) {
       throw new XlsxError('unreadable-part', `Part ${entry.name} could not be inflated`, {
         part: entry.name,
