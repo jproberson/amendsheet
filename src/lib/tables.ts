@@ -1,7 +1,7 @@
 import type { Container } from './container.js'
 import { formatReference, parseReference } from './reference.js'
 import { readRelationships, resolveTarget } from './relationships.js'
-import { readXml, withAttribute } from './xml.js'
+import { readXml, readXmlBytes, withAttribute } from './xml.js'
 
 /** A rewritten table part, ready to replace the one that was read. */
 export interface TableExtension {
@@ -22,12 +22,12 @@ interface Range {
  * table no edit reaches, or one with a totals row, is left exactly as it was.
  */
 export function extendTables(
-  sheetXml: string,
+  sheetBytes: Uint8Array,
   sheetPath: string,
   container: Container,
   written: Iterable<string>,
 ): TableExtension[] {
-  const paths = tablePartPaths(sheetXml, sheetPath, container)
+  const paths = tablePartPaths(sheetBytes, sheetPath, container)
   if (paths.length === 0) return []
 
   const cells = new Set(written)
@@ -55,9 +55,9 @@ interface DecodedTable {
   readonly columnIds: number[]
 }
 
-function tablePartPaths(sheetXml: string, sheetPath: string, container: Container): string[] {
+function tablePartPaths(sheetBytes: Uint8Array, sheetPath: string, container: Container): string[] {
   const ids: string[] = []
-  for (const event of readXml(sheetXml)) {
+  for (const event of readXmlBytes(sheetBytes)) {
     if (event.kind !== 'open' || event.localName !== 'tablePart') continue
     const id = relationshipId(event.attributes)
     if (id !== undefined) ids.push(id)

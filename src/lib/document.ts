@@ -115,8 +115,6 @@ const EMPTY_STYLES: Styles = { numberFormats: new Map(), cellFormats: [] }
 const CALCULATION_CHAIN = 'xl/calcChain.xml'
 const CONTENT_TYPES = '[Content_Types].xml'
 
-const utf8 = new TextEncoder()
-
 /**
  * CT_Workbook is a sequence, so a calcPr the file lacks cannot simply be
  * appended: these are the children the schema puts after it.
@@ -300,25 +298,17 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     const sheetBytes = container.parts.get(reference.path)
     const at: SheetLocation = { sheet: reference.name, part: reference.path }
 
-    // Decoded only by the still-string patch and index path, and only on a
-    // write; a pure read never builds the whole sheet as a string.
-    let sheetStringCache: string | undefined
-    const sheetText = (bytes: Uint8Array): string =>
-      (sheetStringCache ??= decodeXmlPart(bytes, reference.path))
-
     const patched = (): Uint8Array | undefined => {
       if (sheetBytes === undefined) return undefined
       const pending = edits.get(reference.path)
       if (pending === undefined) return sheetBytes
-      return utf8.encode(
-        patchSheet(
-          sheetText(sheetBytes),
-          pending,
-          date1904,
-          undefined,
-          styleOverrides.get(reference.path),
-          at,
-        ),
+      return patchSheet(
+        sheetBytes,
+        pending,
+        date1904,
+        undefined,
+        styleOverrides.get(reference.path),
+        at,
       )
     }
 
@@ -345,7 +335,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     let index: SheetIndex | undefined
     const indexed = (): SheetIndex | undefined => {
       if (sheetBytes === undefined) return undefined
-      index ??= indexSheet(sheetText(sheetBytes))
+      index ??= indexSheet(sheetBytes)
       return index
     }
 
@@ -528,18 +518,15 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     }
 
     for (const [path, pending] of edits) {
-      const xml = partText(container, path)
-      if (xml === undefined) continue
+      const bytes = container.parts.get(path)
+      if (bytes === undefined) continue
       const at: SheetLocation = {
         sheet: part.sheets.find((s) => s.path === path)?.name,
         part: path,
       }
-      changes.set(
-        path,
-        encoder.encode(patchSheet(xml, pending, date1904, indexes, styleOverrides.get(path), at)),
-      )
+      changes.set(path, patchSheet(bytes, pending, date1904, indexes, styleOverrides.get(path), at))
       // A cell written just past a table grows it, the way Excel would.
-      for (const extension of extendTables(xml, path, container, pending.keys())) {
+      for (const extension of extendTables(bytes, path, container, pending.keys())) {
         changes.set(extension.path, encoder.encode(extension.xml))
       }
     }

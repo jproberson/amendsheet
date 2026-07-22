@@ -1,7 +1,17 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { type CellInput, checkWritable, patchSheet } from './patch.js'
+import { type CellInput, checkWritable, patchSheet as patchSheetBytes } from './patch.js'
 import { XlsxError } from './errors.js'
+
+const encode = (text: string) => new TextEncoder().encode(text)
+const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes)
+const patchSheet = (
+  source: string,
+  edits: ReadonlyMap<string, CellInput>,
+  date1904: boolean,
+  sharedStrings?: ReadonlyMap<string, number>,
+  styleOverrides?: ReadonlyMap<string, number>,
+) => decode(patchSheetBytes(encode(source), edits, date1904, sharedStrings, styleOverrides))
 
 const sheet = (rows: string) =>
   `<?xml version="1.0"?><worksheet xmlns="http://x"><cols><col min="1" max="1" width="20"/></cols>` +

@@ -2,8 +2,18 @@ import assert from 'node:assert/strict'
 import { readFile, readdir } from 'node:fs/promises'
 import { test } from 'node:test'
 import { readWorkbook } from './document.js'
-import { type CellInput, patchSheet } from './patch.js'
+import { type CellInput, patchSheet as patchSheetBytes } from './patch.js'
 import { assertPatchedSheet } from '../testing/invariants.js'
+
+const encode = (text: string) => new TextEncoder().encode(text)
+const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes)
+const patchSheet = (
+  source: string,
+  edits: ReadonlyMap<string, CellInput>,
+  date1904: boolean,
+  sharedStrings?: ReadonlyMap<string, number>,
+  styleOverrides?: ReadonlyMap<string, number>,
+) => decode(patchSheetBytes(encode(source), edits, date1904, sharedStrings, styleOverrides))
 
 const sheet = (rows: string) => `<worksheet><sheetData>${rows}</sheetData></worksheet>`
 

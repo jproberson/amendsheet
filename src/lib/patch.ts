@@ -1,7 +1,7 @@
 import { dateToSerial } from './date.js'
 import { XlsxError } from './errors.js'
 import { formatReference, parseReference } from './reference.js'
-import { findUnwritableCharacter, readXml } from './xml.js'
+import { findUnwritableCharacter, readXmlBytes } from './xml.js'
 
 /**
  * Where a write-path error points, past the cell reference the throw site
@@ -139,10 +139,10 @@ export interface SheetIndex {
 }
 
 /** One pass, because set() needs all of these before it accepts an edit. */
-export function indexSheet(xml: string): SheetIndex {
+export function indexSheet(bytes: Uint8Array): SheetIndex {
   const styles = new Map<string, number>()
   const sharedFormulas = new Map<string, SpillingFormula>()
-  const shape = readShape(xml)
+  const shape = readShape(bytes)
 
   for (const row of shape.rows) {
     for (const cell of row.cells) {
@@ -281,7 +281,7 @@ interface SheetShape {
   readonly dataEnd: number
 }
 
-function readShape(xml: string, at: SheetLocation = {}): SheetShape {
+function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
   const rows: RowSpan[] = []
   const merges: MergeRange[] = []
   let dimension: DimensionSpan | undefined
@@ -301,7 +301,7 @@ function readShape(xml: string, at: SheetLocation = {}): SheetShape {
   let master: SpillingFormula | undefined
   let openCell = false
 
-  for (const event of readXml(xml)) {
+  for (const event of readXmlBytes(bytes)) {
     if (event.kind === 'open') {
       if (event.localName === 'dimension') {
         const ref = event.attributes.get('ref')
@@ -433,16 +433,16 @@ interface Splice {
 }
 
 export function patchSheet(
-  xml: string,
+  bytes: Uint8Array,
   edits: ReadonlyMap<string, CellInput>,
   date1904: boolean,
   sharedStrings?: ReadonlyMap<string, number>,
   styleOverrides?: ReadonlyMap<string, number>,
   at: SheetLocation = {},
-): string {
-  if (edits.size === 0) return xml
+): Uint8Array {
+  if (edits.size === 0) return bytes
 
-  const shape = readShape(xml, at)
+  const shape = readShape(bytes, at)
   const splices: Splice[] = []
   const newRows = new Map<number, string[]>()
   const filledRows = new Map<RowSpan, Array<{ column: number; cell: string }>>()
@@ -542,7 +542,7 @@ export function patchSheet(
       .sort((left, right) => left.column - right.column)
       .map((entry) => entry.cell)
       .join('')
-    const openTag = xml.slice(row.start, row.end)
+    const openTag = decoder.decode(bytes.subarray(row.start, row.end))
     splices.push({
       start: row.start,
       end: row.end,
@@ -597,7 +597,7 @@ export function patchSheet(
     })
   }
 
-  return applySplices(xml, splices)
+  return applySplices(bytes, splices)
 }
 
 /**
@@ -646,17 +646,28 @@ function cellReferenceOf(element: string): string {
   return element.slice(start, element.indexOf('"', start))
 }
 
-function applySplices(xml: string, splices: Splice[]): string {
+const decoder = new TextDecoder()
+const encoder = new TextEncoder()
+
+function applySplices(bytes: Uint8Array, splices: Splice[]): Uint8Array {
   const ordered = [...splices].sort((a, b) => a.start - b.start || a.order - b.order)
 
-  const pieces: string[] = []
+  const pieces: Uint8Array[] = []
   let cursor = 0
   for (const splice of ordered) {
-    pieces.push(xml.slice(cursor, splice.start))
-    pieces.push(splice.text)
+    pieces.push(bytes.subarray(cursor, splice.start))
+    pieces.push(encoder.encode(splice.text))
     cursor = splice.end
   }
-  pieces.push(xml.slice(cursor))
+  pieces.push(bytes.subarray(cursor))
 
-  return pieces.join('')
+  let length = 0
+  for (const piece of pieces) length += piece.length
+  const out = new Uint8Array(length)
+  let offset = 0
+  for (const piece of pieces) {
+    out.set(piece, offset)
+    offset += piece.length
+  }
+  return out
 }

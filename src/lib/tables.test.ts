@@ -36,12 +36,7 @@ function withOneTable(ref: string, extra: Record<string, string> = {}) {
 }
 
 const extend = (parts: Container, written: string[]) =>
-  extendTables(
-    new TextDecoder().decode(parts.parts.get(SHEET_PATH) ?? new Uint8Array()),
-    SHEET_PATH,
-    parts,
-    written,
-  )
+  extendTables(parts.parts.get(SHEET_PATH) ?? new Uint8Array(), SHEET_PATH, parts, written)
 
 test('grows a table down to a cell written just below it', () => {
   const [result] = extend(withOneTable('A1:B2'), ['A3'])
