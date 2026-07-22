@@ -115,6 +115,8 @@ const EMPTY_STYLES: Styles = { numberFormats: new Map(), cellFormats: [] }
 const CALCULATION_CHAIN = 'xl/calcChain.xml'
 const CONTENT_TYPES = '[Content_Types].xml'
 
+const utf8 = new TextEncoder()
+
 /**
  * CT_Workbook is a sequence, so a calcPr the file lacks cannot simply be
  * appended: these are the children the schema puts after it.
@@ -295,32 +297,40 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   }
 
   const sheets = part.sheets.map((reference): Worksheet => {
-    const sheetXml = partText(container, reference.path)
+    const sheetBytes = container.parts.get(reference.path)
     const at: SheetLocation = { sheet: reference.name, part: reference.path }
 
-    const patched = () => {
-      if (sheetXml === undefined) return undefined
+    // Decoded only by the still-string patch and index path, and only on a
+    // write; a pure read never builds the whole sheet as a string.
+    let sheetStringCache: string | undefined
+    const sheetText = (bytes: Uint8Array): string =>
+      (sheetStringCache ??= decodeXmlPart(bytes, reference.path))
+
+    const patched = (): Uint8Array | undefined => {
+      if (sheetBytes === undefined) return undefined
       const pending = edits.get(reference.path)
-      if (pending === undefined) return sheetXml
-      return patchSheet(
-        sheetXml,
-        pending,
-        date1904,
-        undefined,
-        styleOverrides.get(reference.path),
-        at,
+      if (pending === undefined) return sheetBytes
+      return utf8.encode(
+        patchSheet(
+          sheetText(sheetBytes),
+          pending,
+          date1904,
+          undefined,
+          styleOverrides.get(reference.path),
+          at,
+        ),
       )
     }
 
-    function* readCells(source?: string): Generator<Cell> {
-      const xml = source ?? patched()
-      if (xml === undefined) return
+    function* readCells(source?: Uint8Array): Generator<Cell> {
+      const bytes = source ?? patched()
+      if (bytes === undefined) return
 
       // The cell owning a shared range comes before its dependents, so filling
       // this in as the sheet streams resolves every one of them.
       const masters: SharedMasters = new Map()
 
-      for (const raw of readSheet(xml, sharedStrings, at)) {
+      for (const raw of readSheet(bytes, sharedStrings, at)) {
         if (raw.ownsSharedRange === true && raw.sharedIndex !== undefined) {
           masters.set(raw.sharedIndex, canonicalReference(raw.address) ?? raw.reference)
         }
@@ -334,8 +344,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     // bench.
     let index: SheetIndex | undefined
     const indexed = (): SheetIndex | undefined => {
-      if (sheetXml === undefined) return undefined
-      index ??= indexSheet(sheetXml)
+      if (sheetBytes === undefined) return undefined
+      index ??= indexSheet(sheetText(sheetBytes))
       return index
     }
 
@@ -392,7 +402,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
 
         if (byReference === undefined) {
           byReference = new Map()
-          for (const found of readCells(sheetXml)) {
+          for (const found of readCells(sheetBytes)) {
             const at = canonicalReference(found.address)
             if (at !== undefined) byReference.set(at, found)
           }
@@ -407,7 +417,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         // Refused here rather than at save time. An edit that only fails once
         // the workbook is written takes the whole batch down with it, and until
         // then cell() reports a write that is never going to happen.
-        if (sheetXml === undefined) {
+        if (sheetBytes === undefined) {
           // Recording it would report the value from cell() and save none of it.
           throw new XlsxError(
             'missing-part',
@@ -417,7 +427,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         }
 
         checkWritable(canonical, value, date1904, at)
-        // sheetXml is present, so indexed() is too; the guard is for the type.
+        // sheetBytes is present, so indexed() is too; the guard is for the type.
         const index = indexed()
         if (index !== undefined) {
           const si = index.sharedFormulas.get(canonical)

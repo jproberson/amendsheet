@@ -1,6 +1,6 @@
 import { type XlsxErrorContext, XlsxError } from './errors.js'
 import { type CellAddress, formatReference, parseReference } from './reference.js'
-import { readXml } from './xml.js'
+import { readXmlBytes } from './xml.js'
 
 export type RawCellValue =
   | { readonly kind: 'number'; readonly value: number }
@@ -27,7 +27,7 @@ export interface RawCell {
 
 /** No dates: a date is a number with a date format, which needs the style table. */
 export function* readSheet(
-  xml: string,
+  bytes: Uint8Array,
   sharedStrings: readonly string[],
   at: XlsxErrorContext = {},
 ): Generator<RawCell> {
@@ -64,7 +64,7 @@ export function* readSheet(
     }
   }
 
-  for (const event of readXml(xml)) {
+  for (const event of readXmlBytes(bytes)) {
     if (event.kind === 'open') {
       switch (event.localName) {
         case 'row': {

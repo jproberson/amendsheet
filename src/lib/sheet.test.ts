@@ -9,9 +9,17 @@ import { readWorkbookPart } from './workbook.js'
 const sheet = (body: string, dimension = 'A1:Z100') =>
   `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="${dimension}"/><sheetData>${body}</sheetData></worksheet>`
 
+const encode = (xml: string) => new TextEncoder().encode(xml)
+
 const cells = (body: string, strings: readonly string[] = []) => [
-  ...readSheet(sheet(body), strings),
+  ...readSheet(encode(sheet(body)), strings),
 ]
+
+test('reads a sheet from utf-8 bytes, multibyte content and all', () => {
+  const [cell] = cells('<row r="1"><c r="A1" t="inlineStr"><is><t>café €</t></is></c></row>')
+
+  assert.deepEqual(cell?.value, { kind: 'text', value: 'café €' })
+})
 
 test('reads a number', () => {
   const [cell] = cells('<row r="1"><c r="A1"><v>42.5</v></c></row>')
@@ -94,7 +102,9 @@ test('reads rows that appear out of order', () => {
 })
 
 test('reads cells beyond the range the dimension claims', () => {
-  const found = [...readSheet(sheet('<row r="1"><c r="C3"><v>9</v></c></row>', 'A1:A1'), [])]
+  const found = [
+    ...readSheet(encode(sheet('<row r="1"><c r="C3"><v>9</v></c></row>', 'A1:A1')), []),
+  ]
 
   assert.deepEqual(
     found.map((cell) => cell.reference),
@@ -143,7 +153,7 @@ test('reads every sheet in the fixtures', async () => {
       const part = workbook.container.parts.get(sheetEntry.path)
       if (part === undefined) continue
       try {
-        for (const _cell of readSheet(new TextDecoder().decode(part), strings)) total++
+        for (const _cell of readSheet(part, strings)) total++
       } catch (error) {
         failures.push(
           `${file} ${sheetEntry.name}: ${error instanceof Error ? error.message : String(error)}`,
@@ -208,7 +218,7 @@ test('reads a sheet whose elements carry a namespace prefix', () => {
     '<x:c r="A1"><x:v>1</x:v></x:c><x:c r="B1" t="inlineStr"><x:is><x:t>hi</x:t></x:is></x:c>' +
     '</x:row></x:sheetData></x:worksheet>'
 
-  const found = [...readSheet(xml, [])]
+  const found = [...readSheet(encode(xml), [])]
 
   assert.deepEqual(
     found.map((cell) => cell.reference),
