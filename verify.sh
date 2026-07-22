@@ -68,6 +68,15 @@ if [ -n "$doc_dupes" ]; then
   printf '%s\n' "$doc_dupes" | sed 's/^/    /'
 fi
 
+# Every README ts example is typechecked against the real exports, so a renamed
+# or removed part of the API breaks the docs rather than drifting from them.
+examples_output=$(node scripts/doc-examples.mjs 2>&1)
+printf '%s\n' "$examples_output" | head -1
+printf '%s' "$examples_output" | grep -qE '^(PASSED|SKIPPED)' || {
+  fail "a README example is out of step with the exports"
+  printf '%s\n' "$examples_output" | tail -n +2 | sed 's/^/    /'
+}
+
 step "tests and coverage"
 # Thresholds ratchet up, never down, with one exception recorded here.
 #

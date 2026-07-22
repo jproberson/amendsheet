@@ -45,6 +45,7 @@ Editing:
 
 ```ts
 const workbook = readWorkbook(bytes)
+const sheet = workbook.sheet('Summary') ?? workbook.sheets[0]
 
 sheet.set('B7', 42)
 sheet.set('C1', 'a new cell')
@@ -53,8 +54,8 @@ sheet.set('E1', null) // clears the value, keeps the formatting
 sheet.set('F9', { formula: 'SUM(F1:F8)' })
 sheet.set('G1', 1234.5, { numberFormat: '"$"#,##0.00' })
 
-const bytes = workbook.toBytes() // synchronous
-await writeFile('out.xlsx', bytes)
+const out = workbook.toBytes() // synchronous
+await writeFile('out.xlsx', out)
 ```
 
 `set` takes a number, string, boolean, `Date`, `{ formula }`, or `null` to clear
@@ -91,10 +92,11 @@ format applied, so `kind: 'date'` comes from resolving the cell's style. The
 Which format codes count as dates is a heuristic over the code, and it is not
 frozen: a release may start or stop calling a given format a date, and a cell
 can move between `number` and `date` without the type changing to warn you. Both
-kinds carry the same stored double, so the branch that never breaks is
+carry the same stored double, in `serial` or `value`, so read it by kind:
 
 ```ts
-const stored = value.kind === 'date' ? value.serial : value.value
+const stored =
+  value.kind === 'date' ? value.serial : value.kind === 'number' ? value.value : undefined
 ```
 
 If you need a stable classification, read `cell.numberFormat` and decide for

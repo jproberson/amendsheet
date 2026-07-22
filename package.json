@@ -28,7 +28,8 @@
     "mutate": "node scripts/mutate.mjs",
     "external": "node scripts/external.mjs",
     "browser": "node scripts/browser-smoke.mjs",
-    "validate": "node --import tsx scripts/validate-opc.mjs"
+    "validate": "node --import tsx scripts/validate-opc.mjs",
+    "docs": "node scripts/doc-examples.mjs"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
