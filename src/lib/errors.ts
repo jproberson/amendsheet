@@ -4,7 +4,8 @@
  *
  * Two codes mean the caller passed something the library cannot use, and are
  * the ones worth answering with a different value: `bad-reference` and
- * `unwritable-value`. Every other code means the file is at fault.
+ * `unwritable-value`. Every other code is about the file, or the runtime
+ * reading it, not a value you passed.
  *
  * The union is open. An existing code will not change without a major version,
  * but new ones arrive in minor releases, because there is no knowing today

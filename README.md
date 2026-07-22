@@ -125,7 +125,8 @@ What a minor release is allowed to do, so you know which branches are safe:
   is no knowing today every way an xlsx can be malformed. Switch with a default.
   An existing code will not change meaning without a major version.
   `bad-reference` and `unwritable-value` mean the caller passed something the
-  library cannot use; every other code means the file is at fault.
+  library cannot use; every other code is about the file, or the runtime reading
+  it, not a value you passed.
 - **`kind: 'date'` is not a frozen classification.** See above.
 - **A `Date` written and read back is the same date.** A serial another
   application wrote can carry finer resolution than a millisecond, which is all
