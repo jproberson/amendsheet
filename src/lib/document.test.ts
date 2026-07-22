@@ -1201,3 +1201,19 @@ test('a write just right of a table grows it and adds a column', () => {
   assert.match(table, /<table[^>]*\sref="A1:C2"/)
   assert.match(table, /<tableColumns count="3">/)
 })
+
+test('an untouched part is copied through still compressed after an edit', async () => {
+  const { readZip } = await import('./zip.js')
+  const bytes = new Uint8Array(await readFile('fixtures/real/WithChart.xlsx'))
+  const before = new Map(readZip(bytes).map((entry) => [entry.name, entry.compressed]))
+
+  const workbook = readWorkbook(bytes)
+  workbook.sheets[0]?.set('A100', 'edited far from the chart')
+  const after = new Map(readZip(workbook.toBytes()).map((entry) => [entry.name, entry.compressed]))
+
+  // The theme is never touched, so its bytes must be the file's own, not ours
+  // re-deflated. Excel's DEFLATE differs from fflate's, so equality means the
+  // compressed bytes were passed through rather than inflated and rebuilt.
+  const theme = 'xl/theme/theme1.xml'
+  assert.deepEqual([...(after.get(theme) ?? [])], [...(before.get(theme) ?? [])])
+})

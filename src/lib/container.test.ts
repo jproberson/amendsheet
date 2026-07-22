@@ -82,3 +82,30 @@ test('refuses a utf-16 part rather than decoding it to silent garbage', () => {
     )
   }
 })
+
+test('the parts of a read container behave as a full read-only map', () => {
+  const source = writeContainer({
+    parts: new Map([
+      ['a.xml', new TextEncoder().encode('<a/>')],
+      ['b.xml', new TextEncoder().encode('<b>two</b>')],
+    ]),
+  })
+  const { parts } = readContainer(source)
+
+  assert.equal(parts.size, 2)
+  assert.deepEqual([...parts.keys()], ['a.xml', 'b.xml'])
+  assert.equal(parts.has('a.xml'), true)
+  assert.ok([...parts.values()].every((bytes) => bytes instanceof Uint8Array))
+  // entries, the default iterator, and forEach must agree, and all inflate once.
+  assert.deepEqual(
+    [...parts.entries()].map(([name]) => name),
+    [...parts].map(([name]) => name),
+  )
+  let visited = 0
+  parts.forEach((bytes, name, map) => {
+    visited++
+    assert.equal(map.has(name), true)
+    assert.ok(bytes.length > 0)
+  })
+  assert.equal(visited, 2)
+})

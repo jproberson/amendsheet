@@ -1,4 +1,4 @@
-import { type Container, decodeXmlPart, writeContainer } from './container.js'
+import { type Container, decodeXmlPart } from './container.js'
 import { XlsxError } from './errors.js'
 import { LAST_SERIAL, dateToSerial, serialToDate } from './date.js'
 import {
@@ -471,21 +471,24 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   })
 
   const toBytes = (): Uint8Array => {
-    if (edits.size === 0) return writeContainer(container)
+    // A change carries new bytes for a part; null deletes it. Every part not
+    // named here is passed through still compressed, never inflated or rebuilt.
+    const changes = new Map<string, Uint8Array | null>()
+    if (edits.size === 0) return container.write(changes)
 
-    const parts = new Map(container.parts)
     const encoder = new TextEncoder()
 
     // Excel rebuilds the calculation chain, but a stale one makes it offer to
     // repair the file, so the part and its content type go together.
-    if (parts.delete(CALCULATION_CHAIN)) {
+    if (container.parts.has(CALCULATION_CHAIN)) {
+      changes.set(CALCULATION_CHAIN, null)
       const types = partText(container, CONTENT_TYPES)
       if (types !== undefined) {
-        parts.set(CONTENT_TYPES, encoder.encode(withoutOverride(types, CALCULATION_CHAIN)))
+        changes.set(CONTENT_TYPES, encoder.encode(withoutOverride(types, CALCULATION_CHAIN)))
       }
       const rels = partText(container, part.relationshipsPath)
       if (rels !== undefined) {
-        parts.set(
+        changes.set(
           part.relationshipsPath,
           encoder.encode(withoutRelationship(rels, part.path, CALCULATION_CHAIN)),
         )
@@ -494,7 +497,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
 
     // set() already resolved every style; only the serialising is left.
     if (workingStyles !== undefined && workingStyles !== stylesXml) {
-      parts.set('xl/styles.xml', encoder.encode(workingStyles))
+      changes.set('xl/styles.xml', encoder.encode(workingStyles))
     }
 
     // Text goes into the shared string table when the file has one, so the same
@@ -509,7 +512,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       }
       if (written.length > 0) {
         const appended = appendSharedStrings(stringsXml, written)
-        parts.set('xl/sharedStrings.xml', encoder.encode(appended.xml))
+        changes.set('xl/sharedStrings.xml', encoder.encode(appended.xml))
         indexes = appended.indexes
       }
     }
@@ -521,13 +524,13 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         sheet: part.sheets.find((s) => s.path === path)?.name,
         part: path,
       }
-      parts.set(
+      changes.set(
         path,
         encoder.encode(patchSheet(xml, pending, date1904, indexes, styleOverrides.get(path), at)),
       )
       // A cell written just past a table grows it, the way Excel would.
       for (const extension of extendTables(xml, path, container, pending.keys())) {
-        parts.set(extension.path, encoder.encode(extension.xml))
+        changes.set(extension.path, encoder.encode(extension.xml))
       }
     }
 
@@ -538,10 +541,10 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     )
     if (wroteFormula) {
       const book = partText(container, part.path)
-      if (book !== undefined) parts.set(part.path, encoder.encode(withRecalculation(book)))
+      if (book !== undefined) changes.set(part.path, encoder.encode(withRecalculation(book)))
     }
 
-    return writeContainer({ parts })
+    return container.write(changes)
   }
 
   return {

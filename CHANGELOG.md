@@ -45,6 +45,13 @@ and the API is still free to change.
 
 ### Changed
 
+- A part the edit does not touch is copied through still compressed, never
+  inflated or rebuilt. Editing one cell in a workbook full of images or other
+  sheets no longer pays to decompress and recompress them: over ~86MB of
+  untouched parts, a one-cell edit went from 2.2s to 3ms and about 90MB less
+  peak memory. The ZIP layer is now ours; fflate only deflates and inflates the
+  parts that change. ZIP64 archives (over 4GB or 65535+ entries) are refused
+  with a clear message rather than misread.
 - `cell.formula` is a union rather than a string. A cell following a shared
   formula reported `''`, which is falsy, so `if (cell.formula)` treated it as a
   cell holding a literal. It now reports `{ kind: 'shared', master }`, naming the

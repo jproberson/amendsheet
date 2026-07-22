@@ -1,4 +1,9 @@
-import { type Container, decodeXmlPart, readContainer } from './container.js'
+import {
+  type Container,
+  type ReadableContainer,
+  decodeXmlPart,
+  readContainer,
+} from './container.js'
 import { XlsxError } from './errors.js'
 import { readRelationships, resolveTarget } from './relationships.js'
 import { readXml } from './xml.js'
@@ -28,7 +33,7 @@ export interface WorkbookPart {
   readonly sheets: readonly SheetRef[]
   /** The alternate epoch, where serials count from 1904 rather than 1900. */
   readonly date1904: boolean
-  readonly container: Container
+  readonly container: ReadableContainer
 }
 
 function partText(container: Container, path: string): string {
