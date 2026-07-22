@@ -73,22 +73,43 @@ function readCellFormats(xml: string): CellFormats | undefined {
   return { elements, prefix, openTag, openStart, openEnd, insertAt, selfClosing }
 }
 
-function withFormatId(element: string, formatId: number): string {
+const DEFAULT_XF = '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+
+/** The parts of a cell format this library sets, each with its `apply*` flag. */
+interface CellOverrides {
+  readonly numFmtId?: number
+  readonly fontId?: number
+  readonly fillId?: number
+  readonly borderId?: number
+}
+
+const OVERRIDE_FLAGS: ReadonlyArray<readonly [keyof CellOverrides, string]> = [
+  ['numFmtId', 'applyNumberFormat'],
+  ['fontId', 'applyFont'],
+  ['fillId', 'applyFill'],
+  ['borderId', 'applyBorder'],
+]
+
+/** Turns an `apply*` flag on, whether it was off, absent, or written as a word. */
+function withApplyFlag(openTag: string, flag: string): string {
+  const pattern = new RegExp(`${flag}=("|')(?:\\d+|true|false)\\1`)
+  if (pattern.test(openTag)) return openTag.replace(pattern, `${flag}="1"`)
+  return openTag.replace(/\/?>$/, (tag) => (tag === '/>' ? ` ${flag}="1"/>` : ` ${flag}="1">`))
+}
+
+function withOverrides(element: string, overrides: CellOverrides): string {
   const openTagEnd = element.indexOf('>') + 1
-  const openTag = element.slice(0, openTagEnd)
+  let openTag = element.slice(0, openTagEnd)
   const rest = element.slice(openTagEnd)
 
-  // The element may be written <xf> or <x:xf>, so the name is matched rather
-  // than assumed. Missing it left the cell on General while it held a serial.
-  const withFormat = withAttribute(openTag, 'numFmtId', formatId)
+  for (const [attribute, flag] of OVERRIDE_FLAGS) {
+    const value = overrides[attribute]
+    // The element may be written <xf> or <x:xf>, so the name is matched rather
+    // than assumed. Missing it left the cell on General while it held a serial.
+    if (value !== undefined) openTag = withApplyFlag(withAttribute(openTag, attribute, value), flag)
+  }
 
-  const applied = withFormat.includes('applyNumberFormat=')
-    ? withFormat.replace(/applyNumberFormat=("|')(?:\d+|true|false)\1/, 'applyNumberFormat="1"')
-    : withFormat.replace(/\/?>$/, (tag) =>
-        tag === '/>' ? ' applyNumberFormat="1"/>' : ' applyNumberFormat="1">',
-      )
-
-  return `${applied}${rest}`
+  return `${openTag}${rest}`
 }
 
 /**
@@ -109,21 +130,18 @@ export function ensureDateStyle(stylesXml: string, basedOn: number | undefined):
     }
   }
 
-  return applyFormatId(stylesXml, basedOn, SHORT_DATE_FORMAT_ID)
+  return applyCellFormat(stylesXml, basedOn, { numFmtId: SHORT_DATE_FORMAT_ID })
 }
 
-/** Puts a cell format carrying `formatId` in the table, reusing one if it fits. */
-function applyFormatId(
+/** Puts a cell format carrying `overrides` in the table, reusing one if it fits. */
+function applyCellFormat(
   stylesXml: string,
   basedOn: number | undefined,
-  formatId: number,
+  overrides: CellOverrides,
 ): DateStyle {
   const formats = readCellFormats(stylesXml)
-  const defaultXf = `<xf numFmtId="${formatId}" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>`
-  const wanted =
-    basedOn === undefined
-      ? defaultXf
-      : withFormatId(formats?.elements[basedOn] ?? defaultXf, formatId)
+  const base = basedOn === undefined ? DEFAULT_XF : (formats?.elements[basedOn] ?? DEFAULT_XF)
+  const wanted = withOverrides(base, overrides)
 
   if (formats === undefined) {
     let closeStart = -1
@@ -291,5 +309,5 @@ export function ensureNumberFormat(
     withFormat = withNumberFormat(stylesXml, formatId, formatCode, prefix)
   }
 
-  return applyFormatId(withFormat, basedOn, formatId)
+  return applyCellFormat(withFormat, basedOn, { numFmtId: formatId })
 }
