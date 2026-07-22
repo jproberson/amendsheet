@@ -2,10 +2,10 @@
 
 Amend `.xlsx` files. Everything you didn't touch stays exactly as it was.
 
-Reads and edits spreadsheets in Node and the browser. The contents of any part
-the library doesn't interpret get written back byte for byte, so charts, pivot
-tables, drawings and macros all survive a read and a save. Changing one cell
-won't quietly throw away the rest of the workbook.
+Reads and edits spreadsheets in Node and the browser, checked in both. The
+contents of any part the library doesn't interpret get written back byte for
+byte, so charts, pivot tables, drawings and macros all survive a read and a
+save. Changing one cell won't quietly throw away the rest of the workbook.
 
 The ZIP container itself is rebuilt, so an untouched file comes back the same
 document but not the same bytes: compression, timestamps and entry order are
@@ -133,8 +133,12 @@ What a minor release is allowed to do, so you know which branches are safe:
 
 ## Not done yet
 
-- Overwriting the cell that defines a shared formula is refused rather than
-  breaking the cells that follow it.
+- Overwriting the anchor of a shared formula, an array formula or a data table
+  is refused rather than breaking the cells that spill from it.
+- Writing into a merged cell is not stopped. A value in any but the top-left
+  member of a merge is stored but never shown, and nothing warns.
+- A digital signature survives as a part but any edit invalidates it, since the
+  package is rebuilt and the bytes it signed change.
 - Nothing evaluates formulas, so a written one has no value until a spreadsheet
   application opens the file.
 - Writing isn't streamed. A sheet is patched as one string.
@@ -215,6 +219,12 @@ written value in all of them.
 It needs LibreOffice installed and takes a few minutes, so it isn't part of
 `./verify.sh`.
 
+`npm run browser` is the other outside check. It bundles the built library with
+fflate, then reads a fixture, edits a cell and writes it back inside a headless
+Chrome, confirming the code runs where no Node API exists. It drives Chrome over
+the DevTools protocol directly, so it adds no dependency, and `./verify.sh` runs
+it, skipping cleanly on a machine with no Chrome.
+
 ## Round-trip harness
 
 `npm run harness` reads every test file and reports what changed: missing ZIP
@@ -222,10 +232,13 @@ parts, markup features whose count dropped, and cell values that differ. It runs
 twice. Once writing the file straight back out, which measures the container and
 nothing else. Then again after writing a cell past the last row in use, which is
 the measurement that matches the claim — every existing cell has to come back
-unchanged, and the only parts allowed to differ are the sheet the edit landed in
-and the tables a new value can extend.
+unchanged, and the only parts allowed to differ are the sheet the edit landed
+in, the four parts an edit legitimately rewrites (`styles.xml`,
+`sharedStrings.xml`, `workbook.xml`, `[Content_Types].xml`), and
+`calcChain.xml`, which is deleted so the reader recomputes the values a formula
+edit invalidates.
 
-Nothing is lost or rewritten across the 72 committed files in either pass, and
+Nothing is lost or rewritten across the 73 committed files in either pass, and
 both gate `./verify.sh`.
 
 ## Fixtures

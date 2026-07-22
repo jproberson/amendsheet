@@ -22,6 +22,10 @@ and the API is still free to change.
 - `npm run external` converts every real test file with LibreOffice, before and
   after an edit, to check the output against an implementation that is not this
   one.
+- `npm run browser` runs the built library through a read, an edit and a write
+  inside a headless Chrome, so the browser-support claim is checked by execution
+  rather than by a grep for Node APIs. It drives Chrome over the DevTools
+  protocol, so it adds no dependency, and `verify.sh` runs it.
 - The round-trip harness measures an edited file as well as an untouched one,
   and reports parts rewritten separately from data lost.
 

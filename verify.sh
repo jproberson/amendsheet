@@ -88,6 +88,16 @@ npm run --silent build > /dev/null || fail "build failed"
 npx publint --strict > /dev/null 2>&1 || { fail "publint found packaging problems"; npx publint --strict 2>&1 | tail -8; }
 npx attw --pack . --format table-flipped > /dev/null 2>&1 || { fail "type resolution is broken for some consumers"; npx attw --pack . 2>&1 | tail -12; }
 
+step "browser"
+# We claim browser support, and the grep above only proves no Node API is named.
+# This runs the built bundle in a real browser end to end. It skips cleanly on a
+# machine with no Chrome, so it never fails the build for being unable to run.
+browser_output=$(node scripts/browser-smoke.mjs 2>&1)
+printf '%s\n' "$browser_output"
+printf '%s' "$browser_output" | grep -q '^SKIPPED' || {
+  printf '%s' "$browser_output" | grep -q '^PASSED' || fail "browser smoke test failed"
+}
+
 step "dates in other timezones"
 # date.ts converts through calendar components to survive daylight saving, and
 # that only means anything if it is run somewhere the clock actually moves.

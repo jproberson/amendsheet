@@ -4,6 +4,14 @@
   "private": true,
   "type": "module",
   "description": "Amend .xlsx files. Everything you did not touch stays exactly as it was.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jproberson/amendsheet.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jproberson/amendsheet/issues"
+  },
+  "homepage": "https://github.com/jproberson/amendsheet#readme",
   "scripts": {
     "fixtures": "tsx src/fixtures/generate.ts",
     "fixtures:real": "tsx src/fixtures/fetch.ts",
@@ -18,7 +26,8 @@
     "build": "tsup",
     "check:package": "publint --strict && attw --pack .",
     "mutate": "node scripts/mutate.mjs",
-    "external": "node scripts/external.mjs"
+    "external": "node scripts/external.mjs",
+    "browser": "node scripts/browser-smoke.mjs"
   },
   "devDependencies": {
     "@arethetypeswrong/cli": "^0.18.5",
