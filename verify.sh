@@ -57,6 +57,17 @@ if [ -d src/lib ]; then
   forbid "from 'node:|require\('node:" 'no Node-only APIs in the library core' src/lib --no-tests
 fi
 
+step "docs"
+# A doubled word from an edit — "the file is is at fault". Only words that are
+# never validly repeated, so there is nothing to whitelist. CHANGELOG.md is a
+# working note, not gated.
+doc_dupes=$(grep -rniE '\b(is is|the the|a a|an an|and and|or or|of of|to to|in in|on on|for for|with with|as as)\b' \
+  --include='*.md' --exclude-dir=node_modules --exclude=CHANGELOG.md . 2>/dev/null || true)
+if [ -n "$doc_dupes" ]; then
+  fail "a word is doubled in the docs"
+  printf '%s\n' "$doc_dupes" | sed 's/^/    /'
+fi
+
 step "tests and coverage"
 # Thresholds ratchet up, never down, with one exception recorded here.
 #
