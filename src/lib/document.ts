@@ -152,6 +152,12 @@ export interface Worksheet {
    * is not two references either side of a colon.
    */
   merge(range: string): void
+  /**
+   * Sets a row's height in points, marking it a custom height so a reader keeps
+   * it. Refuses a row number below 1 or a height that is not a finite number at
+   * least zero.
+   */
+  setRowHeight(row: number, height: number): void
 }
 
 export interface SetOptions {
@@ -361,6 +367,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   const styleOverrides = new Map<string, Map<string, number>>()
   const sheetProtections = new Map<string, SheetProtection | 'remove'>()
   const sheetMerges = new Map<string, string[]>()
+  const sheetRowHeights = new Map<string, Map<number, number>>()
   let workingStyles = stylesXml
   let parsedStyles = styles
   let parsedFrom = stylesXml
@@ -396,18 +403,21 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       const overrides = styleOverrides.get(reference.path)
       const protection = sheetProtections.get(reference.path)
       const merges = sheetMerges.get(reference.path)
+      const rowHeights = sheetRowHeights.get(reference.path)
       // A format() with no set() leaves overrides but no pending edit.
       if (
         pending === undefined &&
         overrides === undefined &&
         protection === undefined &&
-        merges === undefined
+        merges === undefined &&
+        rowHeights === undefined
       ) {
         return sheetBytes
       }
       return patchSheet(sheetBytes, pending ?? EMPTY_EDITS, date1904, undefined, overrides, at, {
         protection,
         merges,
+        rowHeights,
       })
     }
 
@@ -692,6 +702,26 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         pending.push(canonical)
         sheetMerges.set(reference.path, pending)
       },
+      setRowHeight(row: number, height: number): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so row ${row} cannot be sized`,
+            at,
+          )
+        }
+        if (!Number.isInteger(row) || row < 1) {
+          throw new XlsxError('bad-reference', `Row ${row} is not a row number`, { ...at })
+        }
+        if (!Number.isFinite(height) || height < 0) {
+          throw new XlsxError('unwritable-value', `Row height ${height} is not zero or more`, {
+            ...at,
+          })
+        }
+        const heights = sheetRowHeights.get(reference.path) ?? new Map<number, number>()
+        heights.set(row, height)
+        sheetRowHeights.set(reference.path, heights)
+      },
     }
   })
 
@@ -700,12 +730,13 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     // named here is passed through still compressed, never inflated or rebuilt.
     const changes = new Map<string, Uint8Array | null>()
     // A format() with no set() records a style override and no value edit; a
-    // protect() or merge() records neither and still has to rewrite its sheet.
+    // protect(), merge() or setRowHeight() records neither and still rewrites.
     if (
       edits.size === 0 &&
       styleOverrides.size === 0 &&
       sheetProtections.size === 0 &&
-      sheetMerges.size === 0
+      sheetMerges.size === 0 &&
+      sheetRowHeights.size === 0
     ) {
       return container.write(changes)
     }
@@ -751,13 +782,14 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       }
     }
 
-    // Every sheet with a value edit, a format() restyle, a protect() or a
-    // merge() is rewritten once.
+    // Every sheet with a value edit, a format() restyle, a protect(), a merge()
+    // or a setRowHeight() is rewritten once.
     for (const path of new Set([
       ...edits.keys(),
       ...styleOverrides.keys(),
       ...sheetProtections.keys(),
       ...sheetMerges.keys(),
+      ...sheetRowHeights.keys(),
     ])) {
       const bytes = container.parts.get(path)
       if (bytes === undefined) continue
@@ -771,6 +803,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         patchSheet(bytes, pending, date1904, indexes, styleOverrides.get(path), at, {
           protection: sheetProtections.get(path),
           merges: sheetMerges.get(path),
+          rowHeights: sheetRowHeights.get(path),
         }),
       )
       // A cell written just past a table grows it, the way Excel would.

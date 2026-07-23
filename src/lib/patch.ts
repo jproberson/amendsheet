@@ -362,6 +362,8 @@ interface CellSpan {
 interface RowSpan {
   readonly row: number
   readonly start: number
+  /** Offset just after the row's open tag, where its attributes end. */
+  readonly openEnd: number
   /** Offset just before `</row>`, where a new cell is appended. */
   readonly contentEnd: number
   /** A self closing row holds nothing, so it is rewritten rather than spliced into. */
@@ -413,7 +415,7 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
   let prefix = ''
   let lastRow = 0
   let openDimension = -1
-  let currentRow: { row: number; start: number } | undefined
+  let currentRow: { row: number; start: number; openEnd: number } | undefined
   let currentCells: CellSpan[] = []
   let cellStart = -1
   let cellColumn = 0
@@ -447,7 +449,7 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
         // same as the count of rows seen once any row declares its number.
         const declared = event.attributes.get('r')
         lastRow = declared === undefined ? lastRow + 1 : Number(declared)
-        currentRow = { row: lastRow, start: event.start }
+        currentRow = { row: lastRow, start: event.start, openEnd: event.end }
         currentCells = []
         cellColumn = 0
         if (event.selfClosing) {
@@ -590,6 +592,8 @@ export interface SheetEdits {
   readonly protection?: SheetProtection | 'remove'
   /** Canonical ranges (`A1:B2`) to merge, added to any the sheet already has. */
   readonly merges?: readonly string[]
+  /** Row number to height in points, applied to the row's open tag. */
+  readonly rowHeights?: ReadonlyMap<number, number>
 }
 
 export function patchSheet(
@@ -608,13 +612,20 @@ export function patchSheet(
   const restyleRefs =
     styleOverrides === undefined ? [] : [...styleOverrides.keys()].filter((ref) => !edits.has(ref))
   const newMerges = merges ?? []
+  const rowHeights = sheet.rowHeights ?? new Map<number, number>()
   if (
     edits.size === 0 &&
     restyleRefs.length === 0 &&
     protection === undefined &&
-    newMerges.length === 0
+    newMerges.length === 0 &&
+    rowHeights.size === 0
   ) {
     return bytes
+  }
+
+  const heightAttributes = (row: number): string => {
+    const height = rowHeights.get(row)
+    return height === undefined ? '' : ` ht="${height}" customHeight="1"`
   }
 
   const operations: ReadonlyArray<{ given: string; value: CellInput; restyle: boolean }> = [
@@ -741,12 +752,37 @@ export function patchSheet(
       .sort((left, right) => left.column - right.column)
       .map((entry) => entry.cell)
       .join('')
+    const height = rowHeights.get(row.row)
     const openTag = decoder.decode(bytes.subarray(row.start, row.end))
+    const opened =
+      height === undefined
+        ? openTag
+        : withAttribute(withAttribute(openTag, 'ht', height), 'customHeight', 1)
     splices.push({
       start: row.start,
       end: row.end,
-      text: `${openTag.slice(0, -2)}>${ordered}</${shape.prefix}row>`,
+      text: `${opened.slice(0, -2)}>${ordered}</${shape.prefix}row>`,
       order: row.row,
+    })
+  }
+
+  // A height on a row that neither exists nor has a value edit is a new empty row.
+  for (const row of rowHeights.keys()) {
+    if (!rowsByNumber.has(row) && !newRows.has(row)) newRows.set(row, [])
+  }
+
+  // A height on a row that stays as it is, its open tag rewritten, unless a cell
+  // was added to a self closing one, where filledRows already redid the whole row.
+  for (const row of rowHeights.keys()) {
+    const span = rowsByNumber.get(row)
+    const height = rowHeights.get(row)
+    if (span === undefined || height === undefined || filledRows.has(span)) continue
+    const openTag = decoder.decode(bytes.subarray(span.start, span.openEnd))
+    splices.push({
+      start: span.start,
+      end: span.openEnd,
+      text: withAttribute(withAttribute(openTag, 'ht', height), 'customHeight', 1),
+      order: span.row,
     })
   }
 
@@ -756,7 +792,7 @@ export function patchSheet(
       .sort((a, b) => a.column - b.column)
       .map((entry) => entry.text)
       .join('')
-    return `<${shape.prefix}row r="${row}">${ordered}</${shape.prefix}row>`
+    return `<${shape.prefix}row r="${row}"${heightAttributes(row)}>${ordered}</${shape.prefix}row>`
   }
 
   if (shape.selfClosing && newRows.size > 0) {

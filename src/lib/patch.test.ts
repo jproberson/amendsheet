@@ -150,6 +150,64 @@ test('a new mergeCells opens after a sheet protection the file already had', () 
   )
 })
 
+test('sets the height on an existing row, keeping its other attributes', () => {
+  const patched = patchSheet(sheet(ROWS), new Map(), false, undefined, undefined, {
+    rowHeights: new Map([[2, 40]]),
+  })
+
+  assert.match(patched, /<row customHeight="1" ht="40" r="2" hidden="1">/)
+})
+
+test('replaces a height a row already declares', () => {
+  const patched = patchSheet(sheet(ROWS), new Map(), false, undefined, undefined, {
+    rowHeights: new Map([[1, 15]]),
+  })
+
+  assert.match(patched, /<row r="1" ht="15" customHeight="1">/)
+  assert.doesNotMatch(patched, /ht="30"/)
+})
+
+test('adds a new empty row for a height on a row that has none', () => {
+  const source =
+    '<worksheet xmlns="http://x"><sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData></worksheet>'
+
+  const patched = patchSheet(source, new Map(), false, undefined, undefined, {
+    rowHeights: new Map([[3, 22]]),
+  })
+
+  assert.match(patched, /<row r="3" ht="22" customHeight="1"><\/row>/)
+})
+
+test('a height and a value on the same new row land together', () => {
+  const source = '<worksheet xmlns="http://x"><sheetData/></worksheet>'
+
+  const patched = patchSheet(
+    source,
+    new Map<string, CellInput>([['A5', 7]]),
+    false,
+    undefined,
+    undefined,
+    { rowHeights: new Map([[5, 33]]) },
+  )
+
+  assert.match(patched, /<row r="5" ht="33" customHeight="1"><c r="A5"><v>7<\/v><\/c><\/row>/)
+})
+
+test('a height on a self closing row that also gains a cell keeps both', () => {
+  const source = '<worksheet xmlns="http://x"><sheetData><row r="4"/></sheetData></worksheet>'
+
+  const patched = patchSheet(
+    source,
+    new Map<string, CellInput>([['B4', 9]]),
+    false,
+    undefined,
+    undefined,
+    { rowHeights: new Map([[4, 18]]) },
+  )
+
+  assert.match(patched, /<row customHeight="1" ht="18" r="4"><c r="B4"><v>9<\/v><\/c><\/row>/)
+})
+
 test('reads sheet protection back as the permissions it grants', () => {
   const bytes = encode(
     '<worksheet xmlns="http://x"><sheetData/>' +

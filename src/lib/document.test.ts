@@ -408,6 +408,28 @@ test('unprotect removes the protection a file already declared', () => {
   assert.doesNotMatch(sheet, /sheetProtection/)
 })
 
+test('setRowHeight sizes a row as a custom height', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.setRowHeight(1, 42)
+
+  const sheet = decode(readContainer(workbook.toBytes()).parts.get('xl/worksheets/sheet1.xml'))
+  assert.match(sheet, /<row customHeight="1" ht="42" r="1">/)
+})
+
+test('setRowHeight refuses a row below one or a negative height', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  const sheet = workbook.sheets[0]
+
+  assert.throws(
+    () => sheet?.setRowHeight(0, 20),
+    (error: unknown) => error instanceof XlsxError && error.code === 'bad-reference',
+  )
+  assert.throws(
+    () => sheet?.setRowHeight(1, -5),
+    (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+  )
+})
+
 test('protection reads back off a protected sheet', () => {
   const workbook = readWorkbook(
     build('<row r="1"><c r="A1"><v>1</v></c></row>', {
@@ -1392,6 +1414,10 @@ test('refuses a write to a sheet whose part is not in the package', () => {
   )
   assert.throws(
     () => workbook.sheets[0]?.merge('A1:B2'),
+    (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
+  )
+  assert.throws(
+    () => workbook.sheets[0]?.setRowHeight(1, 20),
     (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
   )
 })
