@@ -121,6 +121,11 @@ has. Excel shows only the top-left cell; the others keep their values, since a
 merge does not clear them, and a write to one is refused the way it already was
 for a merge the file came with.
 
+`worksheet.setRowHeight(1, 30)` sizes a row in points, and
+`worksheet.setColumnWidth('A', 24)` sizes a column in Excel's width units,
+splitting a `cols` range that spans more than the one column so the rest keeps
+its own width.
+
 An edit the format cannot hold is refused by `set` itself, with an `XlsxError`
 naming the cell. `NaN`, an infinity, a character XML has no way to encode, a
 date outside the workbook's epoch, and overwriting the cell that defines a
