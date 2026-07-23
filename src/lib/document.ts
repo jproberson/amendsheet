@@ -5,6 +5,7 @@ import {
   type CellInput,
   checkWritable,
   mergeAnchorFor,
+  mergeRangeReference,
   mergeRefusal,
   patchSheet,
   indexSheet,
@@ -137,6 +138,13 @@ export interface Worksheet {
   protect(options?: SheetProtection): void
   /** Removes worksheet protection, if the sheet had any. */
   unprotect(): void
+  /**
+   * Merges a rectangular range like `A1:B2`, joining any merges the sheet
+   * already has. Excel shows only the top-left cell's value; the others keep
+   * whatever they hold, since a merge does not clear them. Refuses a range that
+   * is not two references either side of a colon.
+   */
+  merge(range: string): void
 }
 
 export interface SetOptions {
@@ -345,6 +353,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   // path its own copy of the decision, and the two drifted.
   const styleOverrides = new Map<string, Map<string, number>>()
   const sheetProtections = new Map<string, SheetProtection | 'remove'>()
+  const sheetMerges = new Map<string, string[]>()
   let workingStyles = stylesXml
   let parsedStyles = styles
   let parsedFrom = stylesXml
@@ -379,19 +388,20 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       const pending = edits.get(reference.path)
       const overrides = styleOverrides.get(reference.path)
       const protection = sheetProtections.get(reference.path)
+      const merges = sheetMerges.get(reference.path)
       // A format() with no set() leaves overrides but no pending edit.
-      if (pending === undefined && overrides === undefined && protection === undefined) {
+      if (
+        pending === undefined &&
+        overrides === undefined &&
+        protection === undefined &&
+        merges === undefined
+      ) {
         return sheetBytes
       }
-      return patchSheet(
-        sheetBytes,
-        pending ?? EMPTY_EDITS,
-        date1904,
-        undefined,
-        overrides,
-        at,
+      return patchSheet(sheetBytes, pending ?? EMPTY_EDITS, date1904, undefined, overrides, at, {
         protection,
-      )
+        merges,
+      })
     }
 
     function* readCells(source?: Uint8Array): Generator<Cell> {
@@ -656,6 +666,19 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         // unprotect; recording the intent is harmless.
         sheetProtections.set(reference.path, 'remove')
       },
+      merge(range: string): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so ${range} cannot be merged`,
+            { ...at, reference: range },
+          )
+        }
+        const canonical = mergeRangeReference(range, at)
+        const pending = sheetMerges.get(reference.path) ?? []
+        pending.push(canonical)
+        sheetMerges.set(reference.path, pending)
+      },
     }
   })
 
@@ -664,8 +687,13 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     // named here is passed through still compressed, never inflated or rebuilt.
     const changes = new Map<string, Uint8Array | null>()
     // A format() with no set() records a style override and no value edit; a
-    // protect() records neither and still has to rewrite its sheet.
-    if (edits.size === 0 && styleOverrides.size === 0 && sheetProtections.size === 0) {
+    // protect() or merge() records neither and still has to rewrite its sheet.
+    if (
+      edits.size === 0 &&
+      styleOverrides.size === 0 &&
+      sheetProtections.size === 0 &&
+      sheetMerges.size === 0
+    ) {
       return container.write(changes)
     }
 
@@ -710,12 +738,13 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       }
     }
 
-    // Every sheet with a value edit, a format() restyle or a protect() is
-    // rewritten once.
+    // Every sheet with a value edit, a format() restyle, a protect() or a
+    // merge() is rewritten once.
     for (const path of new Set([
       ...edits.keys(),
       ...styleOverrides.keys(),
       ...sheetProtections.keys(),
+      ...sheetMerges.keys(),
     ])) {
       const bytes = container.parts.get(path)
       if (bytes === undefined) continue
@@ -726,15 +755,10 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       }
       changes.set(
         path,
-        patchSheet(
-          bytes,
-          pending,
-          date1904,
-          indexes,
-          styleOverrides.get(path),
-          at,
-          sheetProtections.get(path),
-        ),
+        patchSheet(bytes, pending, date1904, indexes, styleOverrides.get(path), at, {
+          protection: sheetProtections.get(path),
+          merges: sheetMerges.get(path),
+        }),
       )
       // A cell written just past a table grows it, the way Excel would.
       for (const extension of extendTables(bytes, path, container, pending.keys())) {

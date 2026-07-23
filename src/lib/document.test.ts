@@ -408,6 +408,40 @@ test('unprotect removes the protection a file already declared', () => {
   assert.doesNotMatch(sheet, /sheetProtection/)
 })
 
+test('merge adds a mergeCells element after sheetData', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.merge('A1:B2')
+
+  const sheet = decode(readContainer(workbook.toBytes()).parts.get('xl/worksheets/sheet1.xml'))
+  assert.match(sheet, /<\/sheetData><mergeCells count="1"><mergeCell ref="A1:B2"\/><\/mergeCells>/)
+})
+
+test('merge canonicalises the range and refuses one without a colon', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  const sheet = workbook.sheets[0]
+  sheet?.merge('b2:a1')
+
+  assert.match(
+    decode(readContainer(workbook.toBytes()).parts.get('xl/worksheets/sheet1.xml')),
+    /<mergeCell ref="A1:B2"\/>/,
+  )
+  assert.throws(
+    () => sheet?.merge('A1'),
+    (error: unknown) => error instanceof XlsxError && error.code === 'bad-reference',
+  )
+})
+
+test('a value written into a merged non-anchor cell is still refused', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.merge('A1:B2')
+
+  const reopened = readWorkbook(workbook.toBytes())
+  assert.throws(
+    () => reopened.sheets[0]?.set('B2', 5),
+    (error: unknown) => error instanceof XlsxError && /merged into A1/.test(error.message),
+  )
+})
+
 test('a plain value writes into a package with no style table', () => {
   const bytes = writeContainer({
     parts: new Map([
@@ -1319,6 +1353,10 @@ test('refuses a write to a sheet whose part is not in the package', () => {
   assert.equal(workbook.sheets[0]?.cell('A1'), undefined)
   assert.throws(
     () => workbook.sheets[0]?.protect(),
+    (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
+  )
+  assert.throws(
+    () => workbook.sheets[0]?.merge('A1:B2'),
     (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
   )
 })

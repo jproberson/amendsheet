@@ -187,6 +187,24 @@ function parseMergeRange(ref: string): MergeRange | undefined {
   }
 }
 
+const canonicalMerge = (merge: MergeRange): string =>
+  `${merge.anchor}:${formatReference({ row: merge.maxRow, column: merge.maxColumn })}`
+
+/**
+ * The canonical `A1:B2` form of a range to merge, so `b2:a1` and `A1:B2` are the
+ * same merge. Refuses anything that is not two references either side of a colon.
+ */
+export function mergeRangeReference(range: string, at: SheetLocation = {}): string {
+  const parsed = parseMergeRange(range)
+  if (parsed === undefined) {
+    throw new XlsxError('bad-reference', `"${range}" is not an A1:B2 style range to merge`, {
+      ...at,
+      reference: range,
+    })
+  }
+  return canonicalMerge(parsed)
+}
+
 /** All keyed by canonical reference, so `a1` and `$A$1` find the same cell. */
 export interface SheetIndex {
   /** The style index a cell carried when the file was read. */
@@ -342,6 +360,10 @@ interface SheetShape {
   readonly dataEnd: number
   /** An existing sheetProtection element, replaced in place rather than doubled. */
   readonly protection: { start: number; end: number } | undefined
+  /** An existing mergeCells element, so a new merge joins it rather than a second. */
+  readonly mergeContainer:
+    | { openStart: number; openEnd: number; insertAt: number; selfClosing: boolean; count: number }
+    | undefined
 }
 
 function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
@@ -353,6 +375,11 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
   let dataEnd = -1
   let selfClosing = false
   let protection: { start: number; end: number } | undefined
+  let mergeOpenStart = -1
+  let mergeOpenEnd = -1
+  let mergeInsertAt = -1
+  let mergeSelfClosing = false
+  let mergeCount = 0
 
   let prefix = ''
   let lastRow = 0
@@ -423,7 +450,15 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
           })
         }
       }
+      if (event.localName === 'mergeCells') {
+        mergeOpenStart = event.start
+        mergeOpenEnd = event.end
+        mergeSelfClosing = event.selfClosing
+        if (event.selfClosing) mergeInsertAt = event.end
+        continue
+      }
       if (event.localName === 'mergeCell') {
+        mergeCount++
         const ref = event.attributes.get('ref')
         const merge = ref === undefined ? undefined : parseMergeRange(ref)
         if (merge !== undefined) merges.push(merge)
@@ -484,6 +519,7 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
       contentEnd = event.start
       dataEnd = event.end
     }
+    if (event.localName === 'mergeCells') mergeInsertAt = event.start
   }
 
   if (dataStart === -1)
@@ -499,6 +535,16 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
     dataStart,
     dataEnd,
     protection,
+    mergeContainer:
+      mergeOpenStart === -1
+        ? undefined
+        : {
+            openStart: mergeOpenStart,
+            openEnd: mergeOpenEnd,
+            insertAt: mergeInsertAt,
+            selfClosing: mergeSelfClosing,
+            count: mergeCount,
+          },
   }
 }
 
@@ -510,6 +556,13 @@ interface Splice {
   readonly order: number
 }
 
+/** Edits to a sheet that are not cell values: the elements around sheetData. */
+export interface SheetEdits {
+  readonly protection?: SheetProtection | 'remove'
+  /** Canonical ranges (`A1:B2`) to merge, added to any the sheet already has. */
+  readonly merges?: readonly string[]
+}
+
 export function patchSheet(
   bytes: Uint8Array,
   edits: ReadonlyMap<string, CellInput>,
@@ -517,14 +570,23 @@ export function patchSheet(
   sharedStrings?: ReadonlyMap<string, number>,
   styleOverrides?: ReadonlyMap<string, number>,
   at: SheetLocation = {},
-  protection?: SheetProtection | 'remove',
+  sheet: SheetEdits = {},
 ): Uint8Array {
+  const { protection, merges } = sheet
   // A style override with no value edit is a restyle: the cell keeps its value
   // and formula and only its `s` changes, so unlike a write it needs no shared
   // formula or merge refusal — formatting is always safe.
   const restyleRefs =
     styleOverrides === undefined ? [] : [...styleOverrides.keys()].filter((ref) => !edits.has(ref))
-  if (edits.size === 0 && restyleRefs.length === 0 && protection === undefined) return bytes
+  const newMerges = merges ?? []
+  if (
+    edits.size === 0 &&
+    restyleRefs.length === 0 &&
+    protection === undefined &&
+    newMerges.length === 0
+  ) {
+    return bytes
+  }
 
   const operations: ReadonlyArray<{ given: string; value: CellInput; restyle: boolean }> = [
     ...[...edits].map(([given, value]) => ({ given, value, restyle: false })),
@@ -724,6 +786,55 @@ export function patchSheet(
       text: sheetProtectionElement(protection, shape.prefix),
       order: -1,
     })
+  }
+
+  // mergeCells is the sibling after sheetProtection. New ranges join the sheet's
+  // own mergeCells when it has one, or open a fresh one past sheetData.
+  if (newMerges.length > 0) {
+    const seen = new Set(shape.merges.map(canonicalMerge))
+    const fresh: string[] = []
+    for (const range of newMerges) {
+      if (seen.has(range)) continue
+      seen.add(range)
+      fresh.push(range)
+    }
+    if (fresh.length > 0) {
+      const children = fresh.map((ref) => `<${shape.prefix}mergeCell ref="${ref}"/>`).join('')
+      const container = shape.mergeContainer
+      if (container === undefined) {
+        const anchor = shape.protection?.end ?? shape.dataEnd
+        splices.push({
+          start: anchor,
+          end: anchor,
+          text: `<${shape.prefix}mergeCells count="${fresh.length}">${children}</${shape.prefix}mergeCells>`,
+          order: 0,
+        })
+      } else {
+        const openTag = decoder.decode(bytes.subarray(container.openStart, container.openEnd))
+        const counted = withAttribute(openTag, 'count', container.count + fresh.length)
+        if (container.selfClosing) {
+          splices.push({
+            start: container.openStart,
+            end: container.openEnd,
+            text: `${counted.slice(0, -2)}>${children}</${shape.prefix}mergeCells>`,
+            order: -1,
+          })
+        } else {
+          splices.push({
+            start: container.openStart,
+            end: container.openEnd,
+            text: counted,
+            order: -1,
+          })
+          splices.push({
+            start: container.insertAt,
+            end: container.insertAt,
+            text: children,
+            order: 0,
+          })
+        }
+      }
+    }
   }
 
   return applySplices(bytes, splices)

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   type CellInput,
-  type SheetProtection,
+  type SheetEdits,
   checkWritable,
   indexSheet,
   patchSheet as patchSheetBytes,
@@ -17,11 +17,9 @@ const patchSheet = (
   date1904: boolean,
   sharedStrings?: ReadonlyMap<string, number>,
   styleOverrides?: ReadonlyMap<string, number>,
-  protection?: SheetProtection | 'remove',
+  sheet?: SheetEdits,
 ) =>
-  decode(
-    patchSheetBytes(encode(source), edits, date1904, sharedStrings, styleOverrides, {}, protection),
-  )
+  decode(patchSheetBytes(encode(source), edits, date1904, sharedStrings, styleOverrides, {}, sheet))
 
 const sheet = (rows: string) =>
   `<?xml version="1.0"?><worksheet xmlns="http://x"><cols><col min="1" max="1" width="20"/></cols>` +
@@ -41,7 +39,9 @@ test('returns the source untouched when there is nothing to do', () => {
 })
 
 test('writes sheet protection after sheetData and before mergeCells', () => {
-  const patched = patchSheet(sheet(ROWS), new Map(), false, undefined, undefined, {})
+  const patched = patchSheet(sheet(ROWS), new Map(), false, undefined, undefined, {
+    protection: {},
+  })
 
   assert.match(
     patched,
@@ -54,7 +54,7 @@ test('replaces a sheet protection the sheet already declares', () => {
     '<worksheet xmlns="http://x"><sheetData/><sheetProtection sheet="1" formatCells="1"/></worksheet>'
 
   const patched = patchSheet(source, new Map(), false, undefined, undefined, {
-    formatCells: true,
+    protection: { formatCells: true },
   })
 
   assert.doesNotMatch(patched, /formatCells="1"/)
@@ -65,7 +65,7 @@ test('replaces a sheet protection the sheet already declares', () => {
 test('writes sheet protection with the document namespace prefix', () => {
   const source = '<x:worksheet xmlns:x="http://x"><x:sheetData/></x:worksheet>'
 
-  const patched = patchSheet(source, new Map(), false, undefined, undefined, {})
+  const patched = patchSheet(source, new Map(), false, undefined, undefined, { protection: {} })
 
   assert.match(patched, /<x:sheetData\/><x:sheetProtection sheet="1"/)
 })
@@ -74,7 +74,9 @@ test('removing sheet protection drops the element the sheet had', () => {
   const source =
     '<worksheet xmlns="http://x"><sheetData/><sheetProtection sheet="1"/><pageMargins left="0.7"/></worksheet>'
 
-  const patched = patchSheet(source, new Map(), false, undefined, undefined, 'remove')
+  const patched = patchSheet(source, new Map(), false, undefined, undefined, {
+    protection: 'remove',
+  })
 
   assert.doesNotMatch(patched, /sheetProtection/)
   assert.match(patched, /<sheetData\/><pageMargins/)
@@ -83,9 +85,68 @@ test('removing sheet protection drops the element the sheet had', () => {
 test('removing sheet protection a sheet lacks changes nothing', () => {
   const source = sheet(ROWS)
 
-  const patched = patchSheet(source, new Map(), false, undefined, undefined, 'remove')
+  const patched = patchSheet(source, new Map(), false, undefined, undefined, {
+    protection: 'remove',
+  })
 
   assert.equal(patched, source)
+})
+
+test('adds a mergeCell to the mergeCells the sheet already has', () => {
+  const patched = patchSheet(sheet(ROWS), new Map(), false, undefined, undefined, {
+    merges: ['C1:D2'],
+  })
+
+  assert.match(patched, /<mergeCells count="2"><mergeCell ref="A1:B1"\/><mergeCell ref="C1:D2"\/>/)
+})
+
+test('opens a mergeCells element when the sheet has none', () => {
+  const source = '<worksheet xmlns="http://x"><sheetData/><pageMargins left="0.7"/></worksheet>'
+
+  const patched = patchSheet(source, new Map(), false, undefined, undefined, { merges: ['A1:B2'] })
+
+  assert.match(
+    patched,
+    /<sheetData\/><mergeCells count="1"><mergeCell ref="A1:B2"\/><\/mergeCells>/,
+  )
+})
+
+test('a merge the sheet already declares is not added twice', () => {
+  const patched = patchSheet(sheet(ROWS), new Map(), false, undefined, undefined, {
+    merges: ['A1:B1'],
+  })
+
+  assert.equal(patched, decode(encode(sheet(ROWS))))
+})
+
+test('opens a self closing mergeCells element to hold a new merge', () => {
+  const source = '<worksheet xmlns="http://x"><sheetData/><mergeCells/></worksheet>'
+
+  const patched = patchSheet(source, new Map(), false, undefined, undefined, { merges: ['A1:B2'] })
+
+  assert.match(patched, /<mergeCells count="1"><mergeCell ref="A1:B2"\/><\/mergeCells>/)
+})
+
+test('a new merge lands after sheet protection added in the same write', () => {
+  const source = '<worksheet xmlns="http://x"><sheetData/></worksheet>'
+
+  const patched = patchSheet(source, new Map(), false, undefined, undefined, {
+    protection: {},
+    merges: ['A1:B2'],
+  })
+
+  assert.match(patched, /<sheetProtection[^>]*\/><mergeCells count="1">/)
+})
+
+test('a new mergeCells opens after a sheet protection the file already had', () => {
+  const source = '<worksheet xmlns="http://x"><sheetData/><sheetProtection sheet="1"/></worksheet>'
+
+  const patched = patchSheet(source, new Map(), false, undefined, undefined, { merges: ['A1:B2'] })
+
+  assert.match(
+    patched,
+    /<sheetProtection sheet="1"\/><mergeCells count="1"><mergeCell ref="A1:B2"\/>/,
+  )
 })
 
 test('restyling a cell rewrites its style and keeps its value and formula', () => {
