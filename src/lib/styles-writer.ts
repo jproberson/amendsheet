@@ -408,9 +408,7 @@ function withReservedBorder(stylesXml: string): string {
   return `${stylesXml.slice(0, position)}<${prefix}borders count="1">${seeded}</${prefix}borders>${stylesXml.slice(position)}`
 }
 
-function readBorderAt(stylesXml: string, id: number): Sides {
-  const element = readTable(stylesXml, 'borders', 'border')?.elements[id]
-  if (element === undefined) return {}
+function parseBorder(element: string): Sides {
   const sides: { left?: Side; right?: Side; top?: Side; bottom?: Side } = {}
   let inSide: 'left' | 'right' | 'top' | 'bottom' | undefined
   for (const event of readXml(element)) {
@@ -436,6 +434,11 @@ function readBorderAt(stylesXml: string, id: number): Sides {
   return sides
 }
 
+const borderSidesAt = (stylesXml: string, id: number): Sides => {
+  const element = readTable(stylesXml, 'borders', 'border')?.elements[id]
+  return element === undefined ? {} : parseBorder(element)
+}
+
 const buildSide = (name: string, side: Side | undefined): string => {
   if (side === undefined) return `<${name}/>`
   if (side.color === undefined) return `<${name} style="${side.style}"/>`
@@ -451,7 +454,7 @@ export function ensureBorderStyle(
   border: BorderFormat,
 ): DateStyle {
   const seeded = withReservedBorder(stylesXml)
-  const current = readBorderAt(seeded, idOf(seeded, basedOn, 'borderId'))
+  const current = borderSidesAt(seeded, idOf(seeded, basedOn, 'borderId'))
   const merged: { left?: Side; right?: Side; top?: Side; bottom?: Side } = {}
   for (const name of SIDE_NAMES) {
     const side = border[name] ?? border.all ?? current[name]
@@ -582,4 +585,102 @@ export function ensureNumberFormat(
   }
 
   return applyCellFormat(withFormat, basedOn, { numFmtId: formatId })
+}
+
+// --- Reading a cell's formatting back ---
+
+/** The font, fill and border a cell format resolves to, each absent when the
+ * cell uses the default and so carries no formatting of its own to report. */
+export interface CellFormatting {
+  readonly font?: FontFormat
+  readonly fill?: FillFormat
+  readonly border?: BorderFormat
+}
+
+function parseFill(element: string): FillFormat | undefined {
+  let solid = false
+  let color: string | undefined
+  for (const event of readXml(element)) {
+    if (event.kind !== 'open') continue
+    if (event.localName === 'patternFill' && event.attributes.get('patternType') === 'solid') {
+      solid = true
+    }
+    if (event.localName === 'fgColor') color = event.attributes.get('rgb') ?? color
+  }
+  return solid && color !== undefined ? { color } : undefined
+}
+
+const BORDER_STYLES: ReadonlySet<BorderStyle> = new Set([
+  'thin',
+  'medium',
+  'thick',
+  'dashed',
+  'dotted',
+  'double',
+  'hair',
+  'mediumDashed',
+  'dashDot',
+  'mediumDashDot',
+  'dashDotDot',
+  'mediumDashDotDot',
+  'slantDashDot',
+])
+
+/** Narrows a file's border style to the known set, so no assertion is needed. */
+function toBorderStyle(value: string): BorderStyle | undefined {
+  for (const known of BORDER_STYLES) if (known === value) return known
+  return undefined
+}
+
+const attrId = (xf: string, attribute: string): number => {
+  const match = xf.match(new RegExp(`\\b${attribute}\\s*=\\s*["'](\\d+)["']`))
+  return match?.[1] === undefined ? 0 : Number(match[1])
+}
+
+/** The default font is 0, so a non-zero id is a font the cell was given. */
+function fontFrom(xf: string, fonts: readonly string[]): FontFormat | undefined {
+  const id = attrId(xf, 'fontId')
+  const element = fonts[id]
+  if (id === 0 || element === undefined) return undefined
+  const font = parseFont(element)
+  return Object.keys(font).length === 0 ? undefined : font
+}
+
+const fillFrom = (xf: string, fills: readonly string[]): FillFormat | undefined => {
+  const element = fills[attrId(xf, 'fillId')]
+  return element === undefined ? undefined : parseFill(element)
+}
+
+function borderFrom(xf: string, borders: readonly string[]): BorderFormat | undefined {
+  const element = borders[attrId(xf, 'borderId')]
+  if (element === undefined) return undefined
+  const sides = parseBorder(element)
+  const border: { left?: BorderSide; right?: BorderSide; top?: BorderSide; bottom?: BorderSide } =
+    {}
+  for (const name of SIDE_NAMES) {
+    const side = sides[name]
+    const style = side === undefined ? undefined : toBorderStyle(side.style)
+    if (side === undefined || style === undefined) continue
+    border[name] = side.color === undefined ? { style } : { style, color: side.color }
+  }
+  return Object.keys(border).length === 0 ? undefined : border
+}
+
+/** Resolves every cell format's font, fill and border in one pass, so a read
+ * looks each up by the cell's `s` index rather than reparsing the styles. */
+export function readFormatting(stylesXml: string): readonly CellFormatting[] {
+  const xfs = readTable(stylesXml, 'cellXfs', 'xf')?.elements ?? []
+  const fonts = readTable(stylesXml, 'fonts', 'font')?.elements ?? []
+  const fills = readTable(stylesXml, 'fills', 'fill')?.elements ?? []
+  const borders = readTable(stylesXml, 'borders', 'border')?.elements ?? []
+  return xfs.map((xf) => {
+    const font = fontFrom(xf, fonts)
+    const fill = fillFrom(xf, fills)
+    const border = borderFrom(xf, borders)
+    return {
+      ...(font === undefined ? {} : { font }),
+      ...(fill === undefined ? {} : { fill }),
+      ...(border === undefined ? {} : { border }),
+    }
+  })
 }

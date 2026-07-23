@@ -5,6 +5,7 @@ import {
   ensureDateStyle,
   ensureFillStyle,
   ensureFontStyle,
+  readFormatting,
 } from './styles-writer.js'
 import { assertWellFormed } from '../testing/invariants.js'
 import { ensureNumberFormat } from './styles-writer.js'
@@ -280,6 +281,65 @@ test('does not add the same border twice', () => {
 
   assert.equal(once.index, twice.index)
   assert.equal(once.xml, twice.xml)
+})
+
+test("reads a cell format's font, fill and border", () => {
+  const source =
+    '<styleSheet>' +
+    '<fonts count="2"><font/><font><b/><sz val="12"/></font></fonts>' +
+    '<fills count="3"><fill><patternFill patternType="none"/></fill>' +
+    '<fill><patternFill patternType="gray125"/></fill>' +
+    '<fill><patternFill patternType="solid"><fgColor rgb="FF00FF00"/></patternFill></fill></fills>' +
+    '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>' +
+    '<border><left style="thin"><color rgb="FF000000"/></left><right/><top/><bottom/><diagonal/></border></borders>' +
+    '<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/>' +
+    '<xf numFmtId="0" fontId="1" fillId="2" borderId="1"/></cellXfs></styleSheet>'
+
+  const formatting = readFormatting(source)
+
+  assert.deepEqual(formatting[0], {})
+  assert.deepEqual(formatting[1], {
+    font: { bold: true, size: 12 },
+    fill: { color: 'FF00FF00' },
+    border: { left: { style: 'thin', color: 'FF000000' } },
+  })
+})
+
+test('reports no font for a non-default id that points at an empty font', () => {
+  const source =
+    '<styleSheet><fonts count="2"><font/><font/></fonts>' +
+    '<cellXfs count="1"><xf fontId="1"/></cellXfs></styleSheet>'
+
+  assert.deepEqual(readFormatting(source)[0], {})
+})
+
+test('ignores an unknown border style', () => {
+  const source =
+    '<styleSheet><borders count="1"><border><left style="weird"/><right/><top/><bottom/>' +
+    '<diagonal/></border></borders><cellXfs count="1"><xf borderId="0"/></cellXfs></styleSheet>'
+
+  assert.deepEqual(readFormatting(source)[0], {})
+})
+
+test('reads a border side with a style but no colour, and skips a colourless fill', () => {
+  const source =
+    '<styleSheet><fills count="1"><fill><patternFill patternType="solid"/></fill></fills>' +
+    '<borders count="1"><border><top style="thin"/><left/><right/><bottom/><diagonal/></border></borders>' +
+    '<cellXfs count="1"><xf fillId="0" borderId="0"/></cellXfs></styleSheet>'
+
+  assert.deepEqual(readFormatting(source)[0], { border: { top: { style: 'thin' } } })
+})
+
+test('reports nothing for ids past the end of a table', () => {
+  const source =
+    '<styleSheet><fonts count="1"><font><b/></font></fonts>' +
+    '<cellXfs count="1"><xf fontId="9" fillId="9" borderId="9"/></cellXfs></styleSheet>'
+
+  assert.deepEqual(readFormatting(source)[0], {})
+})
+
+test('reads nothing from a styles part with no tables', () => {
+  assert.deepEqual(readFormatting('<styleSheet></styleSheet>'), [])
 })
 
 const styles = (cellXfs: string, extra = '') =>
