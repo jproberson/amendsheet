@@ -5,16 +5,16 @@ export type {
   BorderFormat,
   BorderSide,
   BorderStyle,
+  CellProtection,
   Color,
   FillFormat,
   FontFormat,
+  FontVerticalAlign,
   HorizontalAlignment,
   PatternFill,
   PatternStyle,
-  Protection,
   SolidFill,
   UnderlineStyle,
-  VerticalAlign,
   VerticalAlignment,
 } from './lib/styles-writer.js'
 export type {

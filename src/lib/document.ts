@@ -33,10 +33,10 @@ import {
   type Alignment,
   type BorderFormat,
   type CellFormatting,
+  type CellProtection,
   type DateStyle,
   type FillFormat,
   type FontFormat,
-  type Protection,
   ensureAlignmentStyle,
   ensureBorderStyle,
   ensureDateStyle,
@@ -95,7 +95,7 @@ export interface Cell {
   /** Absent unless the cell sets an alignment of its own. */
   readonly alignment?: Alignment
   /** Absent unless the cell sets a `locked` or `hidden` protection of its own. */
-  readonly protection?: Protection
+  readonly protection?: CellProtection
 }
 
 export interface Worksheet {
@@ -182,7 +182,7 @@ export interface SetOptions {
   /** Alignment to apply, merged onto the alignment the cell already has. */
   readonly alignment?: Alignment
   /** Protection to apply, merged onto the protection the cell already has. */
-  readonly protection?: Protection
+  readonly protection?: CellProtection
 }
 
 export interface Workbook {

@@ -222,7 +222,7 @@ function applyCellFormat(
  * variants carry a `val`. A read reports `true` for a plain single underline. */
 export type UnderlineStyle = 'single' | 'double' | 'singleAccounting' | 'doubleAccounting'
 
-export type VerticalAlign = 'baseline' | 'superscript' | 'subscript'
+export type FontVerticalAlign = 'baseline' | 'superscript' | 'subscript'
 
 /**
  * A colour a cell can carry: an `RRGGBB`/`AARRGGBB` hex literal, a reference into
@@ -240,7 +240,7 @@ export interface FontFormat {
   readonly italic?: boolean
   readonly strike?: boolean
   readonly underline?: boolean | UnderlineStyle
-  readonly vertAlign?: VerticalAlign
+  readonly vertAlign?: FontVerticalAlign
   readonly size?: number
   readonly color?: Color
   readonly name?: string
@@ -259,13 +259,13 @@ const toUnderline = (value: string | undefined): UnderlineStyle | undefined => {
   return undefined
 }
 
-const VERTICAL_ALIGNS: ReadonlySet<VerticalAlign> = new Set([
+const VERTICAL_ALIGNS: ReadonlySet<FontVerticalAlign> = new Set([
   'baseline',
   'superscript',
   'subscript',
 ])
 
-const toVertAlign = (value: string | undefined): VerticalAlign | undefined => {
+const toVertAlign = (value: string | undefined): FontVerticalAlign | undefined => {
   for (const known of VERTICAL_ALIGNS) if (known === value) return known
   return undefined
 }
@@ -344,7 +344,7 @@ function parseFont(element: string): FontFormat {
     italic?: boolean
     strike?: boolean
     underline?: boolean | UnderlineStyle
-    vertAlign?: VerticalAlign
+    vertAlign?: FontVerticalAlign
     size?: number
     color?: Color
     name?: string
@@ -789,7 +789,7 @@ export function ensureAlignmentStyle(
   return { xml, index: id }
 }
 
-export interface Protection {
+export interface CellProtection {
   /** Whether the cell resists editing once the sheet is protected. */
   readonly locked?: boolean
   /** Whether the cell's formula is hidden once the sheet is protected. */
@@ -843,7 +843,7 @@ function withProtectionChild(xf: string, protection: string, prefix: string): st
 export function ensureProtectionStyle(
   stylesXml: string,
   basedOn: number | undefined,
-  protection: Protection,
+  protection: CellProtection,
 ): DateStyle {
   const prefix = tablePrefix(stylesXml)
   const base =
@@ -992,7 +992,7 @@ export interface CellFormatting {
   readonly fill?: FillFormat
   readonly border?: BorderFormat
   readonly alignment?: Alignment
-  readonly protection?: Protection
+  readonly protection?: CellProtection
 }
 
 const PATTERN_STYLES: ReadonlySet<PatternStyle> = new Set([
@@ -1152,7 +1152,7 @@ function alignmentFrom(xf: string): Alignment | undefined {
 }
 
 /** Protection, like alignment, lives on the xf, so it is read straight off it. */
-function protectionFrom(xf: string): Protection | undefined {
+function protectionFrom(xf: string): CellProtection | undefined {
   const parsed = parseProtection(xf)
   return Object.keys(parsed).length === 0 ? undefined : parsed
 }
