@@ -114,6 +114,11 @@ sheet?.protect({ formatCells: true, sort: true, selectLockedCells: false })
 It replaces any protection the sheet already had. Passwords are not written, so
 protection guards against accidental edits, not a determined one.
 
+`worksheet.merge('A1:B2')` merges a range, joining any merges the sheet already
+has. Excel shows only the top-left cell; the others keep their values, since a
+merge does not clear them, and a write to one is refused the way it already was
+for a merge the file came with.
+
 An edit the format cannot hold is refused by `set` itself, with an `XlsxError`
 naming the cell. `NaN`, an infinity, a character XML has no way to encode, a
 date outside the workbook's epoch, and overwriting the cell that defines a
