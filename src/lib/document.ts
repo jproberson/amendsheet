@@ -84,6 +84,8 @@ export interface Cell {
   readonly fill?: FillFormat
   /** Absent unless at least one side has a border. */
   readonly border?: BorderFormat
+  /** Absent unless the cell sets an alignment of its own. */
+  readonly alignment?: Alignment
 }
 
 export interface Worksheet {

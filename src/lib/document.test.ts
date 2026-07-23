@@ -324,6 +324,17 @@ test('set refuses a bad text rotation, before recording anything', () => {
   assert.deepEqual(sheet?.cell('A1')?.value, { kind: 'number', value: 1 })
 })
 
+test('an alignment set on a cell reads back off it', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.set('A1', 'x', { alignment: { horizontal: 'center', wrapText: true } })
+
+  const reopened = readWorkbook(workbook.toBytes())
+  assert.deepEqual(reopened.sheets[0]?.cell('A1')?.alignment, {
+    horizontal: 'center',
+    wrapText: true,
+  })
+})
+
 test('a plain value writes into a package with no style table', () => {
   const bytes = writeContainer({
     parts: new Map([

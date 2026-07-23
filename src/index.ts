@@ -1,11 +1,14 @@
 export { readWorkbook } from './lib/document.js'
 export type { CellInput, FormulaInput } from './lib/patch.js'
 export type {
+  Alignment,
   BorderFormat,
   BorderSide,
   BorderStyle,
   FillFormat,
   FontFormat,
+  HorizontalAlignment,
+  VerticalAlignment,
 } from './lib/styles-writer.js'
 export type {
   Cell,

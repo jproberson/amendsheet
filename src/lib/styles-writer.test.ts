@@ -345,6 +345,38 @@ test('reads nothing from a styles part with no tables', () => {
   assert.deepEqual(readFormatting('<styleSheet></styleSheet>'), [])
 })
 
+test("reads a cell format's alignment", () => {
+  const source =
+    '<styleSheet><cellXfs count="2"><xf/>' +
+    '<xf applyAlignment="1"><alignment horizontal="center" vertical="top" wrapText="1"' +
+    ' textRotation="90" indent="2"/></xf></cellXfs></styleSheet>'
+
+  assert.deepEqual(readFormatting(source)[1], {
+    alignment: {
+      horizontal: 'center',
+      vertical: 'top',
+      wrapText: true,
+      textRotation: 90,
+      indent: 2,
+    },
+  })
+})
+
+test('ignores an unknown horizontal or vertical alignment', () => {
+  const source =
+    '<styleSheet><cellXfs count="1">' +
+    '<xf><alignment horizontal="sideways" vertical="middle"/></xf></cellXfs></styleSheet>'
+
+  assert.deepEqual(readFormatting(source)[0], {})
+})
+
+test('reports no alignment for a cell format that has none', () => {
+  assert.deepEqual(
+    readFormatting('<styleSheet><cellXfs count="1"><xf/></cellXfs></styleSheet>')[0],
+    {},
+  )
+})
+
 const styles = (cellXfs: string, extra = '') =>
   `<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${extra}<cellXfs count="${(cellXfs.match(/<xf/g) ?? []).length}">${cellXfs}</cellXfs></styleSheet>`
 

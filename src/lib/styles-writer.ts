@@ -739,12 +739,13 @@ export function ensureNumberFormat(
 
 // --- Reading a cell's formatting back ---
 
-/** The font, fill and border a cell format resolves to, each absent when the
- * cell uses the default and so carries no formatting of its own to report. */
+/** The font, fill, border and alignment a cell format resolves to, each absent
+ * when the cell uses the default and so carries none of its own to report. */
 export interface CellFormatting {
   readonly font?: FontFormat
   readonly fill?: FillFormat
   readonly border?: BorderFormat
+  readonly alignment?: Alignment
 }
 
 function parseFill(element: string): FillFormat | undefined {
@@ -816,8 +817,58 @@ function borderFrom(xf: string, borders: readonly string[]): BorderFormat | unde
   return Object.keys(border).length === 0 ? undefined : border
 }
 
-/** Resolves every cell format's font, fill and border in one pass, so a read
- * looks each up by the cell's `s` index rather than reparsing the styles. */
+const HORIZONTAL_ALIGNMENTS: ReadonlySet<HorizontalAlignment> = new Set([
+  'general',
+  'left',
+  'center',
+  'right',
+  'fill',
+  'justify',
+  'centerContinuous',
+  'distributed',
+])
+
+const VERTICAL_ALIGNMENTS: ReadonlySet<VerticalAlignment> = new Set([
+  'top',
+  'center',
+  'bottom',
+  'justify',
+  'distributed',
+])
+
+const toHorizontal = (value: string | undefined): HorizontalAlignment | undefined => {
+  for (const known of HORIZONTAL_ALIGNMENTS) if (known === value) return known
+  return undefined
+}
+
+const toVertical = (value: string | undefined): VerticalAlignment | undefined => {
+  for (const known of VERTICAL_ALIGNMENTS) if (known === value) return known
+  return undefined
+}
+
+/** Alignment lives on the xf, so it is read straight off it, narrowed to the
+ * known horizontal and vertical values the way a border style is. */
+function alignmentFrom(xf: string): Alignment | undefined {
+  const parsed = parseAlignment(xf)
+  const horizontal = toHorizontal(parsed.horizontal)
+  const vertical = toVertical(parsed.vertical)
+  const alignment: {
+    horizontal?: HorizontalAlignment
+    vertical?: VerticalAlignment
+    wrapText?: boolean
+    textRotation?: number
+    indent?: number
+  } = {}
+  if (horizontal !== undefined) alignment.horizontal = horizontal
+  if (vertical !== undefined) alignment.vertical = vertical
+  if (parsed.wrapText !== undefined) alignment.wrapText = parsed.wrapText
+  if (parsed.textRotation !== undefined) alignment.textRotation = parsed.textRotation
+  if (parsed.indent !== undefined) alignment.indent = parsed.indent
+  return Object.keys(alignment).length === 0 ? undefined : alignment
+}
+
+/** Resolves every cell format's font, fill, border and alignment in one pass, so
+ * a read looks each up by the cell's `s` index rather than reparsing the styles. */
 export function readFormatting(stylesXml: string): readonly CellFormatting[] {
   const xfs = readTable(stylesXml, 'cellXfs', 'xf')?.elements ?? []
   const fonts = readTable(stylesXml, 'fonts', 'font')?.elements ?? []
@@ -827,10 +878,12 @@ export function readFormatting(stylesXml: string): readonly CellFormatting[] {
     const font = fontFrom(xf, fonts)
     const fill = fillFrom(xf, fills)
     const border = borderFrom(xf, borders)
+    const alignment = alignmentFrom(xf)
     return {
       ...(font === undefined ? {} : { font }),
       ...(fill === undefined ? {} : { fill }),
       ...(border === undefined ? {} : { border }),
+      ...(alignment === undefined ? {} : { alignment }),
     }
   })
 }
