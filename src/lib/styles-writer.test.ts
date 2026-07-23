@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { ensureDateStyle, ensureFontStyle } from './styles-writer.js'
+import { ensureDateStyle, ensureFillStyle, ensureFontStyle } from './styles-writer.js'
 import { assertWellFormed } from '../testing/invariants.js'
 import { ensureNumberFormat } from './styles-writer.js'
 import { isDateFormat, numberFormatOf, readStyles } from './styles.js'
@@ -123,6 +123,60 @@ test('treats a cell format with no fontId as using the default font', () => {
   const result = ensureFontStyle(source, 0, { bold: true })
 
   assert.match(result.xml, /<font><b\/><sz val="11"\/><\/font>/)
+})
+
+const fills =
+  '<fills count="2"><fill><patternFill patternType="none"/></fill>' +
+  '<fill><patternFill patternType="gray125"/></fill></fills>'
+
+const fillStyles = (cellXfs: string) =>
+  `<styleSheet>${fills}<cellXfs count="1">${cellXfs}</cellXfs></styleSheet>`
+
+test('applying a fill adds a solid fill and points the cell format at it', () => {
+  const source = fillStyles('<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>')
+
+  const result = ensureFillStyle(source, 0, { color: 'FFFF00' })
+
+  assert.match(
+    result.xml,
+    /<fill><patternFill patternType="solid"><fgColor rgb="FFFFFF00"\/><bgColor indexed="64"\/><\/patternFill><\/fill><\/fills>/,
+  )
+  assert.match(xfAt(result.xml, result.index), /fillId="2"/)
+  assert.match(xfAt(result.xml, result.index), /applyFill="1"/)
+})
+
+test('a solid fill lands past the two reserved fill ids', () => {
+  const source = fillStyles('<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>')
+
+  const result = ensureFillStyle(source, 0, { color: '000000' })
+
+  assert.match(result.xml, /<fills count="3">/)
+  assert.match(xfAt(result.xml, result.index), /fillId="2"/)
+})
+
+test('seeds the reserved fills when a file has no fills table', () => {
+  const source =
+    '<styleSheet><cellXfs count="1">' +
+    '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs></styleSheet>'
+
+  const result = ensureFillStyle(source, 0, { color: '000000' })
+
+  // the two reserved fills are seeded, then ours lands at id 2
+  assert.match(
+    result.xml,
+    /<fills count="3"><fill><patternFill patternType="none"\/><\/fill><fill><patternFill patternType="gray125"\/><\/fill><fill><patternFill patternType="solid"/,
+  )
+  assert.match(xfAt(result.xml, result.index), /fillId="2"/)
+})
+
+test('does not add the same fill twice', () => {
+  const source = fillStyles('<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>')
+
+  const once = ensureFillStyle(source, 0, { color: 'FF0000' })
+  const twice = ensureFillStyle(once.xml, 0, { color: 'FF0000' })
+
+  assert.equal(once.index, twice.index)
+  assert.equal(once.xml, twice.xml)
 })
 
 const styles = (cellXfs: string, extra = '') =>

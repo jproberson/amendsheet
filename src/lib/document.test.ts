@@ -280,6 +280,17 @@ test('set refuses a font colour that is not hex, before recording anything', () 
   assert.deepEqual(sheet?.cell('A1')?.value, { kind: 'number', value: 1 })
 })
 
+test('set and format apply a solid fill, composing with a font', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.set('A1', 'x', { fill: { color: '00FF00' }, font: { bold: true } })
+
+  const styles = decode(readContainer(workbook.toBytes()).parts.get('xl/styles.xml'))
+  assert.match(styles, /<fill><patternFill patternType="solid"><fgColor rgb="FF00FF00"\//)
+  const xf = [...styles.matchAll(/<xf [^>]*\/>/g)].map((match) => match[0]).at(-1) ?? ''
+  assert.match(xf, /applyFill="1"/)
+  assert.match(xf, /applyFont="1"/)
+})
+
 test('format restyles a formula cell without touching its formula', () => {
   const workbook = readWorkbook(build('<row r="1"><c r="A1"><f>SUM(B1:B2)</f><v>3</v></c></row>'))
   workbook.sheets[0]?.format('A1', { font: { bold: true } })

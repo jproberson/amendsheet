@@ -321,6 +321,35 @@ export function ensureFontStyle(
   return applyCellFormat(xml, basedOn, { fontId: id })
 }
 
+export interface FillFormat {
+  /** Solid fill colour, `RRGGBB` or `AARRGGBB` hex. */
+  readonly color: string
+}
+
+// fillId 0 (none) and 1 (gray125) are reserved, so a real solid fill is the
+// third entry; a file with no fills table has these seeded before ours is added.
+const RESERVED_FILLS =
+  '<fill><patternFill patternType="none"/></fill>' +
+  '<fill><patternFill patternType="gray125"/></fill>'
+
+function withReservedFills(stylesXml: string): string {
+  if (readTable(stylesXml, 'fills', 'fill') !== undefined) return stylesXml
+  const { position, prefix } = tableInsertPoint(stylesXml)
+  const seeded = RESERVED_FILLS.replace(/<(\/?)(fill|patternFill)/g, `<$1${prefix}$2`)
+  return `${stylesXml.slice(0, position)}<${prefix}fills count="2">${seeded}</${prefix}fills>${stylesXml.slice(position)}`
+}
+
+export function ensureFillStyle(
+  stylesXml: string,
+  basedOn: number | undefined,
+  fill: FillFormat,
+): DateStyle {
+  const seeded = withReservedFills(stylesXml)
+  const element = `<fill><patternFill patternType="solid"><fgColor rgb="${normalizeColor(fill.color)}"/><bgColor indexed="64"/></patternFill></fill>`
+  const { xml, id } = ensureInTable(seeded, 'fills', 'fill', element)
+  return applyCellFormat(xml, basedOn, { fillId: id })
+}
+
 function tablePrefix(xml: string): string {
   for (const event of readXml(xml)) {
     if (event.kind !== 'open') continue

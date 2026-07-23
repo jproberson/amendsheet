@@ -25,8 +25,10 @@ import { appendSharedStrings, readSharedStrings } from './shared-strings.js'
 import { extendTables } from './tables.js'
 import {
   type DateStyle,
+  type FillFormat,
   type FontFormat,
   ensureDateStyle,
+  ensureFillStyle,
   ensureFontStyle,
   ensureNumberFormat,
 } from './styles-writer.js'
@@ -114,6 +116,8 @@ export interface SetOptions {
   readonly numberFormat?: string
   /** Font to apply, merged onto the font the cell already carries. */
   readonly font?: FontFormat
+  /** Solid fill colour for the cell's background. */
+  readonly fill?: FillFormat
 }
 
 export interface Workbook {
@@ -437,7 +441,11 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       canonical: string,
     ): DateStyle | undefined => {
       if (workingStyles === undefined) {
-        if (options?.numberFormat !== undefined || options?.font !== undefined) {
+        if (
+          options?.numberFormat !== undefined ||
+          options?.font !== undefined ||
+          options?.fill !== undefined
+        ) {
           throw new XlsxError(
             'missing-part',
             `Cannot format ${canonical}: the package has no style table`,
@@ -460,6 +468,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         step(ensureNumberFormat(xml, base, options.numberFormat))
       else if (value instanceof Date) step(ensureDateStyle(xml, base))
       if (options?.font !== undefined) step(ensureFontStyle(xml, base, options.font))
+      if (options?.fill !== undefined) step(ensureFillStyle(xml, base, options.fill))
       return applied
     }
 
