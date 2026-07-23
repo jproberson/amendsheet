@@ -14,6 +14,20 @@ the writer's own.
 One dependency, `fflate`, for the ZIP container. There is no transitive tree to
 audit.
 
+## Fidelity
+
+The claim is measured, not asserted. `npm run harness` reads 73 real files —
+Apache POI's test data plus hand-built edge cases — writes each back, and
+compares the result part by part and value by value. Nothing is lost and no
+untouched part is rewritten, before an edit or after one.
+
+For a reference point the same files go through `exceljs@4.4.0`, a mature and
+much broader library: it keeps 25 of them intact and drops a part or a value in
+46, most often a chart, a drawing or a defined name. That is the cost of
+rebuilding the whole document on write, and it is the one thing this library sets
+out not to do. The full table and the method are in
+[`COMPARISON.md`](COMPARISON.md), regenerated with `npm run harness:doc`.
+
 ## On AI
 
 Heads up: this was built with heavy use of AI assistance, partly as a test of
