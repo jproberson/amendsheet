@@ -100,6 +100,20 @@ and merges the same way, so setting `wrapText` leaves a horizontal choice alone.
 A `protection` sets `locked` and `hidden`, which take effect once the worksheet
 itself is protected. Colours are `RRGGBB` or `AARRGGBB` hex.
 
+`worksheet.protect()` turns that worksheet protection on — it is what makes a
+cell's `locked` and `hidden` bite. With no argument it matches Excel's Protect
+Sheet default: every cell locked, formatting, inserting, deleting, sorting and
+filtering barred, and selecting cells still allowed. Pass options to name the
+actions that stay permitted, each `true` to allow it:
+
+```ts
+const sheet = readWorkbook(bytes).sheets[0]
+sheet?.protect({ formatCells: true, sort: true, selectLockedCells: false })
+```
+
+It replaces any protection the sheet already had. Passwords are not written, so
+protection guards against accidental edits, not a determined one.
+
 An edit the format cannot hold is refused by `set` itself, with an `XlsxError`
 naming the cell. `NaN`, an infinity, a character XML has no way to encode, a
 date outside the workbook's epoch, and overwriting the cell that defines a
