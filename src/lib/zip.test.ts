@@ -136,6 +136,19 @@ test('rejects a malformed local header', () => {
   assert.throws(() => readZip(bytes), notAZipMatching(/local header/i))
 })
 
+test('rejects a central-directory offset that points past the archive', () => {
+  const bytes = corrupted((view, _b, end) => view.setUint32(end + 16, 0x7fffff00, true))
+  assert.throws(() => readZip(bytes), notAZipMatching(/central/i))
+})
+
+test('rejects a local-header offset that points past the archive', () => {
+  const bytes = corrupted((view, _b, end) => {
+    const central = view.getUint32(end + 16, true)
+    view.setUint32(central + 42, 0x7fffff00, true)
+  })
+  assert.throws(() => readZip(bytes), notAZipMatching(/local header/i))
+})
+
 function unreachable(): never {
   throw new Error('entry was missing')
 }

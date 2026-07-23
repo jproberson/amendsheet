@@ -106,7 +106,13 @@ export function readZip(bytes: Uint8Array): ZipEntry[] {
   const entries: ZipEntry[] = []
   let offset = centralOffset
   for (let index = 0; index < count; index++) {
-    if (view.getUint32(offset, true) !== CENTRAL_SIG) {
+    // The offset comes from the file, so it can point past the buffer; reading
+    // there throws a bare RangeError unless the fixed 46-byte header is in range.
+    if (
+      offset < 0 ||
+      offset + 46 > view.byteLength ||
+      view.getUint32(offset, true) !== CENTRAL_SIG
+    ) {
       throw notAZip('Central directory is malformed')
     }
     const method = view.getUint16(offset + 10, true)
@@ -127,7 +133,11 @@ export function readZip(bytes: Uint8Array): ZipEntry[] {
       if (localOffset === U32_MAX) localOffset = next()
     }
 
-    if (view.getUint32(localOffset, true) !== LOCAL_SIG) {
+    if (
+      localOffset < 0 ||
+      localOffset + 30 > view.byteLength ||
+      view.getUint32(localOffset, true) !== LOCAL_SIG
+    ) {
       throw notAZip(`Local header for ${name} is malformed`)
     }
     // The local header repeats the name and extra fields; the data follows them,
