@@ -18,6 +18,7 @@ import {
 import {
   type CellAddress,
   canonicalReference,
+  columnToIndex,
   formatReference,
   parseReference,
   parseWritableReference,
@@ -158,6 +159,13 @@ export interface Worksheet {
    * least zero.
    */
   setRowHeight(row: number, height: number): void
+  /**
+   * Sets a column's width, in the units Excel shows, splitting a `cols` range
+   * that spans more than the column so the rest keeps its own width. The column
+   * is a letter like `A`. Refuses a width that is not a finite number at least
+   * zero.
+   */
+  setColumnWidth(column: string, width: number): void
 }
 
 export interface SetOptions {
@@ -368,6 +376,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   const sheetProtections = new Map<string, SheetProtection | 'remove'>()
   const sheetMerges = new Map<string, string[]>()
   const sheetRowHeights = new Map<string, Map<number, number>>()
+  const sheetColumnWidths = new Map<string, Map<number, number>>()
   let workingStyles = stylesXml
   let parsedStyles = styles
   let parsedFrom = stylesXml
@@ -404,13 +413,15 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       const protection = sheetProtections.get(reference.path)
       const merges = sheetMerges.get(reference.path)
       const rowHeights = sheetRowHeights.get(reference.path)
+      const columnWidths = sheetColumnWidths.get(reference.path)
       // A format() with no set() leaves overrides but no pending edit.
       if (
         pending === undefined &&
         overrides === undefined &&
         protection === undefined &&
         merges === undefined &&
-        rowHeights === undefined
+        rowHeights === undefined &&
+        columnWidths === undefined
       ) {
         return sheetBytes
       }
@@ -418,6 +429,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         protection,
         merges,
         rowHeights,
+        columnWidths,
       })
     }
 
@@ -722,6 +734,25 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         heights.set(row, height)
         sheetRowHeights.set(reference.path, heights)
       },
+      setColumnWidth(column: string, width: number): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so column ${column} cannot be sized`,
+            { ...at, reference: column },
+          )
+        }
+        const index = columnToIndex(column)
+        if (!Number.isFinite(width) || width < 0) {
+          throw new XlsxError('unwritable-value', `Column width ${width} is not zero or more`, {
+            ...at,
+            reference: column,
+          })
+        }
+        const widths = sheetColumnWidths.get(reference.path) ?? new Map<number, number>()
+        widths.set(index, width)
+        sheetColumnWidths.set(reference.path, widths)
+      },
     }
   })
 
@@ -736,7 +767,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       styleOverrides.size === 0 &&
       sheetProtections.size === 0 &&
       sheetMerges.size === 0 &&
-      sheetRowHeights.size === 0
+      sheetRowHeights.size === 0 &&
+      sheetColumnWidths.size === 0
     ) {
       return container.write(changes)
     }
@@ -790,6 +822,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       ...sheetProtections.keys(),
       ...sheetMerges.keys(),
       ...sheetRowHeights.keys(),
+      ...sheetColumnWidths.keys(),
     ])) {
       const bytes = container.parts.get(path)
       if (bytes === undefined) continue
@@ -804,6 +837,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           protection: sheetProtections.get(path),
           merges: sheetMerges.get(path),
           rowHeights: sheetRowHeights.get(path),
+          columnWidths: sheetColumnWidths.get(path),
         }),
       )
       // A cell written just past a table grows it, the way Excel would.

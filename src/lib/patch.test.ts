@@ -208,6 +208,87 @@ test('a height on a self closing row that also gains a cell keeps both', () => {
   assert.match(patched, /<row customHeight="1" ht="18" r="4"><c r="B4"><v>9<\/v><\/c><\/row>/)
 })
 
+test('opens a cols element before sheetData for a new column width', () => {
+  const source = '<worksheet xmlns="http://x"><sheetData/></worksheet>'
+
+  const patched = patchSheet(source, new Map(), false, undefined, undefined, {
+    columnWidths: new Map([[3, 18]]),
+  })
+
+  assert.match(
+    patched,
+    /<cols><col min="3" max="3" width="18" customWidth="1"\/><\/cols><sheetData\/>/,
+  )
+})
+
+test('replaces the width of a single-column col', () => {
+  // sheet(ROWS) has <col min="1" max="1" width="20"/>
+  const patched = patchSheet(sheet(ROWS), new Map(), false, undefined, undefined, {
+    columnWidths: new Map([[1, 42]]),
+  })
+
+  assert.match(patched, /<col customWidth="1" min="1" max="1" width="42"\/>/)
+  assert.doesNotMatch(patched, /width="20"/)
+})
+
+test('splits a multi-column col so the rest keeps its width', () => {
+  const source =
+    '<worksheet xmlns="http://x"><cols><col min="1" max="5" width="10"/></cols><sheetData/></worksheet>'
+
+  const patched = patchSheet(source, new Map(), false, undefined, undefined, {
+    columnWidths: new Map([[3, 30]]),
+  })
+
+  assert.match(
+    patched,
+    /<col min="1" max="2" width="10"\/><col customWidth="1" min="3" max="3" width="30"\/><col min="4" max="5" width="10"\/>/,
+  )
+})
+
+test('appends a column width into a cols element that has one', () => {
+  const patched = patchSheet(sheet(ROWS), new Map(), false, undefined, undefined, {
+    columnWidths: new Map([[4, 25]]),
+  })
+
+  assert.match(
+    patched,
+    /<col min="1" max="1" width="20"\/><col min="4" max="4" width="25" customWidth="1"\/>/,
+  )
+})
+
+test('splits a col for two widths within it, in column order', () => {
+  const source =
+    '<worksheet xmlns="http://x"><cols><col min="1" max="5" width="10"/></cols><sheetData/></worksheet>'
+
+  const patched = patchSheet(source, new Map(), false, undefined, undefined, {
+    columnWidths: new Map([
+      [3, 30],
+      [2, 15],
+    ]),
+  })
+
+  assert.match(
+    patched,
+    /<col min="1" max="1" width="10"\/><col customWidth="1" min="2" max="2" width="15"\/><col customWidth="1" min="3" max="3" width="30"\/><col min="4" max="5" width="10"\/>/,
+  )
+})
+
+test('appends two new column widths in column order', () => {
+  const source = '<worksheet xmlns="http://x"><sheetData/></worksheet>'
+
+  const patched = patchSheet(source, new Map(), false, undefined, undefined, {
+    columnWidths: new Map([
+      [5, 10],
+      [3, 20],
+    ]),
+  })
+
+  assert.match(
+    patched,
+    /<cols><col min="3" max="3" width="20" customWidth="1"\/><col min="5" max="5" width="10" customWidth="1"\/><\/cols>/,
+  )
+})
+
 test('reads sheet protection back as the permissions it grants', () => {
   const bytes = encode(
     '<worksheet xmlns="http://x"><sheetData/>' +

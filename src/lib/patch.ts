@@ -395,6 +395,12 @@ interface SheetShape {
   readonly mergeContainer:
     | { openStart: number; openEnd: number; insertAt: number; selfClosing: boolean; count: number }
     | undefined
+  /** An existing cols element, before sheetData, that a width joins. */
+  readonly colContainer:
+    | { openStart: number; openEnd: number; insertAt: number; selfClosing: boolean }
+    | undefined
+  /** The col entries, so a width lands in the range covering its column. */
+  readonly cols: { start: number; end: number; min: number; max: number }[]
 }
 
 function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
@@ -411,6 +417,11 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
   let mergeInsertAt = -1
   let mergeSelfClosing = false
   let mergeCount = 0
+  let colOpenStart = -1
+  let colOpenEnd = -1
+  let colInsertAt = -1
+  let colSelfClosing = false
+  const cols: { start: number; end: number; min: number; max: number }[] = []
 
   let prefix = ''
   let lastRow = 0
@@ -480,6 +491,21 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
             spillingFormula: undefined,
           })
         }
+      }
+      if (event.localName === 'cols') {
+        colOpenStart = event.start
+        colOpenEnd = event.end
+        colSelfClosing = event.selfClosing
+        if (event.selfClosing) colInsertAt = event.end
+        continue
+      }
+      if (event.localName === 'col') {
+        const min = Number(event.attributes.get('min'))
+        const max = Number(event.attributes.get('max'))
+        if (Number.isInteger(min) && Number.isInteger(max)) {
+          cols.push({ start: event.start, end: event.end, min, max })
+        }
+        continue
       }
       if (event.localName === 'mergeCells') {
         mergeOpenStart = event.start
@@ -551,6 +577,7 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
       dataEnd = event.end
     }
     if (event.localName === 'mergeCells') mergeInsertAt = event.start
+    if (event.localName === 'cols') colInsertAt = event.start
   }
 
   if (dataStart === -1)
@@ -576,6 +603,16 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
             selfClosing: mergeSelfClosing,
             count: mergeCount,
           },
+    colContainer:
+      colOpenStart === -1
+        ? undefined
+        : {
+            openStart: colOpenStart,
+            openEnd: colOpenEnd,
+            insertAt: colInsertAt,
+            selfClosing: colSelfClosing,
+          },
+    cols,
   }
 }
 
@@ -594,6 +631,8 @@ export interface SheetEdits {
   readonly merges?: readonly string[]
   /** Row number to height in points, applied to the row's open tag. */
   readonly rowHeights?: ReadonlyMap<number, number>
+  /** One-based column index to width, landing in the cols element before sheetData. */
+  readonly columnWidths?: ReadonlyMap<number, number>
 }
 
 export function patchSheet(
@@ -613,12 +652,14 @@ export function patchSheet(
     styleOverrides === undefined ? [] : [...styleOverrides.keys()].filter((ref) => !edits.has(ref))
   const newMerges = merges ?? []
   const rowHeights = sheet.rowHeights ?? new Map<number, number>()
+  const columnWidths = sheet.columnWidths ?? new Map<number, number>()
   if (
     edits.size === 0 &&
     restyleRefs.length === 0 &&
     protection === undefined &&
     newMerges.length === 0 &&
-    rowHeights.size === 0
+    rowHeights.size === 0 &&
+    columnWidths.size === 0
   ) {
     return bytes
   }
@@ -898,6 +939,73 @@ export function patchSheet(
             order: 0,
           })
         }
+      }
+    }
+  }
+
+  // cols is the sibling before sheetData. A width lands in the col whose range
+  // covers its column, splitting that range when it spans more than the column,
+  // or opening a new col when none covers it.
+  if (columnWidths.size > 0) {
+    const colElement = (min: number, max: number, width: number): string =>
+      `<${shape.prefix}col min="${min}" max="${max}" width="${width}" customWidth="1"/>`
+    const colWith = (element: string, min: number, max: number, width?: number): string => {
+      const ranged = withAttribute(withAttribute(element, 'min', min), 'max', max)
+      return width === undefined
+        ? ranged
+        : withAttribute(withAttribute(ranged, 'width', width), 'customWidth', 1)
+    }
+
+    const covering = (column: number) => shape.cols.find((c) => c.min <= column && column <= c.max)
+    const bySpan = new Map<(typeof shape.cols)[number], Map<number, number>>()
+    const appends = new Map<number, number>()
+    for (const [column, width] of columnWidths) {
+      const span = covering(column)
+      if (span === undefined) {
+        appends.set(column, width)
+        continue
+      }
+      const grouped = bySpan.get(span) ?? new Map<number, number>()
+      grouped.set(column, width)
+      bySpan.set(span, grouped)
+    }
+
+    for (const [span, widths] of bySpan) {
+      const element = decoder.decode(bytes.subarray(span.start, span.end))
+      const segments: string[] = []
+      let cursor = span.min
+      for (const [column, width] of [...widths].sort(([a], [b]) => a - b)) {
+        if (column > cursor) segments.push(colWith(element, cursor, column - 1))
+        segments.push(colWith(element, column, column, width))
+        cursor = column + 1
+      }
+      if (cursor <= span.max) segments.push(colWith(element, cursor, span.max))
+      splices.push({ start: span.start, end: span.end, text: segments.join(''), order: span.min })
+    }
+
+    if (appends.size > 0) {
+      const added = [...appends]
+        .sort(([a], [b]) => a - b)
+        .map(([column, width]) => colElement(column, column, width))
+        .join('')
+      const container = shape.colContainer
+      if (container === undefined) {
+        splices.push({
+          start: shape.dataStart,
+          end: shape.dataStart,
+          text: `<${shape.prefix}cols>${added}</${shape.prefix}cols>`,
+          order: -2,
+        })
+      } else if (container.selfClosing) {
+        const openTag = decoder.decode(bytes.subarray(container.openStart, container.openEnd))
+        splices.push({
+          start: container.openStart,
+          end: container.openEnd,
+          text: `${openTag.slice(0, -2)}>${added}</${shape.prefix}cols>`,
+          order: -1,
+        })
+      } else {
+        splices.push({ start: container.insertAt, end: container.insertAt, text: added, order: 1 })
       }
     }
   }

@@ -430,6 +430,28 @@ test('setRowHeight refuses a row below one or a negative height', () => {
   )
 })
 
+test('setColumnWidth opens a cols element for the column', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.setColumnWidth('B', 24)
+
+  const sheet = decode(readContainer(workbook.toBytes()).parts.get('xl/worksheets/sheet1.xml'))
+  assert.match(sheet, /<cols><col min="2" max="2" width="24" customWidth="1"\/><\/cols><sheetData>/)
+})
+
+test('setColumnWidth refuses a bad column or a negative width', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  const sheet = workbook.sheets[0]
+
+  assert.throws(
+    () => sheet?.setColumnWidth('7', 10),
+    (error: unknown) => error instanceof XlsxError && error.code === 'bad-reference',
+  )
+  assert.throws(
+    () => sheet?.setColumnWidth('A', -1),
+    (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+  )
+})
+
 test('protection reads back off a protected sheet', () => {
   const workbook = readWorkbook(
     build('<row r="1"><c r="A1"><v>1</v></c></row>', {
@@ -1418,6 +1440,10 @@ test('refuses a write to a sheet whose part is not in the package', () => {
   )
   assert.throws(
     () => workbook.sheets[0]?.setRowHeight(1, 20),
+    (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
+  )
+  assert.throws(
+    () => workbook.sheets[0]?.setColumnWidth('A', 20),
     (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
   )
 })
