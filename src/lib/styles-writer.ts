@@ -272,20 +272,24 @@ const toVertAlign = (value: string | undefined): FontVerticalAlign | undefined =
 
 /** ECMA-376 stores a colour as eight hex digits, alpha first; a six-digit value
  * is the colour at full opacity. */
+const HEX_COLOR = /^[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/
+
 export function normalizeColor(color: string): string {
   const hex = color.startsWith('#') ? color.slice(1) : color
-  if (!/^[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(hex)) {
+  if (!HEX_COLOR.test(hex)) {
     throw new XlsxError('unwritable-value', `Colour "${color}" is not a 6 or 8 digit hex value`, {})
   }
   return (hex.length === 6 ? `FF${hex}` : hex).toUpperCase()
 }
 
 /** Reads a colour off a `<color>`, `<fgColor>` or `<bgColor>`, preferring an
- * explicit rgb, then a theme reference, then a palette index. A malformed theme
- * or index is dropped rather than reported, the way an unreadable attribute is. */
+ * explicit rgb, then a theme reference, then a palette index. A malformed rgb,
+ * theme or index is dropped rather than reported, the way an unreadable
+ * attribute is — a bad rgb read back would otherwise crash the next write that
+ * re-serialises it. */
 function parseColor(attributes: ReadonlyMap<string, string>): Color | undefined {
   const rgb = attributes.get('rgb')
-  if (rgb !== undefined) return rgb
+  if (rgb !== undefined && HEX_COLOR.test(rgb)) return rgb
   const themeText = attributes.get('theme')
   if (themeText !== undefined) {
     const theme = Number(themeText)

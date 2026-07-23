@@ -1178,6 +1178,14 @@ test('readFormatting drops a colour whose index is negative', () => {
   assert.equal(readFormatting(styles)[1]?.font, undefined)
 })
 
+test('readFormatting drops a malformed rgb colour rather than carrying it into a write', () => {
+  const styles =
+    '<styleSheet><fonts count="2"><font/><font><color rgb="Auto"/></font></fonts>' +
+    '<cellXfs count="2"><xf fontId="0"/><xf fontId="1"/></cellXfs></styleSheet>'
+
+  assert.equal(readFormatting(styles)[1]?.font, undefined)
+})
+
 test('readFormatting reads a theme colour on a fill and a border side', () => {
   const styles =
     '<styleSheet><fills count="3"><fill><patternFill patternType="none"/></fill>' +
