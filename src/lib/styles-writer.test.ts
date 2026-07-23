@@ -1248,3 +1248,11 @@ test('a colour tint outside minus one to one is refused', () => {
 
   assert.throws(() => ensureFontStyle(source, 0, { color: { theme: 1, tint: 2 } }), isUnwritable)
 })
+
+test('a font size that is not a positive finite number is refused', () => {
+  const source = fontStyles('<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>')
+
+  assert.throws(() => ensureFontStyle(source, 0, { size: Number.POSITIVE_INFINITY }), isUnwritable)
+  assert.throws(() => ensureFontStyle(source, 0, { size: Number.NaN }), isUnwritable)
+  assert.throws(() => ensureFontStyle(source, 0, { size: -5 }), isUnwritable)
+})

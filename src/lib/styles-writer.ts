@@ -401,7 +401,14 @@ function buildFontElement(font: FontFormat): string {
   if (font.underline === true || font.underline === 'single') inner += '<u/>'
   else if (typeof font.underline === 'string') inner += `<u val="${font.underline}"/>`
   if (font.vertAlign !== undefined) inner += `<vertAlign val="${font.vertAlign}"/>`
-  if (font.size !== undefined) inner += `<sz val="${font.size}"/>`
+  if (font.size !== undefined) {
+    if (!Number.isFinite(font.size) || font.size <= 0) {
+      throw new XlsxError('unwritable-value', `Font size ${font.size} is not a positive number`, {
+        part: 'xl/styles.xml',
+      })
+    }
+    inner += `<sz val="${font.size}"/>`
+  }
   if (font.color !== undefined) inner += `<color${colorAttributes(font.color)}/>`
   if (font.name !== undefined) inner += `<name val="${escapeXml(font.name)}"/>`
   return `<font>${inner}</font>`
