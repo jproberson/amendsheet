@@ -392,6 +392,22 @@ test('protecting a sheet with no other edit still rewrites only that sheet', () 
   assert.match(sheet, /<sheetProtection /)
 })
 
+test('unprotect removes the protection a file already declared', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      extra: {
+        'xl/worksheets/sheet1.xml':
+          '<worksheet><sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData>' +
+          '<sheetProtection sheet="1"/></worksheet>',
+      },
+    }),
+  )
+  workbook.sheets[0]?.unprotect()
+
+  const sheet = decode(readContainer(workbook.toBytes()).parts.get('xl/worksheets/sheet1.xml'))
+  assert.doesNotMatch(sheet, /sheetProtection/)
+})
+
 test('a plain value writes into a package with no style table', () => {
   const bytes = writeContainer({
     parts: new Map([

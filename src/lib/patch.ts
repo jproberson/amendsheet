@@ -517,7 +517,7 @@ export function patchSheet(
   sharedStrings?: ReadonlyMap<string, number>,
   styleOverrides?: ReadonlyMap<string, number>,
   at: SheetLocation = {},
-  protection?: SheetProtection,
+  protection?: SheetProtection | 'remove',
 ): Uint8Array {
   // A style override with no value edit is a restyle: the cell keeps its value
   // and formula and only its `s` changes, so unlike a write it needs no shared
@@ -706,8 +706,17 @@ export function patchSheet(
   }
 
   // sheetProtection is the sibling after sheetData, so it goes at dataEnd unless
-  // the sheet already has one to replace in place.
-  if (protection !== undefined) {
+  // the sheet already has one to replace or remove in place.
+  if (protection === 'remove') {
+    if (shape.protection !== undefined) {
+      splices.push({
+        start: shape.protection.start,
+        end: shape.protection.end,
+        text: '',
+        order: -1,
+      })
+    }
+  } else if (protection !== undefined) {
     const span = shape.protection ?? { start: shape.dataEnd, end: shape.dataEnd }
     splices.push({
       start: span.start,

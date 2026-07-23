@@ -17,7 +17,7 @@ const patchSheet = (
   date1904: boolean,
   sharedStrings?: ReadonlyMap<string, number>,
   styleOverrides?: ReadonlyMap<string, number>,
-  protection?: SheetProtection,
+  protection?: SheetProtection | 'remove',
 ) =>
   decode(
     patchSheetBytes(encode(source), edits, date1904, sharedStrings, styleOverrides, {}, protection),
@@ -68,6 +68,24 @@ test('writes sheet protection with the document namespace prefix', () => {
   const patched = patchSheet(source, new Map(), false, undefined, undefined, {})
 
   assert.match(patched, /<x:sheetData\/><x:sheetProtection sheet="1"/)
+})
+
+test('removing sheet protection drops the element the sheet had', () => {
+  const source =
+    '<worksheet xmlns="http://x"><sheetData/><sheetProtection sheet="1"/><pageMargins left="0.7"/></worksheet>'
+
+  const patched = patchSheet(source, new Map(), false, undefined, undefined, 'remove')
+
+  assert.doesNotMatch(patched, /sheetProtection/)
+  assert.match(patched, /<sheetData\/><pageMargins/)
+})
+
+test('removing sheet protection a sheet lacks changes nothing', () => {
+  const source = sheet(ROWS)
+
+  const patched = patchSheet(source, new Map(), false, undefined, undefined, 'remove')
+
+  assert.equal(patched, source)
 })
 
 test('restyling a cell rewrites its style and keeps its value and formula', () => {

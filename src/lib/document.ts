@@ -135,6 +135,8 @@ export interface Worksheet {
    * protection the sheet already declared. Passwords are not written.
    */
   protect(options?: SheetProtection): void
+  /** Removes worksheet protection, if the sheet had any. */
+  unprotect(): void
 }
 
 export interface SetOptions {
@@ -342,7 +344,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   // decision about what a cell MEANS; leaving it to write time gave the read
   // path its own copy of the decision, and the two drifted.
   const styleOverrides = new Map<string, Map<string, number>>()
-  const sheetProtections = new Map<string, SheetProtection>()
+  const sheetProtections = new Map<string, SheetProtection | 'remove'>()
   let workingStyles = stylesXml
   let parsedStyles = styles
   let parsedFrom = stylesXml
@@ -648,6 +650,11 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           )
         }
         sheetProtections.set(reference.path, options)
+      },
+      unprotect(): void {
+        // A missing sheet part is left to toBytes to skip, as it has nothing to
+        // unprotect; recording the intent is harmless.
+        sheetProtections.set(reference.path, 'remove')
       },
     }
   })
