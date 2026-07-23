@@ -120,13 +120,19 @@ function decodeTable(container: Container, path: string): DecodedTable | undefin
 function parseRange(ref: string): Range | undefined {
   const colon = ref.indexOf(':')
   if (colon === -1) return undefined
-  const start = parseReference(ref.slice(0, colon))
-  const end = parseReference(ref.slice(colon + 1))
-  return {
-    minRow: Math.min(start.row, end.row),
-    maxRow: Math.max(start.row, end.row),
-    minColumn: Math.min(start.column, end.column),
-    maxColumn: Math.max(start.column, end.column),
+  // A malformed half is a fault in the file, not the caller, so the table is
+  // left as it is rather than taking the whole save down with a bad-reference.
+  try {
+    const start = parseReference(ref.slice(0, colon))
+    const end = parseReference(ref.slice(colon + 1))
+    return {
+      minRow: Math.min(start.row, end.row),
+      maxRow: Math.max(start.row, end.row),
+      minColumn: Math.min(start.column, end.column),
+      maxColumn: Math.max(start.column, end.column),
+    }
+  } catch {
+    return undefined
   }
 }
 

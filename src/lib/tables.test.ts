@@ -120,6 +120,10 @@ test('leaves a table part that is not valid utf-8 untouched', () => {
   assert.deepEqual(extend(parts, ['A3']), [])
 })
 
+test('leaves a table with a malformed ref untouched instead of crashing the write', () => {
+  assert.deepEqual(extend(withOneTable('A1:B'), ['A3']), [])
+})
+
 test('leaves an autoFilter over a sub-range alone while growing the table', () => {
   const parts = withOneTable('A1:B2', {
     'xl/tables/table1.xml': table('A1:B2', '', '<autoFilter ref="A1:B1"/>'),
