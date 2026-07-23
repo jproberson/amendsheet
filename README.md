@@ -113,6 +113,8 @@ sheet?.protect({ formatCells: true, sort: true, selectLockedCells: false })
 
 It replaces any protection the sheet already had. Passwords are not written, so
 protection guards against accidental edits, not a determined one.
+`worksheet.protection` reads the protection back in the same shape, or is
+undefined when the sheet is not protected.
 
 `worksheet.merge('A1:B2')` merges a range, joining any merges the sheet already
 has. Excel shows only the top-left cell; the others keep their values, since a
