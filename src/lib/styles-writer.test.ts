@@ -6,6 +6,7 @@ import {
   ensureDateStyle,
   ensureFillStyle,
   ensureFontStyle,
+  ensureProtectionStyle,
   readFormatting,
 } from './styles-writer.js'
 import { assertWellFormed } from '../testing/invariants.js'
@@ -554,6 +555,14 @@ test('reports no alignment for a cell format that has none', () => {
   )
 })
 
+test("reads a cell format's protection", () => {
+  const source =
+    '<styleSheet><cellXfs count="2"><xf/>' +
+    '<xf applyProtection="1"><protection locked="0" hidden="1"/></xf></cellXfs></styleSheet>'
+
+  assert.deepEqual(readFormatting(source)[1], { protection: { locked: false, hidden: true } })
+})
+
 const styles = (cellXfs: string, extra = '') =>
   `<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${extra}<cellXfs count="${(cellXfs.match(/<xf/g) ?? []).length}">${cellXfs}</cellXfs></styleSheet>`
 
@@ -810,6 +819,95 @@ test('refuses a negative indent', () => {
   const source = styles('<xf numFmtId="0"/>')
 
   assert.throws(() => ensureAlignmentStyle(source, 0, { indent: -1 }), /[Ii]ndent/)
+})
+
+test('locking a cell writes a protection and turns applyProtection on', () => {
+  const source = styles('<xf numFmtId="0"/>')
+
+  const result = ensureProtectionStyle(source, 0, { locked: false, hidden: true })
+
+  assert.equal(result.index, 1)
+  assertWellFormed(result.xml, 'protection')
+  assert.match(xfAt(result.xml, 1), /applyProtection="1"/)
+  assert.match(xfAt(result.xml, 1), /<protection locked="0" hidden="1"\/>/)
+})
+
+test('a protection change merges onto the one the cell already has', () => {
+  const source = styles('<xf numFmtId="0"><protection locked="0"/></xf>')
+
+  const result = ensureProtectionStyle(source, 0, { hidden: true })
+
+  assert.match(xfAt(result.xml, 1), /<protection locked="0" hidden="1"\/>/)
+})
+
+test('protection writes explicit locked and unhidden flags', () => {
+  const source = styles('<xf numFmtId="0"/>')
+
+  const result = ensureProtectionStyle(source, 0, { locked: true, hidden: false })
+
+  assert.match(xfAt(result.xml, 1), /<protection locked="1" hidden="0"\/>/)
+})
+
+test('a protection change keeps a hidden the cell already has', () => {
+  const source = styles('<xf numFmtId="0"><protection hidden="1"/></xf>')
+
+  const result = ensureProtectionStyle(source, 0, { locked: false })
+
+  assert.match(xfAt(result.xml, 1), /<protection locked="0" hidden="1"\/>/)
+})
+
+test('protection sits after alignment on the same cell format', () => {
+  const source = styles('<xf numFmtId="0" applyAlignment="1"><alignment horizontal="center"/></xf>')
+
+  const result = ensureProtectionStyle(source, 0, { locked: false })
+
+  assertWellFormed(result.xml, 'alignment then protection')
+  assert.match(xfAt(result.xml, 1), /<alignment horizontal="center"\/><protection locked="0"\/>/)
+})
+
+test('does not add the same protection twice', () => {
+  const source = styles('<xf numFmtId="0"/>')
+  const once = ensureProtectionStyle(source, 0, { locked: false })
+  const twice = ensureProtectionStyle(once.xml, 0, { locked: false })
+
+  assert.equal(twice.index, once.index)
+  assert.equal(twice.xml, once.xml)
+})
+
+test('writes protection into a prefixed cell format', () => {
+  const source =
+    '<x:styleSheet><x:cellXfs count="1"><x:xf numFmtId="0"/></x:cellXfs></x:styleSheet>'
+
+  const result = ensureProtectionStyle(source, 0, { hidden: true })
+
+  assertWellFormed(result.xml, 'prefixed protection')
+  assert.match(result.xml, /<x:xf [^>]*applyProtection="1"><x:protection hidden="1"\/><\/x:xf>/)
+})
+
+test('protects a cell that has no style yet against the default', () => {
+  const source = styles('<xf numFmtId="0"/>')
+
+  const result = ensureProtectionStyle(source, undefined, { locked: false })
+
+  assert.equal(result.index, 1)
+  assert.match(xfAt(result.xml, 1), /<protection locked="0"\/>/)
+})
+
+test('protection falls back to the default when the base cell format is missing', () => {
+  const source = styles('<xf numFmtId="0"/>')
+
+  const result = ensureProtectionStyle(source, 99, { hidden: true })
+
+  assert.match(xfAt(result.xml, 1), /<protection hidden="1"\/>/)
+})
+
+test('protection is written before an extLst the cell format already has', () => {
+  const source = styles('<xf numFmtId="0"><extLst><ext uri="x"/></extLst></xf>')
+
+  const result = ensureProtectionStyle(source, 0, { locked: false })
+
+  assertWellFormed(result.xml, 'protection before extLst')
+  assert.match(xfAt(result.xml, 1), /<protection locked="0"\/><extLst>/)
 })
 
 test('writes into a prefixed style table without breaking it', () => {

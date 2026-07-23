@@ -30,12 +30,14 @@ import {
   type DateStyle,
   type FillFormat,
   type FontFormat,
+  type Protection,
   ensureAlignmentStyle,
   ensureBorderStyle,
   ensureDateStyle,
   ensureFillStyle,
   ensureFontStyle,
   ensureNumberFormat,
+  ensureProtectionStyle,
   readFormatting,
 } from './styles-writer.js'
 import { type Styles, isDateFormat, numberFormatOf, readStyles } from './styles.js'
@@ -86,6 +88,8 @@ export interface Cell {
   readonly border?: BorderFormat
   /** Absent unless the cell sets an alignment of its own. */
   readonly alignment?: Alignment
+  /** Absent unless the cell sets a `locked` or `hidden` protection of its own. */
+  readonly protection?: Protection
 }
 
 export interface Worksheet {
@@ -136,6 +140,8 @@ export interface SetOptions {
   readonly border?: BorderFormat
   /** Alignment to apply, merged onto the alignment the cell already has. */
   readonly alignment?: Alignment
+  /** Protection to apply, merged onto the protection the cell already has. */
+  readonly protection?: Protection
 }
 
 export interface Workbook {
@@ -527,6 +533,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       if (options?.fill !== undefined) step(ensureFillStyle(xml, base, options.fill))
       if (options?.border !== undefined) step(ensureBorderStyle(xml, base, options.border))
       if (options?.alignment !== undefined) step(ensureAlignmentStyle(xml, base, options.alignment))
+      if (options?.protection !== undefined)
+        step(ensureProtectionStyle(xml, base, options.protection))
       return applied
     }
 

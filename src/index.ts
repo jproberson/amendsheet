@@ -10,6 +10,7 @@ export type {
   HorizontalAlignment,
   PatternFill,
   PatternStyle,
+  Protection,
   SolidFill,
   UnderlineStyle,
   VerticalAlign,

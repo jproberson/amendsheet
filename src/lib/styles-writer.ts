@@ -717,6 +717,78 @@ export function ensureAlignmentStyle(
   return { xml, index: id }
 }
 
+export interface Protection {
+  /** Whether the cell resists editing once the sheet is protected. */
+  readonly locked?: boolean
+  /** Whether the cell's formula is hidden once the sheet is protected. */
+  readonly hidden?: boolean
+}
+
+interface ProtectionAttributes {
+  readonly locked?: boolean
+  readonly hidden?: boolean
+}
+
+function parseProtection(xf: string): ProtectionAttributes {
+  const out: { locked?: boolean; hidden?: boolean } = {}
+  for (const event of readXml(xf)) {
+    if (event.kind !== 'open' || event.localName !== 'protection') continue
+    const locked = event.attributes.get('locked')
+    if (locked !== undefined) out.locked = flagOn(locked)
+    const hidden = event.attributes.get('hidden')
+    if (hidden !== undefined) out.hidden = flagOn(hidden)
+  }
+  return out
+}
+
+function buildProtectionElement(protection: ProtectionAttributes, prefix: string): string {
+  let attributes = ''
+  if (protection.locked !== undefined) attributes += ` locked="${protection.locked ? '1' : '0'}"`
+  if (protection.hidden !== undefined) attributes += ` hidden="${protection.hidden ? '1' : '0'}"`
+  return `<${prefix}protection${attributes}/>`
+}
+
+const PROTECTION_CHILD = /<(?:[A-Za-z0-9]+:)?protection\b[^>]*\/>/
+
+/** Puts `protection` in the xf after any alignment and before any extLst, the
+ *  order CT_Xf wants, dropping a protection it had and turning applyProtection on. */
+function withProtectionChild(xf: string, protection: string, prefix: string): string {
+  const close = xf.indexOf('>')
+  const selfClosing = xf.charAt(close - 1) === '/'
+  const openTag = withApplyFlag(
+    `${xf.slice(0, selfClosing ? close - 1 : close)}>`,
+    'applyProtection',
+  )
+  const body = (selfClosing ? '' : xf.slice(close + 1, xf.lastIndexOf('</'))).replace(
+    PROTECTION_CHILD,
+    '',
+  )
+  const extLst = body.match(/<(?:[A-Za-z0-9]+:)?extLst\b/)
+  const at = extLst?.index ?? body.length
+  return `${openTag}${body.slice(0, at)}${protection}${body.slice(at)}</${prefix}xf>`
+}
+
+export function ensureProtectionStyle(
+  stylesXml: string,
+  basedOn: number | undefined,
+  protection: Protection,
+): DateStyle {
+  const prefix = tablePrefix(stylesXml)
+  const base =
+    basedOn === undefined
+      ? DEFAULT_XF
+      : (readTable(stylesXml, 'cellXfs', 'xf')?.elements[basedOn] ?? DEFAULT_XF)
+  const current = parseProtection(base)
+  const merged: ProtectionAttributes = {
+    locked: protection.locked ?? current.locked,
+    hidden: protection.hidden ?? current.hidden,
+  }
+
+  const wanted = withProtectionChild(base, buildProtectionElement(merged, prefix), prefix)
+  const { xml, id } = ensureInTable(stylesXml, 'cellXfs', 'xf', wanted)
+  return { xml, index: id }
+}
+
 function tablePrefix(xml: string): string {
   for (const event of readXml(xml)) {
     if (event.kind !== 'open') continue
@@ -848,6 +920,7 @@ export interface CellFormatting {
   readonly fill?: FillFormat
   readonly border?: BorderFormat
   readonly alignment?: Alignment
+  readonly protection?: Protection
 }
 
 const PATTERN_STYLES: ReadonlySet<PatternStyle> = new Set([
@@ -1002,8 +1075,14 @@ function alignmentFrom(xf: string): Alignment | undefined {
   return Object.keys(alignment).length === 0 ? undefined : alignment
 }
 
-/** Resolves every cell format's font, fill, border and alignment in one pass, so
- * a read looks each up by the cell's `s` index rather than reparsing the styles. */
+/** Protection, like alignment, lives on the xf, so it is read straight off it. */
+function protectionFrom(xf: string): Protection | undefined {
+  const parsed = parseProtection(xf)
+  return Object.keys(parsed).length === 0 ? undefined : parsed
+}
+
+/** Resolves every cell format's font, fill, border, alignment and protection in
+ * one pass, so a read looks each up by the cell's `s` index. */
 export function readFormatting(stylesXml: string): readonly CellFormatting[] {
   const xfs = readTable(stylesXml, 'cellXfs', 'xf')?.elements ?? []
   const fonts = readTable(stylesXml, 'fonts', 'font')?.elements ?? []
@@ -1014,11 +1093,13 @@ export function readFormatting(stylesXml: string): readonly CellFormatting[] {
     const fill = fillFrom(xf, fills)
     const border = borderFrom(xf, borders)
     const alignment = alignmentFrom(xf)
+    const protection = protectionFrom(xf)
     return {
       ...(font === undefined ? {} : { font }),
       ...(fill === undefined ? {} : { fill }),
       ...(border === undefined ? {} : { border }),
       ...(alignment === undefined ? {} : { alignment }),
+      ...(protection === undefined ? {} : { protection }),
     }
   })
 }

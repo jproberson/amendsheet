@@ -78,6 +78,7 @@ sheet.set('A1', 1234.5, {
   fill: { type: 'solid', color: 'FFFF00' },
   border: { all: { style: 'thin' } },
   alignment: { horizontal: 'center', wrapText: true },
+  protection: { locked: false },
 })
 
 // format() changes only the formatting, so a formula cell keeps its expression.
@@ -96,7 +97,8 @@ pattern, color, background }` for one of the ECMA-376 pattern types such as
 already has. An `alignment` places the text — `horizontal`, `vertical`,
 `wrapText`, `textRotation` (0–180, or 255 to stack top to bottom) and `indent` —
 and merges the same way, so setting `wrapText` leaves a horizontal choice alone.
-Colours are `RRGGBB` or `AARRGGBB` hex.
+A `protection` sets `locked` and `hidden`, which take effect once the worksheet
+itself is protected. Colours are `RRGGBB` or `AARRGGBB` hex.
 
 An edit the format cannot hold is refused by `set` itself, with an `XlsxError`
 naming the cell. `NaN`, an infinity, a character XML has no way to encode, a

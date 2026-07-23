@@ -349,6 +349,23 @@ test('an alignment set on a cell reads back off it', () => {
   })
 })
 
+test('protection set on a cell reads back off it', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.set('A1', 'x', { protection: { locked: false, hidden: true } })
+
+  const reopened = readWorkbook(workbook.toBytes())
+  assert.deepEqual(reopened.sheets[0]?.cell('A1')?.protection, { locked: false, hidden: true })
+})
+
+test('format unlocks a cell without touching its value', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>7</v></c></row>'))
+  workbook.sheets[0]?.format('A1', { protection: { locked: false } })
+
+  const parts = readContainer(workbook.toBytes()).parts
+  assert.match(decode(parts.get('xl/styles.xml')), /<protection locked="0"\/>/)
+  assert.match(decode(parts.get('xl/worksheets/sheet1.xml')), /<c [^>]*s="\d+"[^>]*><v>7<\/v><\/c>/)
+})
+
 test('a plain value writes into a package with no style table', () => {
   const bytes = writeContainer({
     parts: new Map([
