@@ -24,11 +24,13 @@ import { type RawCell, readSheet } from './sheet.js'
 import { appendSharedStrings, readSharedStrings } from './shared-strings.js'
 import { extendTables } from './tables.js'
 import {
+  type Alignment,
   type BorderFormat,
   type CellFormatting,
   type DateStyle,
   type FillFormat,
   type FontFormat,
+  ensureAlignmentStyle,
   ensureBorderStyle,
   ensureDateStyle,
   ensureFillStyle,
@@ -130,6 +132,8 @@ export interface SetOptions {
   readonly fill?: FillFormat
   /** Borders to apply, merged onto the sides the cell already has. */
   readonly border?: BorderFormat
+  /** Alignment to apply, merged onto the alignment the cell already has. */
+  readonly alignment?: Alignment
 }
 
 export interface Workbook {
@@ -520,6 +524,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       if (options?.font !== undefined) step(ensureFontStyle(xml, base, options.font))
       if (options?.fill !== undefined) step(ensureFillStyle(xml, base, options.fill))
       if (options?.border !== undefined) step(ensureBorderStyle(xml, base, options.border))
+      if (options?.alignment !== undefined) step(ensureAlignmentStyle(xml, base, options.alignment))
       return applied
     }
 

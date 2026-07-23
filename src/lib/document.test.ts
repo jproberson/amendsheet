@@ -280,6 +280,50 @@ test('set refuses a font colour that is not hex, before recording anything', () 
   assert.deepEqual(sheet?.cell('A1')?.value, { kind: 'number', value: 1 })
 })
 
+const lastXf = (styles: string) =>
+  [...styles.matchAll(/<xf\b[^>]*?\/>|<xf\b[^>]*?>[\s\S]*?<\/xf>/g)]
+    .map((match) => match[0])
+    .at(-1) ?? ''
+
+test('set applies an alignment, adding it to the cell format', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.set('A1', 'x', { alignment: { horizontal: 'center', wrapText: true } })
+
+  const styles = decode(readContainer(workbook.toBytes()).parts.get('xl/styles.xml'))
+
+  assert.match(styles, /<alignment horizontal="center" wrapText="1"\/>/)
+  assert.match(lastXf(styles), /applyAlignment="1"/)
+})
+
+test('format applies an alignment without touching the value', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>7</v></c></row>'))
+  workbook.sheets[0]?.format('A1', { alignment: { vertical: 'top' } })
+
+  const parts = readContainer(workbook.toBytes()).parts
+
+  assert.match(decode(parts.get('xl/styles.xml')), /<alignment vertical="top"\/>/)
+  assert.match(decode(parts.get('xl/worksheets/sheet1.xml')), /<c [^>]*s="\d+"[^>]*><v>7<\/v><\/c>/)
+})
+
+test('set composes a font and an alignment into one cell format', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.set('A1', 'x', { font: { bold: true }, alignment: { horizontal: 'right' } })
+
+  const xf = lastXf(decode(readContainer(workbook.toBytes()).parts.get('xl/styles.xml')))
+
+  assert.match(xf, /applyFont="1"/)
+  assert.match(xf, /applyAlignment="1"/)
+  assert.match(xf, /<alignment horizontal="right"\/>/)
+})
+
+test('set refuses a bad text rotation, before recording anything', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  const sheet = workbook.sheets[0]
+
+  assert.throws(() => sheet?.set('A1', 'x', { alignment: { textRotation: 999 } }), /rotation/)
+  assert.deepEqual(sheet?.cell('A1')?.value, { kind: 'number', value: 1 })
+})
+
 test('a plain value writes into a package with no style table', () => {
   const bytes = writeContainer({
     parts: new Map([
