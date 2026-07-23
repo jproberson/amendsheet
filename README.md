@@ -66,6 +66,28 @@ grows to cover them. The style of a replaced cell is kept, so its formatting
 survives the edit. Writing a `Date` into a cell with no date format applies one,
 reusing a format the file already has where possible.
 
+Formatting goes through the same options, and composes into one cell format:
+
+```ts
+const workbook = readWorkbook(bytes)
+const sheet = workbook.sheet('Summary') ?? workbook.sheets[0]
+
+sheet.set('A1', 1234.5, {
+  numberFormat: '"$"#,##0.00',
+  font: { bold: true, color: 'FF0000' },
+  fill: { color: 'FFFF00' },
+  border: { all: { style: 'thin' } },
+})
+
+// format() changes only the formatting, so a formula cell keeps its expression.
+sheet.format('B2', { font: { italic: true }, border: { bottom: { style: 'medium' } } })
+```
+
+A `font` merges onto the cell's current one, so `{ font: { bold: true } }` adds
+bold without disturbing its size or colour. A `fill` is a solid background. A
+`border` sets sides by name, or `all` at once, merging onto the sides the cell
+already has. Colours are `RRGGBB` or `AARRGGBB` hex.
+
 An edit the format cannot hold is refused by `set` itself, with an `XlsxError`
 naming the cell. `NaN`, an infinity, a character XML has no way to encode, a
 date outside the workbook's epoch, and overwriting the cell that defines a
@@ -152,8 +174,8 @@ What a minor release is allowed to do, so you know which branches are safe:
   Nothing streams a sheet through in chunks, though, so it is still held whole
   in memory.
 - Charts, pivot tables and drawings are preserved but never created.
-- Nothing reads or writes cell formatting beyond number formats, so fonts,
-  fills and borders can be preserved but not set.
+- Fonts, fills and borders can be set but not read: `cell` exposes the value and
+  number format, not the rest of a cell's formatting, which is preserved.
 - A table grows to include a cell written directly below or to the right of it,
   the way Excel would, adding a column when it grows sideways. Other ranges that
   name cells are still copied, not adjusted: chart ranges, defined names and
