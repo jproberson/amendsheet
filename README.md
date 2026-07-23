@@ -85,7 +85,10 @@ sheet.format('B2', { font: { italic: true }, border: { bottom: { style: 'medium'
 ```
 
 A `font` merges onto the cell's current one, so `{ font: { bold: true } }` adds
-bold without disturbing its size or colour. A `fill` is a solid background. A
+bold without disturbing its size or colour. Besides `bold`, `italic`, `size`,
+`color` and `name`, a font carries `strike`, `vertAlign` (`superscript` or
+`subscript`) and `underline`, which is `true` for a single underline or one of
+`double`, `singleAccounting`, `doubleAccounting`. A `fill` is a solid background. A
 `border` sets sides by name, or `all` at once, merging onto the sides the cell
 already has. An `alignment` places the text — `horizontal`, `vertical`,
 `wrapText`, `textRotation` (0–180, or 255 to stack top to bottom) and `indent` —
