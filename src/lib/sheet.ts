@@ -1,5 +1,5 @@
 import { type XlsxErrorContext, XlsxError } from './errors.js'
-import { type CellAddress, formatReference, parseReference } from './reference.js'
+import { type CellAddress, formatReference, parseFileReference } from './reference.js'
 import { readXmlBytes } from './xml.js'
 
 export type RawCellValue =
@@ -50,7 +50,7 @@ export function* readSheet(
   let inPhonetic = false
 
   const finishCell = (): RawCell => {
-    const address = reference === undefined ? { row, column } : parseReference(reference)
+    const address = reference === undefined ? { row, column } : parseFileReference(reference, at)
     const written = reference ?? formatReference(address)
     column = address.column
 

@@ -1,6 +1,11 @@
 import { dateToSerial } from './date.js'
 import { XlsxError } from './errors.js'
-import { canonicalReference, formatReference, parseReference } from './reference.js'
+import {
+  canonicalReference,
+  formatReference,
+  parseFileReference,
+  parseReference,
+} from './reference.js'
 import { findUnwritableCharacter, readXmlBytes, withAttribute } from './xml.js'
 
 /**
@@ -477,7 +482,8 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
       }
       if (event.localName === 'c') {
         const reference = event.attributes.get('r')
-        cellColumn = reference === undefined ? cellColumn + 1 : parseReference(reference).column
+        cellColumn =
+          reference === undefined ? cellColumn + 1 : parseFileReference(reference, at).column
         cellStyle = event.attributes.get('s')
         cellStart = event.start
         master = undefined

@@ -44,6 +44,15 @@ test('exposes sheets by name', () => {
   )
 })
 
+test('a malformed cell reference in the file reads as a file fault, not a caller fault', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A"><v>1</v></c></row>'))
+
+  assert.throws(
+    () => [...(workbook.sheets[0]?.cells() ?? [])],
+    (error: unknown) => error instanceof XlsxError && error.code === 'invalid-content',
+  )
+})
+
 test('reads a number as a number', () => {
   const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>42</v></c></row>'))
   const [cell] = [...(workbook.sheets[0]?.cells() ?? [])]

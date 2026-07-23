@@ -1,4 +1,4 @@
-import { XlsxError } from './errors.js'
+import { type XlsxErrorContext, XlsxError } from './errors.js'
 
 export const LAST_COLUMN = 16384
 export const LAST_ROW = 1048576
@@ -90,6 +90,22 @@ export function parseWritableReference(reference: string): CellAddress {
 
 export function formatReference(address: CellAddress): string {
   return `${indexToColumn(address.column)}${address.row}`
+}
+
+/**
+ * A cell reference read from a file. A malformed one is the file's fault, so it
+ * surfaces as `invalid-content` rather than the caller-fault `bad-reference`.
+ */
+export function parseFileReference(reference: string, context: XlsxErrorContext): CellAddress {
+  try {
+    return parseReference(reference)
+  } catch {
+    throw new XlsxError(
+      'invalid-content',
+      `Cell reference "${reference}" in the file is not a valid reference`,
+      { ...context, reference },
+    )
+  }
 }
 
 /**
