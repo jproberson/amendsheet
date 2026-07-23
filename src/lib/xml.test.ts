@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile, readdir } from 'node:fs/promises'
 import { test } from 'node:test'
 import { readContainer } from './container.js'
+import { XlsxError } from './errors.js'
 import { type XmlEvent, findUnwritableCharacter, readXml, readXmlBytes } from './xml.js'
 
 const events = (source: string): XmlEvent[] => [...readXml(source)]
@@ -145,6 +146,24 @@ test('rejects unterminated markup', () => {
   assert.throws(() => events('<![CDATA[ open'), /Unterminated CDATA/)
   assert.throws(() => events('<?xml open'), /Unterminated processing instruction/)
   assert.throws(() => events('<!DOCTYPE open'), /Unterminated declaration/)
+})
+
+test('a numeric character reference above the highest code point is a located malformed-xml error', () => {
+  const isMalformed = (error: unknown) =>
+    error instanceof XlsxError && error.code === 'malformed-xml'
+
+  assert.throws(() => events('<t>&#x110000;</t>'), isMalformed)
+  assert.throws(() => events('<t>&#9999999999;</t>'), isMalformed)
+  assert.throws(() => byteEvents('<t>&#x110000;</t>'), isMalformed)
+})
+
+test('invalid utf-8 in a byte stream is a located unreadable-part error', () => {
+  const bytes = new Uint8Array([...bytesOf('<t>'), 0xc3, 0x28, ...bytesOf('</t>')])
+
+  assert.throws(
+    () => [...readXmlBytes(bytes)],
+    (error: unknown) => error instanceof XlsxError && error.code === 'unreadable-part',
+  )
 })
 
 test('reads single quoted attribute values', () => {

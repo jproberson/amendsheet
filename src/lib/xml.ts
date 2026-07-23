@@ -36,13 +36,25 @@ const NAMED_ENTITIES = new Map([
   ['apos', "'"],
 ])
 
+const HIGHEST_CODE_POINT = 0x10ffff
+
+// String.fromCodePoint throws a bare RangeError past U+10FFFF, and the regex
+// accepts an arbitrarily long digit run, so a crafted reference has to become a
+// located parse error rather than an uncaught crash.
+function fromCodePoint(code: number, reference: string): string {
+  if (code > HIGHEST_CODE_POINT) {
+    throw parseError(`Character reference ${reference} is above the highest code point`)
+  }
+  return String.fromCodePoint(code)
+}
+
 function decodeEntities(text: string): string {
   if (!text.includes('&')) return text
   return text.replace(
     ENTITY,
     (match: string, hex?: string, decimal?: string, named?: string): string => {
-      if (hex !== undefined) return String.fromCodePoint(Number.parseInt(hex, 16))
-      if (decimal !== undefined) return String.fromCodePoint(Number(decimal))
+      if (hex !== undefined) return fromCodePoint(Number.parseInt(hex, 16), match)
+      if (decimal !== undefined) return fromCodePoint(Number(decimal), match)
       if (named !== undefined) return NAMED_ENTITIES.get(named) ?? match
       return match
     },
@@ -212,7 +224,15 @@ const utf8 = new TextDecoder('utf-8', { fatal: true })
 function decodeSpan(bytes: Uint8Array, start: number, end: number): string {
   for (let index = start; index < end; index++) {
     const byte = bytes[index]
-    if (byte !== undefined && byte >= 0x80) return utf8.decode(bytes.subarray(start, end))
+    if (byte !== undefined && byte >= 0x80) {
+      try {
+        return utf8.decode(bytes.subarray(start, end))
+      } catch (cause) {
+        // fatal:true throws a bare TypeError on invalid utf-8; a sheet reaches
+        // this path without the container's decode guard, so locate it here.
+        throw new XlsxError('unreadable-part', `Not valid utf-8, at offset ${start}`, { cause })
+      }
+    }
   }
   let text = ''
   for (let index = start; index < end; index += 8192) {
