@@ -1,7 +1,7 @@
 import { XlsxError } from './errors.js'
 
-const LAST_COLUMN = 16384
-const LAST_ROW = 1048576
+export const LAST_COLUMN = 16384
+export const LAST_ROW = 1048576
 
 const LETTER_A = 'A'.charCodeAt(0)
 

@@ -17,6 +17,8 @@ import {
 } from './patch.js'
 import {
   type CellAddress,
+  LAST_COLUMN,
+  LAST_ROW,
   canonicalReference,
   columnToIndex,
   formatReference,
@@ -725,6 +727,9 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         if (!Number.isInteger(row) || row < 1) {
           throw new XlsxError('bad-reference', `Row ${row} is not a row number`, { ...at })
         }
+        if (row > LAST_ROW) {
+          throw new XlsxError('bad-reference', `Row ${row} is outside the sheet`, { ...at })
+        }
         if (!Number.isFinite(height) || height < 0) {
           throw new XlsxError('unwritable-value', `Row height ${height} is not zero or more`, {
             ...at,
@@ -743,6 +748,12 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           )
         }
         const index = columnToIndex(column)
+        if (index > LAST_COLUMN) {
+          throw new XlsxError('bad-reference', `Column ${column} is outside the sheet`, {
+            ...at,
+            reference: column,
+          })
+        }
         if (!Number.isFinite(width) || width < 0) {
           throw new XlsxError('unwritable-value', `Column width ${width} is not zero or more`, {
             ...at,

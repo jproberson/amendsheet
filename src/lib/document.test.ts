@@ -452,6 +452,24 @@ test('setColumnWidth refuses a bad column or a negative width', () => {
   )
 })
 
+test('setRowHeight refuses a row past the sheet maximum', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+
+  assert.throws(
+    () => workbook.sheets[0]?.setRowHeight(1048577, 20),
+    (error: unknown) => error instanceof XlsxError && error.code === 'bad-reference',
+  )
+})
+
+test('setColumnWidth refuses a column past the last', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+
+  assert.throws(
+    () => workbook.sheets[0]?.setColumnWidth('XFE', 15),
+    (error: unknown) => error instanceof XlsxError && error.code === 'bad-reference',
+  )
+})
+
 test('protection reads back off a protected sheet', () => {
   const workbook = readWorkbook(
     build('<row r="1"><c r="A1"><v>1</v></c></row>', {
