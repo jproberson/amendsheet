@@ -1027,30 +1027,38 @@ function widenDimension(
   const from = bounds[0] ?? ''
   if (from === '') return undefined
 
-  const topLeft = parseReference(from)
-  const bottomRight = parseReference(bounds[1] ?? from)
+  // The dimension comes from the file, so its halves may not parse, and a range
+  // it names past the last column cannot be spelled back. Either way the file's
+  // dimension is left as it is rather than taking the whole save down; the cell
+  // still writes, and Excel recalculates the used range anyway.
+  try {
+    const topLeft = parseReference(from)
+    const bottomRight = parseReference(bounds[1] ?? from)
 
-  let { row: lastRow, column: lastColumn } = bottomRight
-  let { row: firstRow, column: firstColumn } = topLeft
+    let { row: lastRow, column: lastColumn } = bottomRight
+    let { row: firstRow, column: firstColumn } = topLeft
 
-  for (const reference of references) {
-    const { row, column } = parseReference(reference)
-    firstRow = Math.min(firstRow, row)
-    firstColumn = Math.min(firstColumn, column)
-    lastRow = Math.max(lastRow, row)
-    lastColumn = Math.max(lastColumn, column)
+    for (const reference of references) {
+      const { row, column } = parseReference(reference)
+      firstRow = Math.min(firstRow, row)
+      firstColumn = Math.min(firstColumn, column)
+      lastRow = Math.max(lastRow, row)
+      lastColumn = Math.max(lastColumn, column)
+    }
+
+    const grown =
+      firstRow !== topLeft.row ||
+      firstColumn !== topLeft.column ||
+      lastRow !== bottomRight.row ||
+      lastColumn !== bottomRight.column
+    if (!grown) return undefined
+
+    const start = formatReference({ row: firstRow, column: firstColumn })
+    const end = formatReference({ row: lastRow, column: lastColumn })
+    return `${start}:${end}`
+  } catch {
+    return undefined
   }
-
-  const grown =
-    firstRow !== topLeft.row ||
-    firstColumn !== topLeft.column ||
-    lastRow !== bottomRight.row ||
-    lastColumn !== bottomRight.column
-  if (!grown) return undefined
-
-  const start = formatReference({ row: firstRow, column: firstColumn })
-  const end = formatReference({ row: lastRow, column: lastColumn })
-  return `${start}:${end}`
 }
 
 /** Only safe on elements built above, where the reference is the first attribute. */

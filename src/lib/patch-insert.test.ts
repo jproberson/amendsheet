@@ -202,6 +202,16 @@ test('widens the declared dimension downwards for a new row', () => {
   assert.match(patched, /<dimension ref="A1:B9"\/>/)
 })
 
+test('leaves a dimension naming a column past the last alone instead of crashing the save', () => {
+  const patched = patchSheet(
+    withDimension('A1:XFE1', ROW_ONE),
+    new Map<string, CellInput>([['B9', 9]]),
+    false,
+  )
+
+  assert.match(patched, /<dimension ref="A1:XFE1"\/>/)
+})
+
 test('leaves the dimension alone when the edit fits inside it', () => {
   const patched = patchSheet(
     withDimension('A1:Z100', ROW_ONE),
