@@ -195,10 +195,14 @@ export function ensureDateStyle(stylesXml: string, basedOn: number | undefined):
     return { xml: stylesXml, index: basedOn }
   }
 
-  // A cell with no formatting of its own can borrow any date format already here.
+  // A cell with no formatting of its own can borrow a date format already here,
+  // but only from a plain xf: borrowing carries the whole xf, so a decorated one
+  // would hand the blank cell a font, fill or border it never asked for.
   if (basedOn === undefined) {
     for (let index = 0; index < parsed.cellFormats.length; index++) {
-      if (isDateFormat(parsed, index)) return { xml: stylesXml, index }
+      if (isDateFormat(parsed, index) && isPlainFormat(stylesXml, index)) {
+        return { xml: stylesXml, index }
+      }
     }
   }
 
@@ -424,6 +428,27 @@ function idOf(stylesXml: string, basedOn: number | undefined, attribute: string)
   const element = readTable(stylesXml, 'cellXfs', 'xf')?.elements[basedOn]
   const match = element?.match(new RegExp(`\\b${attribute}\\s*=\\s*["'](\\d+)["']`))
   return match?.[1] === undefined ? 0 : Number(match[1])
+}
+
+/**
+ * A cell format that decorates nothing: default font, fill and border and no
+ * alignment or protection child. Only such a format is safe for a blank cell to
+ * borrow, since a borrow carries the whole xf, not just its number format.
+ */
+function isPlainFormat(stylesXml: string, index: number): boolean {
+  const element = readTable(stylesXml, 'cellXfs', 'xf')?.elements[index]
+  if (element === undefined) return true
+  const idIsZero = (attribute: string) => {
+    const match = element.match(new RegExp(`\\b${attribute}\\s*=\\s*["'](\\d+)["']`))
+    return match?.[1] === undefined || match[1] === '0'
+  }
+  return (
+    idIsZero('fontId') &&
+    idIsZero('fillId') &&
+    idIsZero('borderId') &&
+    !/<[a-z0-9]*:?alignment[\s/>]/i.test(element) &&
+    !/<[a-z0-9]*:?protection[\s/>]/i.test(element)
+  )
 }
 
 /**
@@ -964,7 +989,9 @@ export function ensureNumberFormat(
   // target's are silently dropped.
   if (basedOn === undefined) {
     for (let index = 0; index < parsed.cellFormats.length; index++) {
-      if (numberFormatOf(parsed, index) === formatCode) return { xml: stylesXml, index }
+      if (numberFormatOf(parsed, index) === formatCode && isPlainFormat(stylesXml, index)) {
+        return { xml: stylesXml, index }
+      }
     }
   }
 

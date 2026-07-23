@@ -1029,6 +1029,29 @@ test('writes into a format table that was self closing', () => {
   assert.equal(numberFormatOf(readStyles(result.xml), result.index), '0.000')
 })
 
+test('a blank cell does not borrow a decorated xf just because its number format matches', () => {
+  const source =
+    '<styleSheet><numFmts count="1"><numFmt numFmtId="164" formatCode="0.00"/></numFmts>' +
+    '<cellXfs count="2"><xf numFmtId="0"/><xf numFmtId="164" fontId="1" fillId="2"/></cellXfs>' +
+    '</styleSheet>'
+
+  const result = ensureNumberFormat(source, undefined, '0.00')
+
+  assert.notEqual(result.index, 1)
+  assert.doesNotMatch(xfAt(result.xml, result.index), /fontId="1"|fillId="2"/)
+})
+
+test('a blank cell does not borrow a decorated date xf just because its format is a date', () => {
+  const source =
+    '<styleSheet><cellXfs count="2"><xf numFmtId="0"/>' +
+    '<xf numFmtId="14" fontId="1" fillId="2"/></cellXfs></styleSheet>'
+
+  const result = ensureDateStyle(source, undefined)
+
+  assert.notEqual(result.index, 1)
+  assert.doesNotMatch(xfAt(result.xml, result.index), /fontId="1"|fillId="2"/)
+})
+
 test('writes a format into a prefixed document', () => {
   const source =
     '<x:styleSheet><x:cellXfs count="1"><x:xf numFmtId="0"/></x:cellXfs></x:styleSheet>'
