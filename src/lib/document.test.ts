@@ -408,6 +408,41 @@ test('unprotect removes the protection a file already declared', () => {
   assert.doesNotMatch(sheet, /sheetProtection/)
 })
 
+test('protection reads back off a protected sheet', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      extra: {
+        'xl/worksheets/sheet1.xml':
+          '<worksheet><sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData>' +
+          '<sheetProtection sheet="1" objects="1" scenarios="1" sort="0"/></worksheet>',
+      },
+    }),
+  )
+
+  assert.deepEqual(workbook.sheets[0]?.protection, {
+    editObjects: false,
+    editScenarios: false,
+    sort: true,
+  })
+})
+
+test('a plain sheet reports no protection', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+
+  assert.equal(workbook.sheets[0]?.protection, undefined)
+})
+
+test('protection reflects a pending protect and unprotect', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  const sheet = workbook.sheets[0]
+
+  sheet?.protect({ sort: true })
+  assert.deepEqual(sheet?.protection, { sort: true })
+
+  sheet?.unprotect()
+  assert.equal(sheet?.protection, undefined)
+})
+
 test('merge adds a mergeCells element after sheetData', () => {
   const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
   workbook.sheets[0]?.merge('A1:B2')

@@ -9,6 +9,7 @@ import {
   mergeRefusal,
   patchSheet,
   indexSheet,
+  readSheetProtection,
   sharedFormulaRefusal,
   type SheetIndex,
   type SheetLocation,
@@ -102,6 +103,12 @@ export interface Worksheet {
    * does not interpret can be matched against the sheet it refers to.
    */
   readonly sheetId: string
+  /**
+   * The worksheet protection in force, in the shape `protect()` takes, or
+   * undefined when the sheet is not protected. Reflects a pending `protect()` or
+   * `unprotect()` as well as what the file was read with.
+   */
+  readonly protection?: SheetProtection
   /**
    * Every cell the sheet stores. A cell that was cleared, or that carries only
    * formatting, is still stored, and arrives with a value of `kind: 'empty'`.
@@ -596,6 +603,12 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       name: reference.name,
       state: reference.state,
       sheetId: reference.sheetId,
+      get protection(): SheetProtection | undefined {
+        const pending = sheetProtections.get(reference.path)
+        if (pending === 'remove') return undefined
+        if (pending !== undefined) return pending
+        return sheetBytes === undefined ? undefined : readSheetProtection(sheetBytes)
+      },
       cells: () => readCells(),
       cell(cellReference: string): Cell | undefined {
         const wanted = canonicalReference(parseReference(cellReference))

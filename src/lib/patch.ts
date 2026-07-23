@@ -78,6 +78,35 @@ function sheetProtectionElement(protection: SheetProtection, prefix: string): st
   return `<${prefix}sheetProtection${attributes}/>`
 }
 
+/** 0 means the action stays permitted, 1 that it is locked; anything else off. */
+const isPermitted = (value: string): boolean => value === '0' || value === 'false'
+
+/**
+ * The protection a sheet declares, in the same shape `protect()` takes, or
+ * undefined when it is not protected. Only the attributes the element carries
+ * are reported; the rest keep their defaults.
+ */
+export function readSheetProtection(bytes: Uint8Array): SheetProtection | undefined {
+  for (const event of readXmlBytes(bytes)) {
+    if (event.kind !== 'open' || event.localName !== 'sheetProtection') continue
+    if (!isProtected(event.attributes.get('sheet'))) return undefined
+
+    const result: { -readonly [K in keyof SheetProtection]?: boolean } = {}
+    for (const [key, attribute] of PROTECTION_PERMISSIONS) {
+      const value = event.attributes.get(attribute)
+      if (value !== undefined) result[key] = isPermitted(value)
+    }
+    const objects = event.attributes.get('objects')
+    if (objects !== undefined) result.editObjects = isPermitted(objects)
+    const scenarios = event.attributes.get('scenarios')
+    if (scenarios !== undefined) result.editScenarios = isPermitted(scenarios)
+    return result
+  }
+  return undefined
+}
+
+const isProtected = (value: string | undefined): boolean => value === '1' || value === 'true'
+
 /** Element content only. Quotes need no escaping there, and Excel leaves them. */
 const escapeXml = (text: string) =>
   text

@@ -6,6 +6,7 @@ import {
   checkWritable,
   indexSheet,
   patchSheet as patchSheetBytes,
+  readSheetProtection,
 } from './patch.js'
 import { XlsxError } from './errors.js'
 
@@ -146,6 +147,34 @@ test('a new mergeCells opens after a sheet protection the file already had', () 
   assert.match(
     patched,
     /<sheetProtection sheet="1"\/><mergeCells count="1"><mergeCell ref="A1:B2"\/>/,
+  )
+})
+
+test('reads sheet protection back as the permissions it grants', () => {
+  const bytes = encode(
+    '<worksheet xmlns="http://x"><sheetData/>' +
+      '<sheetProtection sheet="1" objects="1" scenarios="0" formatCells="0" selectLockedCells="1"/>' +
+      '</worksheet>',
+  )
+
+  assert.deepEqual(readSheetProtection(bytes), {
+    editObjects: false,
+    editScenarios: true,
+    formatCells: true,
+    selectLockedCells: false,
+  })
+})
+
+test('reads no protection when the element is absent or turned off', () => {
+  assert.equal(
+    readSheetProtection(encode('<worksheet xmlns="http://x"><sheetData/></worksheet>')),
+    undefined,
+  )
+  assert.equal(
+    readSheetProtection(
+      encode('<worksheet xmlns="http://x"><sheetData/><sheetProtection sheet="0"/></worksheet>'),
+    ),
+    undefined,
   )
 })
 
