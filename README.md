@@ -77,6 +77,7 @@ sheet.set('A1', 1234.5, {
   font: { bold: true, color: 'FF0000' },
   fill: { color: 'FFFF00' },
   border: { all: { style: 'thin' } },
+  alignment: { horizontal: 'center', wrapText: true },
 })
 
 // format() changes only the formatting, so a formula cell keeps its expression.
@@ -86,7 +87,10 @@ sheet.format('B2', { font: { italic: true }, border: { bottom: { style: 'medium'
 A `font` merges onto the cell's current one, so `{ font: { bold: true } }` adds
 bold without disturbing its size or colour. A `fill` is a solid background. A
 `border` sets sides by name, or `all` at once, merging onto the sides the cell
-already has. Colours are `RRGGBB` or `AARRGGBB` hex.
+already has. An `alignment` places the text — `horizontal`, `vertical`,
+`wrapText`, `textRotation` (0–180, or 255 to stack top to bottom) and `indent` —
+and merges the same way, so setting `wrapText` leaves a horizontal choice alone.
+Colours are `RRGGBB` or `AARRGGBB` hex.
 
 An edit the format cannot hold is refused by `set` itself, with an `XlsxError`
 naming the cell. `NaN`, an infinity, a character XML has no way to encode, a
@@ -174,8 +178,10 @@ What a minor release is allowed to do, so you know which branches are safe:
   Nothing streams a sheet through in chunks, though, so it is still held whole
   in memory.
 - Charts, pivot tables and drawings are preserved but never created.
-- Fonts, fills and borders can be set but not read: `cell` exposes the value and
-  number format, not the rest of a cell's formatting, which is preserved.
+- `cell` exposes a cell's `font`, `fill`, `border` and `alignment`, but only the
+  parts this library models. Anything else on the cell format — protection, a
+  gradient or pattern fill, a themed colour — is preserved in the file but not
+  reported.
 - A table grows to include a cell written directly below or to the right of it,
   the way Excel would, adding a column when it grows sideways. Other ranges that
   name cells are still copied, not adjusted: chart ranges, defined names and
