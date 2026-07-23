@@ -661,6 +661,31 @@ test('a pattern fill set on a cell reads back off it', () => {
   })
 })
 
+test('a theme colour set on a cell font reads back off it', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.set('A1', 'x', { font: { color: { theme: 4, tint: 0.4 } } })
+
+  const reopened = readWorkbook(workbook.toBytes())
+  assert.deepEqual(reopened.sheets[0]?.cell('A1')?.font, { color: { theme: 4, tint: 0.4 } })
+})
+
+test('editing a cell keeps the theme colour its font already carries', () => {
+  const styles =
+    '<styleSheet><fonts count="2"><font/><font><color theme="1"/><sz val="12"/></font></fonts>' +
+    '<cellXfs count="2"><xf numFmtId="0"/><xf numFmtId="0" fontId="1"/></cellXfs></styleSheet>'
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1" s="1"><v>1</v></c></row>', { extra: { 'xl/styles.xml': styles } }),
+  )
+  workbook.sheets[0]?.set('A1', 'x', { font: { bold: true } })
+
+  const reopened = readWorkbook(workbook.toBytes())
+  assert.deepEqual(reopened.sheets[0]?.cell('A1')?.font, {
+    bold: true,
+    color: { theme: 1 },
+    size: 12,
+  })
+})
+
 test('format restyles a formula cell without touching its formula', () => {
   const workbook = readWorkbook(build('<row r="1"><c r="A1"><f>SUM(B1:B2)</f><v>3</v></c></row>'))
   workbook.sheets[0]?.format('A1', { font: { bold: true } })

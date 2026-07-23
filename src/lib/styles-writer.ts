@@ -224,6 +224,17 @@ export type UnderlineStyle = 'single' | 'double' | 'singleAccounting' | 'doubleA
 
 export type VerticalAlign = 'baseline' | 'superscript' | 'subscript'
 
+/**
+ * A colour a cell can carry: an `RRGGBB`/`AARRGGBB` hex literal, a reference into
+ * the workbook theme's colour scheme (`tint` lightens or darkens it, -1 to 1), or
+ * an index into the legacy palette. A theme or indexed colour is a reference, not
+ * a value, so it is kept as one rather than flattened to the hex it resolves to.
+ */
+export type Color =
+  | string
+  | { readonly theme: number; readonly tint?: number }
+  | { readonly indexed: number }
+
 export interface FontFormat {
   readonly bold?: boolean
   readonly italic?: boolean
@@ -231,8 +242,7 @@ export interface FontFormat {
   readonly underline?: boolean | UnderlineStyle
   readonly vertAlign?: VerticalAlign
   readonly size?: number
-  /** An `RRGGBB` or `AARRGGBB` hex colour; a six-digit value is stored opaque. */
-  readonly color?: string
+  readonly color?: Color
   readonly name?: string
 }
 
@@ -270,6 +280,61 @@ export function normalizeColor(color: string): string {
   return (hex.length === 6 ? `FF${hex}` : hex).toUpperCase()
 }
 
+/** Reads a colour off a `<color>`, `<fgColor>` or `<bgColor>`, preferring an
+ * explicit rgb, then a theme reference, then a palette index. A malformed theme
+ * or index is dropped rather than reported, the way an unreadable attribute is. */
+function parseColor(attributes: ReadonlyMap<string, string>): Color | undefined {
+  const rgb = attributes.get('rgb')
+  if (rgb !== undefined) return rgb
+  const themeText = attributes.get('theme')
+  if (themeText !== undefined) {
+    const theme = Number(themeText)
+    if (Number.isInteger(theme) && theme >= 0) {
+      const tint = Number(attributes.get('tint'))
+      return Number.isNaN(tint) ? { theme } : { theme, tint }
+    }
+  }
+  const indexedText = attributes.get('indexed')
+  if (indexedText !== undefined) {
+    const indexed = Number(indexedText)
+    if (Number.isInteger(indexed) && indexed >= 0) return { indexed }
+  }
+  return undefined
+}
+
+/** Serialises a colour to the attributes of a colour element, validating a
+ * caller's value: a hex string, or a non-negative integer theme or index, with a
+ * tint between -1 and 1. Returns a leading space so a site can inline it. */
+function colorAttributes(color: Color): string {
+  if (typeof color === 'string') return ` rgb="${normalizeColor(color)}"`
+  if ('theme' in color) {
+    if (!Number.isInteger(color.theme) || color.theme < 0) {
+      throw new XlsxError(
+        'unwritable-value',
+        `Colour theme "${color.theme}" is not a non-negative integer`,
+        {},
+      )
+    }
+    if (color.tint === undefined) return ` theme="${color.theme}"`
+    if (!Number.isFinite(color.tint) || color.tint < -1 || color.tint > 1) {
+      throw new XlsxError(
+        'unwritable-value',
+        `Colour tint "${color.tint}" is not between -1 and 1`,
+        {},
+      )
+    }
+    return ` theme="${color.theme}" tint="${color.tint}"`
+  }
+  if (!Number.isInteger(color.indexed) || color.indexed < 0) {
+    throw new XlsxError(
+      'unwritable-value',
+      `Colour index "${color.indexed}" is not a non-negative integer`,
+      {},
+    )
+  }
+  return ` indexed="${color.indexed}"`
+}
+
 /** A `<b val="0"/>` turns bold off, so presence alone is not the whole story. */
 const flagOn = (value: string | undefined) => value !== '0' && value !== 'false'
 
@@ -281,7 +346,7 @@ function parseFont(element: string): FontFormat {
     underline?: boolean | UnderlineStyle
     vertAlign?: VerticalAlign
     size?: number
-    color?: string
+    color?: Color
     name?: string
   } = {}
   for (const event of readXml(element)) {
@@ -314,8 +379,8 @@ function parseFont(element: string): FontFormat {
         break
       }
       case 'color': {
-        const rgb = event.attributes.get('rgb')
-        if (rgb !== undefined) font.color = rgb
+        const color = parseColor(event.attributes)
+        if (color !== undefined) font.color = color
         break
       }
       case 'name': {
@@ -337,7 +402,7 @@ function buildFontElement(font: FontFormat): string {
   else if (typeof font.underline === 'string') inner += `<u val="${font.underline}"/>`
   if (font.vertAlign !== undefined) inner += `<vertAlign val="${font.vertAlign}"/>`
   if (font.size !== undefined) inner += `<sz val="${font.size}"/>`
-  if (font.color !== undefined) inner += `<color rgb="${normalizeColor(font.color)}"/>`
+  if (font.color !== undefined) inner += `<color${colorAttributes(font.color)}/>`
   if (font.name !== undefined) inner += `<name val="${escapeXml(font.name)}"/>`
   return `<font>${inner}</font>`
 }
@@ -409,17 +474,17 @@ export type PatternStyle =
 
 export interface SolidFill {
   readonly type: 'solid'
-  /** `RRGGBB` or `AARRGGBB` hex; the cell's background colour. */
-  readonly color: string
+  /** The cell's background colour. */
+  readonly color: Color
 }
 
 export interface PatternFill {
   readonly type: 'pattern'
   readonly pattern: PatternStyle
-  /** The pattern's foreground colour, `RRGGBB` or `AARRGGBB` hex. */
-  readonly color: string
+  /** The pattern's foreground colour. */
+  readonly color: Color
   /** The colour behind the pattern; the default window background when absent. */
-  readonly background?: string
+  readonly background?: Color
 }
 
 export type FillFormat = SolidFill | PatternFill
@@ -438,14 +503,14 @@ function withReservedFills(stylesXml: string): string {
 }
 
 function buildFillElement(fill: FillFormat): string {
-  const fg = `<fgColor rgb="${normalizeColor(fill.color)}"/>`
+  const fg = `<fgColor${colorAttributes(fill.color)}/>`
   if (fill.type === 'solid') {
     return `<fill><patternFill patternType="solid">${fg}<bgColor indexed="64"/></patternFill></fill>`
   }
   const bg =
     fill.background === undefined
       ? '<bgColor indexed="64"/>'
-      : `<bgColor rgb="${normalizeColor(fill.background)}"/>`
+      : `<bgColor${colorAttributes(fill.background)}/>`
   return `<fill><patternFill patternType="${fill.pattern}">${fg}${bg}</patternFill></fill>`
 }
 
@@ -478,8 +543,8 @@ export type BorderStyle =
 
 export interface BorderSide {
   readonly style: BorderStyle
-  /** `RRGGBB` or `AARRGGBB` hex; the side's line colour. */
-  readonly color?: string
+  /** The side's line colour. */
+  readonly color?: Color
 }
 
 export interface BorderFormat {
@@ -495,7 +560,7 @@ export interface BorderFormat {
 // through a merge are looser than the BorderSide a caller passes in.
 interface Side {
   readonly style: string
-  readonly color?: string
+  readonly color?: Color
 }
 interface Sides {
   readonly left?: Side
@@ -531,9 +596,9 @@ function parseBorder(element: string): Sides {
     else if (event.localName === 'top' || event.localName === 'bottom') inSide = event.localName
     else {
       if (event.localName === 'color' && inSide !== undefined) {
-        const rgb = event.attributes.get('rgb')
+        const color = parseColor(event.attributes)
         const style = sides[inSide]?.style
-        if (rgb !== undefined && style !== undefined) sides[inSide] = { style, color: rgb }
+        if (color !== undefined && style !== undefined) sides[inSide] = { style, color }
       }
       continue
     }
@@ -552,7 +617,7 @@ const borderSidesAt = (stylesXml: string, id: number): Sides => {
 const buildSide = (name: string, side: Side | undefined): string => {
   if (side === undefined) return `<${name}/>`
   if (side.color === undefined) return `<${name} style="${side.style}"/>`
-  return `<${name} style="${side.style}"><color rgb="${normalizeColor(side.color)}"/></${name}>`
+  return `<${name} style="${side.style}"><color${colorAttributes(side.color)}/></${name}>`
 }
 
 const buildBorderElement = (sides: Sides): string =>
@@ -950,15 +1015,19 @@ const toPatternStyle = (value: string | undefined): PatternStyle | undefined => 
 
 function parseFill(element: string): FillFormat | undefined {
   let patternType: string | undefined
-  let foreground: string | undefined
-  let background: string | undefined
+  let foreground: Color | undefined
+  let background: Color | undefined
   for (const event of readXml(element)) {
     if (event.kind !== 'open') continue
     if (event.localName === 'patternFill') patternType = event.attributes.get('patternType')
-    if (event.localName === 'fgColor') foreground = event.attributes.get('rgb') ?? foreground
-    // An indexed bgColor is the default window background, so only an rgb one is
-    // a background the cell chose and worth reporting.
-    if (event.localName === 'bgColor') background = event.attributes.get('rgb') ?? background
+    if (event.localName === 'fgColor') foreground = parseColor(event.attributes) ?? foreground
+    if (event.localName === 'bgColor') {
+      // An indexed bgColor is the default window background (commonly indexed="64"),
+      // not a background the cell chose, so only an rgb or theme one is reported.
+      const color = parseColor(event.attributes)
+      if (color !== undefined && !(typeof color === 'object' && 'indexed' in color))
+        background = color
+    }
   }
   if (foreground === undefined) return undefined
   if (patternType === 'solid') return { type: 'solid', color: foreground }

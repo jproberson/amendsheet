@@ -10,6 +10,7 @@ import {
   readFormatting,
 } from './styles-writer.js'
 import { assertWellFormed } from '../testing/invariants.js'
+import { XlsxError } from './errors.js'
 import { ensureNumberFormat } from './styles-writer.js'
 import { isDateFormat, numberFormatOf, readStyles } from './styles.js'
 
@@ -115,14 +116,14 @@ test('seeds a default font and lands ours past it when the file has none', () =>
   assert.match(xfAt(result.xml, result.index), /fontId="1"/)
 })
 
-test('ignores a themed colour and an unparseable size in the base font', () => {
+test('keeps a themed colour and ignores an unparseable size in the base font', () => {
   const source =
     '<styleSheet><fonts count="1"><font><sz/><color theme="1"/><name val="Calibri"/></font></fonts>' +
     '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs></styleSheet>'
 
   const result = ensureFontStyle(source, 0, { bold: true })
 
-  assert.match(result.xml, /<font><b\/><name val="Calibri"\/><\/font>/)
+  assert.match(result.xml, /<font><b\/><color theme="1"\/><name val="Calibri"\/><\/font>/)
 })
 
 test('treats a cell format with no fontId as using the default font', () => {
@@ -1143,4 +1144,107 @@ test('raises a single quoted number format count', () => {
 
   assertWellFormed(result.xml, 'single quoted numFmts')
   assert.doesNotMatch(result.xml, /numFmts count='1'/, 'the count still claims one format')
+})
+
+test('readFormatting reads a font theme colour with its tint', () => {
+  const styles =
+    '<styleSheet><fonts count="2"><font/><font><color theme="4" tint="0.4"/></font></fonts>' +
+    '<cellXfs count="2"><xf fontId="0"/><xf fontId="1"/></cellXfs></styleSheet>'
+
+  assert.deepEqual(readFormatting(styles)[1]?.font, { color: { theme: 4, tint: 0.4 } })
+})
+
+test('readFormatting reads a font indexed colour', () => {
+  const styles =
+    '<styleSheet><fonts count="2"><font/><font><color indexed="8"/></font></fonts>' +
+    '<cellXfs count="2"><xf fontId="0"/><xf fontId="1"/></cellXfs></styleSheet>'
+
+  assert.deepEqual(readFormatting(styles)[1]?.font, { color: { indexed: 8 } })
+})
+
+test('readFormatting drops a colour whose theme is not a non-negative integer', () => {
+  const styles =
+    '<styleSheet><fonts count="2"><font/><font><color theme="x"/></font></fonts>' +
+    '<cellXfs count="2"><xf fontId="0"/><xf fontId="1"/></cellXfs></styleSheet>'
+
+  assert.equal(readFormatting(styles)[1]?.font, undefined)
+})
+
+test('readFormatting drops a colour whose index is negative', () => {
+  const styles =
+    '<styleSheet><fonts count="2"><font/><font><color indexed="-1"/></font></fonts>' +
+    '<cellXfs count="2"><xf fontId="0"/><xf fontId="1"/></cellXfs></styleSheet>'
+
+  assert.equal(readFormatting(styles)[1]?.font, undefined)
+})
+
+test('readFormatting reads a theme colour on a fill and a border side', () => {
+  const styles =
+    '<styleSheet><fills count="3"><fill><patternFill patternType="none"/></fill>' +
+    '<fill><patternFill patternType="gray125"/></fill>' +
+    '<fill><patternFill patternType="solid"><fgColor theme="5"/></patternFill></fill></fills>' +
+    '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>' +
+    '<border><bottom style="medium"><color theme="6" tint="-0.2"/></bottom>' +
+    '<left/><right/><top/><diagonal/></border></borders>' +
+    '<cellXfs count="1"><xf fillId="2" borderId="1"/></cellXfs></styleSheet>'
+
+  const formatting = readFormatting(styles)[0]
+  assert.deepEqual(formatting?.fill, { type: 'solid', color: { theme: 5 } })
+  assert.deepEqual(formatting?.border, {
+    bottom: { style: 'medium', color: { theme: 6, tint: -0.2 } },
+  })
+})
+
+test('a font can be given a theme colour with a tint', () => {
+  const source = fontStyles('<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>')
+
+  const result = ensureFontStyle(source, 0, { color: { theme: 4, tint: 0.4 } })
+
+  assert.match(result.xml, /<color theme="4" tint="0.4"\/>/)
+})
+
+test('a font can be given an indexed colour', () => {
+  const source = fontStyles('<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>')
+
+  const result = ensureFontStyle(source, 0, { color: { indexed: 8 } })
+
+  assert.match(result.xml, /<color indexed="8"\/>/)
+})
+
+test('a solid fill can be given a theme colour', () => {
+  const source = fillStyles('<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>')
+
+  const result = ensureFillStyle(source, 0, { type: 'solid', color: { theme: 4, tint: 0.4 } })
+
+  assert.match(result.xml, /<fgColor theme="4" tint="0.4"\/>/)
+})
+
+test('a border side can be given a theme colour', () => {
+  const result = ensureBorderStyle(borderStyles(emptyBorderXf), 0, {
+    bottom: { style: 'medium', color: { theme: 6 } },
+  })
+
+  assert.match(result.xml, /<bottom style="medium"><color theme="6"\/><\/bottom>/)
+})
+
+const isUnwritable = (error: unknown) =>
+  error instanceof XlsxError && error.code === 'unwritable-value'
+
+test('a theme colour outside the non-negative integers is refused', () => {
+  const source = fontStyles('<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>')
+
+  assert.throws(() => ensureFontStyle(source, 0, { color: { theme: -1 } }), isUnwritable)
+  assert.throws(() => ensureFontStyle(source, 0, { color: { theme: 1.5 } }), isUnwritable)
+})
+
+test('an indexed colour outside the non-negative integers is refused', () => {
+  const source = fontStyles('<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>')
+
+  assert.throws(() => ensureFontStyle(source, 0, { color: { indexed: -1 } }), isUnwritable)
+})
+
+test('a colour tint outside minus one to one is refused', () => {
+  const source = fontStyles('<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>')
+
+  assert.throws(() => ensureFontStyle(source, 0, { color: { theme: 1, tint: 2 } }), isUnwritable)
 })

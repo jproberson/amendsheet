@@ -5,6 +5,7 @@ export type {
   BorderFormat,
   BorderSide,
   BorderStyle,
+  Color,
   FillFormat,
   FontFormat,
   HorizontalAlignment,
