@@ -20,6 +20,64 @@ export interface FormulaInput {
 
 export type CellInput = number | string | boolean | Date | null | FormulaInput
 
+/**
+ * What a caller may still do once the worksheet is protected. Each is `true` when
+ * the action stays permitted; omitted falls to Excel's default — the format,
+ * insert, delete, sort and filter family locked, and selecting cells allowed.
+ * Cells resist editing per their own `locked` flag, which only bites here.
+ */
+export interface SheetProtection {
+  readonly selectLockedCells?: boolean
+  readonly selectUnlockedCells?: boolean
+  readonly formatCells?: boolean
+  readonly formatColumns?: boolean
+  readonly formatRows?: boolean
+  readonly insertColumns?: boolean
+  readonly insertRows?: boolean
+  readonly insertHyperlinks?: boolean
+  readonly deleteColumns?: boolean
+  readonly deleteRows?: boolean
+  readonly sort?: boolean
+  readonly autoFilter?: boolean
+  readonly pivotTables?: boolean
+  /** Editing drawing objects; Excel locks this by default when protecting. */
+  readonly editObjects?: boolean
+  /** Editing scenarios; Excel locks this by default when protecting. */
+  readonly editScenarios?: boolean
+}
+
+// Each permission maps to a CT_SheetProtection attribute where 1 means the action
+// is locked and 0 means it is allowed. Only the ones the caller names are written;
+// the rest keep the schema defaults.
+const PROTECTION_PERMISSIONS: ReadonlyArray<readonly [keyof SheetProtection, string]> = [
+  ['selectLockedCells', 'selectLockedCells'],
+  ['selectUnlockedCells', 'selectUnlockedCells'],
+  ['formatCells', 'formatCells'],
+  ['formatColumns', 'formatColumns'],
+  ['formatRows', 'formatRows'],
+  ['insertColumns', 'insertColumns'],
+  ['insertRows', 'insertRows'],
+  ['insertHyperlinks', 'insertHyperlinks'],
+  ['deleteColumns', 'deleteColumns'],
+  ['deleteRows', 'deleteRows'],
+  ['sort', 'sort'],
+  ['autoFilter', 'autoFilter'],
+  ['pivotTables', 'pivotTables'],
+]
+
+function sheetProtectionElement(protection: SheetProtection, prefix: string): string {
+  // objects and scenarios default to unlocked in the schema, but Excel's Protect
+  // Sheet locks them, so they are always written, defaulting to locked.
+  let attributes =
+    ` sheet="1" objects="${protection.editObjects === true ? '0' : '1'}"` +
+    ` scenarios="${protection.editScenarios === true ? '0' : '1'}"`
+  for (const [key, attribute] of PROTECTION_PERMISSIONS) {
+    const permitted = protection[key]
+    if (permitted !== undefined) attributes += ` ${attribute}="${permitted ? '0' : '1'}"`
+  }
+  return `<${prefix}sheetProtection${attributes}/>`
+}
+
 /** Element content only. Quotes need no escaping there, and Excel leaves them. */
 const escapeXml = (text: string) =>
   text
@@ -282,6 +340,8 @@ interface SheetShape {
   readonly selfClosing: boolean
   readonly dataStart: number
   readonly dataEnd: number
+  /** An existing sheetProtection element, replaced in place rather than doubled. */
+  readonly protection: { start: number; end: number } | undefined
 }
 
 function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
@@ -292,6 +352,7 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
   let dataStart = -1
   let dataEnd = -1
   let selfClosing = false
+  let protection: { start: number; end: number } | undefined
 
   let prefix = ''
   let lastRow = 0
@@ -368,6 +429,10 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
         if (merge !== undefined) merges.push(merge)
         continue
       }
+      if (event.localName === 'sheetProtection') {
+        protection = { start: event.start, end: event.end }
+        continue
+      }
       // Only the cell carrying ref owns the range. A shared dependent names the
       // si alone, and any of them may be written self closing.
       if (event.localName === 'f') {
@@ -424,7 +489,17 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
   if (dataStart === -1)
     throw new XlsxError('malformed-xml', 'Sheet has no sheetData element to write into', at)
 
-  return { prefix, dimension, rows, merges, contentEnd, selfClosing, dataStart, dataEnd }
+  return {
+    prefix,
+    dimension,
+    rows,
+    merges,
+    contentEnd,
+    selfClosing,
+    dataStart,
+    dataEnd,
+    protection,
+  }
 }
 
 interface Splice {
@@ -442,13 +517,14 @@ export function patchSheet(
   sharedStrings?: ReadonlyMap<string, number>,
   styleOverrides?: ReadonlyMap<string, number>,
   at: SheetLocation = {},
+  protection?: SheetProtection,
 ): Uint8Array {
   // A style override with no value edit is a restyle: the cell keeps its value
   // and formula and only its `s` changes, so unlike a write it needs no shared
   // formula or merge refusal — formatting is always safe.
   const restyleRefs =
     styleOverrides === undefined ? [] : [...styleOverrides.keys()].filter((ref) => !edits.has(ref))
-  if (edits.size === 0 && restyleRefs.length === 0) return bytes
+  if (edits.size === 0 && restyleRefs.length === 0 && protection === undefined) return bytes
 
   const operations: ReadonlyArray<{ given: string; value: CellInput; restyle: boolean }> = [
     ...[...edits].map(([given, value]) => ({ given, value, restyle: false })),
@@ -625,6 +701,18 @@ export function patchSheet(
       start: shape.dimension.start,
       end: shape.dimension.end,
       text: `<${shape.prefix}dimension ref="${widened}"/>`,
+      order: -1,
+    })
+  }
+
+  // sheetProtection is the sibling after sheetData, so it goes at dataEnd unless
+  // the sheet already has one to replace in place.
+  if (protection !== undefined) {
+    const span = shape.protection ?? { start: shape.dataEnd, end: shape.dataEnd }
+    splices.push({
+      start: span.start,
+      end: span.end,
+      text: sheetProtectionElement(protection, shape.prefix),
       order: -1,
     })
   }

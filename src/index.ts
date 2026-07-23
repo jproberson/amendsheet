@@ -1,5 +1,5 @@
 export { readWorkbook } from './lib/document.js'
-export type { CellInput, FormulaInput } from './lib/patch.js'
+export type { CellInput, FormulaInput, SheetProtection } from './lib/patch.js'
 export type {
   Alignment,
   BorderFormat,

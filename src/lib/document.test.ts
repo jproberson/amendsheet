@@ -366,6 +366,32 @@ test('format unlocks a cell without touching its value', () => {
   assert.match(decode(parts.get('xl/worksheets/sheet1.xml')), /<c [^>]*s="\d+"[^>]*><v>7<\/v><\/c>/)
 })
 
+test('protect turns on sheet protection with the Excel defaults, after sheetData', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.protect()
+
+  const sheet = decode(readContainer(workbook.toBytes()).parts.get('xl/worksheets/sheet1.xml'))
+  assert.match(sheet, /<\/sheetData><sheetProtection sheet="1" objects="1" scenarios="1"\/>/)
+})
+
+test('protect permits chosen actions and can bar selecting locked cells', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.protect({ formatCells: true, sort: true, selectLockedCells: false })
+
+  const sheet = decode(readContainer(workbook.toBytes()).parts.get('xl/worksheets/sheet1.xml'))
+  assert.match(sheet, /formatCells="0"/)
+  assert.match(sheet, /sort="0"/)
+  assert.match(sheet, /selectLockedCells="1"/)
+})
+
+test('protecting a sheet with no other edit still rewrites only that sheet', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.protect()
+
+  const sheet = decode(readContainer(workbook.toBytes()).parts.get('xl/worksheets/sheet1.xml'))
+  assert.match(sheet, /<sheetProtection /)
+})
+
 test('a plain value writes into a package with no style table', () => {
   const bytes = writeContainer({
     parts: new Map([
@@ -1275,6 +1301,10 @@ test('refuses a write to a sheet whose part is not in the package', () => {
     (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
   )
   assert.equal(workbook.sheets[0]?.cell('A1'), undefined)
+  assert.throws(
+    () => workbook.sheets[0]?.protect(),
+    (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
+  )
 })
 
 test('a reference the sheet cannot hold does not break lookups around it', () => {

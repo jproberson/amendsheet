@@ -11,6 +11,7 @@ import {
   sharedFormulaRefusal,
   type SheetIndex,
   type SheetLocation,
+  type SheetProtection,
 } from './patch.js'
 import {
   type CellAddress,
@@ -127,6 +128,13 @@ export interface Worksheet {
    * safe, since only the cell format changes.
    */
   format(reference: string, options: SetOptions): void
+  /**
+   * Turns on worksheet protection, which is what makes a cell's `locked` and
+   * `hidden` flags bite. Without `options` it matches Excel's Protect Sheet
+   * default; `options` names the actions that stay permitted. Replaces any
+   * protection the sheet already declared. Passwords are not written.
+   */
+  protect(options?: SheetProtection): void
 }
 
 export interface SetOptions {
@@ -334,6 +342,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   // decision about what a cell MEANS; leaving it to write time gave the read
   // path its own copy of the decision, and the two drifted.
   const styleOverrides = new Map<string, Map<string, number>>()
+  const sheetProtections = new Map<string, SheetProtection>()
   let workingStyles = stylesXml
   let parsedStyles = styles
   let parsedFrom = stylesXml
@@ -367,9 +376,20 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       if (sheetBytes === undefined) return undefined
       const pending = edits.get(reference.path)
       const overrides = styleOverrides.get(reference.path)
+      const protection = sheetProtections.get(reference.path)
       // A format() with no set() leaves overrides but no pending edit.
-      if (pending === undefined && overrides === undefined) return sheetBytes
-      return patchSheet(sheetBytes, pending ?? EMPTY_EDITS, date1904, undefined, overrides, at)
+      if (pending === undefined && overrides === undefined && protection === undefined) {
+        return sheetBytes
+      }
+      return patchSheet(
+        sheetBytes,
+        pending ?? EMPTY_EDITS,
+        date1904,
+        undefined,
+        overrides,
+        at,
+        protection,
+      )
     }
 
     function* readCells(source?: Uint8Array): Generator<Cell> {
@@ -619,6 +639,16 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             : restyled(existing, resolved),
         )
       },
+      protect(options: SheetProtection = {}): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so it cannot be protected`,
+            at,
+          )
+        }
+        sheetProtections.set(reference.path, options)
+      },
     }
   })
 
@@ -626,8 +656,11 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     // A change carries new bytes for a part; null deletes it. Every part not
     // named here is passed through still compressed, never inflated or rebuilt.
     const changes = new Map<string, Uint8Array | null>()
-    // A format() with no set() records a style override and no value edit.
-    if (edits.size === 0 && styleOverrides.size === 0) return container.write(changes)
+    // A format() with no set() records a style override and no value edit; a
+    // protect() records neither and still has to rewrite its sheet.
+    if (edits.size === 0 && styleOverrides.size === 0 && sheetProtections.size === 0) {
+      return container.write(changes)
+    }
 
     const encoder = new TextEncoder()
 
@@ -670,8 +703,13 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       }
     }
 
-    // Every sheet with a value edit or a format() restyle is rewritten once.
-    for (const path of new Set([...edits.keys(), ...styleOverrides.keys()])) {
+    // Every sheet with a value edit, a format() restyle or a protect() is
+    // rewritten once.
+    for (const path of new Set([
+      ...edits.keys(),
+      ...styleOverrides.keys(),
+      ...sheetProtections.keys(),
+    ])) {
       const bytes = container.parts.get(path)
       if (bytes === undefined) continue
       const pending = edits.get(path) ?? EMPTY_EDITS
@@ -679,7 +717,18 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         sheet: part.sheets.find((s) => s.path === path)?.name,
         part: path,
       }
-      changes.set(path, patchSheet(bytes, pending, date1904, indexes, styleOverrides.get(path), at))
+      changes.set(
+        path,
+        patchSheet(
+          bytes,
+          pending,
+          date1904,
+          indexes,
+          styleOverrides.get(path),
+          at,
+          sheetProtections.get(path),
+        ),
+      )
       // A cell written just past a table grows it, the way Excel would.
       for (const extension of extendTables(bytes, path, container, pending.keys())) {
         changes.set(extension.path, encoder.encode(extension.xml))

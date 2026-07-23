@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   type CellInput,
+  type SheetProtection,
   checkWritable,
   indexSheet,
   patchSheet as patchSheetBytes,
@@ -16,7 +17,11 @@ const patchSheet = (
   date1904: boolean,
   sharedStrings?: ReadonlyMap<string, number>,
   styleOverrides?: ReadonlyMap<string, number>,
-) => decode(patchSheetBytes(encode(source), edits, date1904, sharedStrings, styleOverrides))
+  protection?: SheetProtection,
+) =>
+  decode(
+    patchSheetBytes(encode(source), edits, date1904, sharedStrings, styleOverrides, {}, protection),
+  )
 
 const sheet = (rows: string) =>
   `<?xml version="1.0"?><worksheet xmlns="http://x"><cols><col min="1" max="1" width="20"/></cols>` +
@@ -33,6 +38,36 @@ test('returns the source untouched when there is nothing to do', () => {
   const source = sheet(ROWS)
 
   assert.equal(patchSheet(source, new Map(), false), source)
+})
+
+test('writes sheet protection after sheetData and before mergeCells', () => {
+  const patched = patchSheet(sheet(ROWS), new Map(), false, undefined, undefined, {})
+
+  assert.match(
+    patched,
+    /<\/sheetData><sheetProtection sheet="1" objects="1" scenarios="1"\/><mergeCells/,
+  )
+})
+
+test('replaces a sheet protection the sheet already declares', () => {
+  const source =
+    '<worksheet xmlns="http://x"><sheetData/><sheetProtection sheet="1" formatCells="1"/></worksheet>'
+
+  const patched = patchSheet(source, new Map(), false, undefined, undefined, {
+    formatCells: true,
+  })
+
+  assert.doesNotMatch(patched, /formatCells="1"/)
+  assert.match(patched, /<sheetProtection sheet="1" objects="1" scenarios="1" formatCells="0"\/>/)
+  assert.equal((patched.match(/<sheetProtection/g) ?? []).length, 1)
+})
+
+test('writes sheet protection with the document namespace prefix', () => {
+  const source = '<x:worksheet xmlns:x="http://x"><x:sheetData/></x:worksheet>'
+
+  const patched = patchSheet(source, new Map(), false, undefined, undefined, {})
+
+  assert.match(patched, /<x:sheetData\/><x:sheetProtection sheet="1"/)
 })
 
 test('restyling a cell rewrites its style and keeps its value and formula', () => {
