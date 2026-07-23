@@ -280,6 +280,79 @@ test('set refuses a font colour that is not hex, before recording anything', () 
   assert.deepEqual(sheet?.cell('A1')?.value, { kind: 'number', value: 1 })
 })
 
+test('a plain value writes into a package with no style table', () => {
+  const bytes = writeContainer({
+    parts: new Map([
+      ['_rels/.rels', encode(ROOT_RELS)],
+      [
+        'xl/workbook.xml',
+        encode('<workbook><sheets><sheet name="D" r:id="rId1"/></sheets></workbook>'),
+      ],
+      ['xl/_rels/workbook.xml.rels', encode(WORKBOOK_RELS)],
+      [
+        'xl/worksheets/sheet1.xml',
+        encode(
+          '<worksheet><sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData></worksheet>',
+        ),
+      ],
+    ]),
+  })
+  const workbook = readWorkbook(bytes)
+  workbook.sheets[0]?.set('A1', 42)
+
+  const sheet = decode(readContainer(workbook.toBytes()).parts.get('xl/worksheets/sheet1.xml'))
+  assert.match(sheet, /<c r="A1"><v>42<\/v><\/c>/)
+})
+
+test('format refuses when the package has no style table', () => {
+  const bytes = writeContainer({
+    parts: new Map([
+      ['_rels/.rels', encode(ROOT_RELS)],
+      [
+        'xl/workbook.xml',
+        encode('<workbook><sheets><sheet name="D" r:id="rId1"/></sheets></workbook>'),
+      ],
+      ['xl/_rels/workbook.xml.rels', encode(WORKBOOK_RELS)],
+      [
+        'xl/worksheets/sheet1.xml',
+        encode(
+          '<worksheet><sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData></worksheet>',
+        ),
+      ],
+    ]),
+  })
+
+  assert.throws(
+    () => readWorkbook(bytes).sheets[0]?.format('A1', { border: { all: { style: 'thin' } } }),
+    /no style table/,
+  )
+})
+
+test('format keeps a cell whose number format id resolves to nothing', () => {
+  // s=1 points at numFmtId 200, which no numFmts entry defines, so the cell has
+  // no resolvable number format; restyling with a font must not invent one.
+  const styles =
+    '<styleSheet><cellXfs count="2"><xf numFmtId="0"/><xf numFmtId="200"/></cellXfs></styleSheet>'
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1" s="1"><v>5</v></c></row>', { extra: { 'xl/styles.xml': styles } }),
+  )
+  workbook.sheets[0]?.format('A1', { font: { bold: true } })
+
+  assert.equal(workbook.sheets[0]?.cell('A1')?.numberFormat, undefined)
+})
+
+test('format applies a border, merging onto the sides the cell has', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.format('A1', { border: { all: { style: 'thin', color: '000000' } } })
+
+  const parts = readContainer(workbook.toBytes()).parts
+  const styles = decode(parts.get('xl/styles.xml'))
+  const sheet = decode(parts.get('xl/worksheets/sheet1.xml'))
+
+  assert.match(styles, /<border><left style="thin"><color rgb="FF000000"\/><\/left>/)
+  assert.match(sheet, /<c s="\d+" r="A1"><v>1<\/v><\/c>/)
+})
+
 test('set and format apply a solid fill, composing with a font', () => {
   const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
   workbook.sheets[0]?.set('A1', 'x', { fill: { color: '00FF00' }, font: { bold: true } })

@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { ensureDateStyle, ensureFillStyle, ensureFontStyle } from './styles-writer.js'
+import {
+  ensureBorderStyle,
+  ensureDateStyle,
+  ensureFillStyle,
+  ensureFontStyle,
+} from './styles-writer.js'
 import { assertWellFormed } from '../testing/invariants.js'
 import { ensureNumberFormat } from './styles-writer.js'
 import { isDateFormat, numberFormatOf, readStyles } from './styles.js'
@@ -174,6 +179,104 @@ test('does not add the same fill twice', () => {
 
   const once = ensureFillStyle(source, 0, { color: 'FF0000' })
   const twice = ensureFillStyle(once.xml, 0, { color: 'FF0000' })
+
+  assert.equal(once.index, twice.index)
+  assert.equal(once.xml, twice.xml)
+})
+
+const bordersTable =
+  '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
+
+const borderStyles = (cellXfs: string) =>
+  `<styleSheet>${bordersTable}<cellXfs count="1">${cellXfs}</cellXfs></styleSheet>`
+
+const emptyBorderXf = '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+
+test('applying a border to all sides adds one and points the cell format at it', () => {
+  const result = ensureBorderStyle(borderStyles(emptyBorderXf), 0, { all: { style: 'thin' } })
+
+  assert.match(
+    result.xml,
+    /<border><left style="thin"\/><right style="thin"\/><top style="thin"\/><bottom style="thin"\/><diagonal\/><\/border><\/borders>/,
+  )
+  assert.match(xfAt(result.xml, result.index), /borderId="1"/)
+  assert.match(xfAt(result.xml, result.index), /applyBorder="1"/)
+})
+
+test('a border colour is written as a child of the side', () => {
+  const result = ensureBorderStyle(borderStyles(emptyBorderXf), 0, {
+    bottom: { style: 'medium', color: 'FF0000' },
+  })
+
+  assert.match(result.xml, /<bottom style="medium"><color rgb="FFFF0000"\/><\/bottom>/)
+})
+
+test('a border change merges onto the sides the cell already has', () => {
+  const source =
+    '<styleSheet><borders count="1"><border><left style="thin"/><right/><top/><bottom/>' +
+    '<diagonal/></border></borders>' +
+    `<cellXfs count="1">${emptyBorderXf}</cellXfs></styleSheet>`
+
+  const result = ensureBorderStyle(source, 0, { top: { style: 'thick' } })
+
+  assert.match(
+    result.xml,
+    /<border><left style="thin"\/><right\/><top style="thick"\/><bottom\/><diagonal\/><\/border>/,
+  )
+})
+
+test('a border change keeps a coloured side the cell already has', () => {
+  const source =
+    '<styleSheet><borders count="1"><border>' +
+    '<left style="thin"><color rgb="FFFF0000"/></left><right/><top/><bottom/><diagonal/>' +
+    '</border></borders>' +
+    `<cellXfs count="1">${emptyBorderXf}</cellXfs></styleSheet>`
+
+  const result = ensureBorderStyle(source, 0, { top: { style: 'thick' } })
+
+  assert.match(result.xml, /<left style="thin"><color rgb="FFFF0000"\/><\/left>/)
+  assert.match(result.xml, /<top style="thick"\/>/)
+})
+
+test('ignores a border colour on a side that has no style', () => {
+  const source =
+    '<styleSheet><borders count="1"><border>' +
+    '<left><color rgb="FF000000"/></left><right/><top/><bottom/><diagonal/>' +
+    '</border></borders>' +
+    `<cellXfs count="1">${emptyBorderXf}</cellXfs></styleSheet>`
+
+  const result = ensureBorderStyle(source, 0, { top: { style: 'thin' } })
+
+  // the colour on a styleless side is dropped, not carried as a border
+  assert.match(result.xml, /<border><left\/><right\/><top style="thin"\/>/)
+})
+
+test('a specific side overrides the all side', () => {
+  const result = ensureBorderStyle(borderStyles(emptyBorderXf), 0, {
+    all: { style: 'thin' },
+    top: { style: 'thick' },
+  })
+
+  assert.match(result.xml, /<top style="thick"\/><bottom style="thin"\/>/)
+})
+
+test('seeds an empty border when the file has no borders table', () => {
+  const source = `<styleSheet><cellXfs count="1">${emptyBorderXf}</cellXfs></styleSheet>`
+
+  const result = ensureBorderStyle(source, 0, { all: { style: 'thin' } })
+
+  assert.match(
+    result.xml,
+    /<borders count="2"><border><left\/><right\/><top\/><bottom\/><diagonal\/><\/border><border><left style="thin"/,
+  )
+  assert.match(xfAt(result.xml, result.index), /borderId="1"/)
+})
+
+test('does not add the same border twice', () => {
+  const source = borderStyles(emptyBorderXf)
+
+  const once = ensureBorderStyle(source, 0, { all: { style: 'thin' } })
+  const twice = ensureBorderStyle(once.xml, 0, { all: { style: 'thin' } })
 
   assert.equal(once.index, twice.index)
   assert.equal(once.xml, twice.xml)

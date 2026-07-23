@@ -24,9 +24,11 @@ import { type RawCell, readSheet } from './sheet.js'
 import { appendSharedStrings, readSharedStrings } from './shared-strings.js'
 import { extendTables } from './tables.js'
 import {
+  type BorderFormat,
   type DateStyle,
   type FillFormat,
   type FontFormat,
+  ensureBorderStyle,
   ensureDateStyle,
   ensureFillStyle,
   ensureFontStyle,
@@ -118,6 +120,8 @@ export interface SetOptions {
   readonly font?: FontFormat
   /** Solid fill colour for the cell's background. */
   readonly fill?: FillFormat
+  /** Borders to apply, merged onto the sides the cell already has. */
+  readonly border?: BorderFormat
 }
 
 export interface Workbook {
@@ -441,11 +445,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       canonical: string,
     ): DateStyle | undefined => {
       if (workingStyles === undefined) {
-        if (
-          options?.numberFormat !== undefined ||
-          options?.font !== undefined ||
-          options?.fill !== undefined
-        ) {
+        if (Object.values(options ?? {}).some((asked) => asked !== undefined)) {
           throw new XlsxError(
             'missing-part',
             `Cannot format ${canonical}: the package has no style table`,
@@ -469,6 +469,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       else if (value instanceof Date) step(ensureDateStyle(xml, base))
       if (options?.font !== undefined) step(ensureFontStyle(xml, base, options.font))
       if (options?.fill !== undefined) step(ensureFillStyle(xml, base, options.fill))
+      if (options?.border !== undefined) step(ensureBorderStyle(xml, base, options.border))
       return applied
     }
 

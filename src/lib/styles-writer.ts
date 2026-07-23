@@ -287,11 +287,11 @@ function buildFontElement(font: FontFormat): string {
   return `<font>${inner}</font>`
 }
 
-/** The font id a cell format points at, or 0 (the default font) when it names none. */
-function fontIdOf(stylesXml: string, basedOn: number | undefined): number {
+/** The id a cell format points at for one sub-table, or 0 (the default) when it names none. */
+function idOf(stylesXml: string, basedOn: number | undefined, attribute: string): number {
   if (basedOn === undefined) return 0
   const element = readTable(stylesXml, 'cellXfs', 'xf')?.elements[basedOn]
-  const match = element?.match(/\bfontId\s*=\s*["'](\d+)["']/)
+  const match = element?.match(new RegExp(`\\b${attribute}\\s*=\\s*["'](\\d+)["']`))
   return match?.[1] === undefined ? 0 : Number(match[1])
 }
 
@@ -306,7 +306,7 @@ export function ensureFontStyle(
   font: FontFormat,
 ): DateStyle {
   const current = parseFont(
-    readTable(stylesXml, 'fonts', 'font')?.elements[fontIdOf(stylesXml, basedOn)] ?? '',
+    readTable(stylesXml, 'fonts', 'font')?.elements[idOf(stylesXml, basedOn, 'fontId')] ?? '',
   )
   const merged: FontFormat = {
     bold: font.bold ?? current.bold,
@@ -348,6 +348,118 @@ export function ensureFillStyle(
   const element = `<fill><patternFill patternType="solid"><fgColor rgb="${normalizeColor(fill.color)}"/><bgColor indexed="64"/></patternFill></fill>`
   const { xml, id } = ensureInTable(seeded, 'fills', 'fill', element)
   return applyCellFormat(xml, basedOn, { fillId: id })
+}
+
+/** ECMA-376 ST_BorderStyle; `none` is expressed by leaving the side out. */
+export type BorderStyle =
+  | 'thin'
+  | 'medium'
+  | 'thick'
+  | 'dashed'
+  | 'dotted'
+  | 'double'
+  | 'hair'
+  | 'mediumDashed'
+  | 'dashDot'
+  | 'mediumDashDot'
+  | 'dashDotDot'
+  | 'mediumDashDotDot'
+  | 'slantDashDot'
+
+export interface BorderSide {
+  readonly style: BorderStyle
+  /** `RRGGBB` or `AARRGGBB` hex; the side's line colour. */
+  readonly color?: string
+}
+
+export interface BorderFormat {
+  readonly top?: BorderSide
+  readonly bottom?: BorderSide
+  readonly left?: BorderSide
+  readonly right?: BorderSide
+  /** Applied to all four sides; a specific side overrides it. */
+  readonly all?: BorderSide
+}
+
+// The style read from a file is any ST_BorderStyle string, so the sides carried
+// through a merge are looser than the BorderSide a caller passes in.
+interface Side {
+  readonly style: string
+  readonly color?: string
+}
+interface Sides {
+  readonly left?: Side
+  readonly right?: Side
+  readonly top?: Side
+  readonly bottom?: Side
+}
+
+const SIDE_NAMES = ['left', 'right', 'top', 'bottom'] as const
+
+const RESERVED_BORDER = '<border><left/><right/><top/><bottom/><diagonal/></border>'
+
+function withReservedBorder(stylesXml: string): string {
+  if (readTable(stylesXml, 'borders', 'border') !== undefined) return stylesXml
+  const { position, prefix } = tableInsertPoint(stylesXml)
+  const seeded = RESERVED_BORDER.replace(
+    /<(\/?)(border|left|right|top|bottom|diagonal)/g,
+    `<$1${prefix}$2`,
+  )
+  return `${stylesXml.slice(0, position)}<${prefix}borders count="1">${seeded}</${prefix}borders>${stylesXml.slice(position)}`
+}
+
+function readBorderAt(stylesXml: string, id: number): Sides {
+  const element = readTable(stylesXml, 'borders', 'border')?.elements[id]
+  if (element === undefined) return {}
+  const sides: { left?: Side; right?: Side; top?: Side; bottom?: Side } = {}
+  let inSide: 'left' | 'right' | 'top' | 'bottom' | undefined
+  for (const event of readXml(element)) {
+    if (event.kind === 'close') {
+      if (inSide !== undefined && event.localName === inSide) inSide = undefined
+      continue
+    }
+    if (event.kind !== 'open') continue
+    if (event.localName === 'left' || event.localName === 'right') inSide = event.localName
+    else if (event.localName === 'top' || event.localName === 'bottom') inSide = event.localName
+    else {
+      if (event.localName === 'color' && inSide !== undefined) {
+        const rgb = event.attributes.get('rgb')
+        const style = sides[inSide]?.style
+        if (rgb !== undefined && style !== undefined) sides[inSide] = { style, color: rgb }
+      }
+      continue
+    }
+    const style = event.attributes.get('style')
+    if (style !== undefined) sides[inSide] = { style }
+    if (event.selfClosing) inSide = undefined
+  }
+  return sides
+}
+
+const buildSide = (name: string, side: Side | undefined): string => {
+  if (side === undefined) return `<${name}/>`
+  if (side.color === undefined) return `<${name} style="${side.style}"/>`
+  return `<${name} style="${side.style}"><color rgb="${normalizeColor(side.color)}"/></${name}>`
+}
+
+const buildBorderElement = (sides: Sides): string =>
+  `<border>${buildSide('left', sides.left)}${buildSide('right', sides.right)}${buildSide('top', sides.top)}${buildSide('bottom', sides.bottom)}<diagonal/></border>`
+
+export function ensureBorderStyle(
+  stylesXml: string,
+  basedOn: number | undefined,
+  border: BorderFormat,
+): DateStyle {
+  const seeded = withReservedBorder(stylesXml)
+  const current = readBorderAt(seeded, idOf(seeded, basedOn, 'borderId'))
+  const merged: { left?: Side; right?: Side; top?: Side; bottom?: Side } = {}
+  for (const name of SIDE_NAMES) {
+    const side = border[name] ?? border.all ?? current[name]
+    if (side !== undefined) merged[name] = side
+  }
+
+  const { xml, id } = ensureInTable(seeded, 'borders', 'border', buildBorderElement(merged))
+  return applyCellFormat(xml, basedOn, { borderId: id })
 }
 
 function tablePrefix(xml: string): string {
