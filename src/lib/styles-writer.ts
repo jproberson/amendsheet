@@ -474,6 +474,147 @@ export function ensureBorderStyle(
   return applyCellFormat(xml, basedOn, { borderId: id })
 }
 
+export type HorizontalAlignment =
+  | 'general'
+  | 'left'
+  | 'center'
+  | 'right'
+  | 'fill'
+  | 'justify'
+  | 'centerContinuous'
+  | 'distributed'
+
+export type VerticalAlignment = 'top' | 'center' | 'bottom' | 'justify' | 'distributed'
+
+export interface Alignment {
+  readonly horizontal?: HorizontalAlignment
+  readonly vertical?: VerticalAlignment
+  readonly wrapText?: boolean
+  /** Degrees anticlockwise, 0–180; 255 stacks the text top to bottom. */
+  readonly textRotation?: number
+  readonly indent?: number
+}
+
+// Unlike a font or border, alignment is not shared through a table: it lives as a
+// child of the xf itself, read and written looser than the caller's Alignment
+// because a file may hold a horizontal or vertical value outside our union.
+interface AlignmentAttributes {
+  readonly horizontal?: string
+  readonly vertical?: string
+  readonly wrapText?: boolean
+  readonly textRotation?: number
+  readonly indent?: number
+}
+
+const numberAttribute = (value: string | undefined): number | undefined => {
+  if (value === undefined) return undefined
+  const parsed = Number(value)
+  return Number.isNaN(parsed) ? undefined : parsed
+}
+
+function parseAlignment(xf: string): AlignmentAttributes {
+  const out: {
+    horizontal?: string
+    vertical?: string
+    wrapText?: boolean
+    textRotation?: number
+    indent?: number
+  } = {}
+  for (const event of readXml(xf)) {
+    if (event.kind !== 'open' || event.localName !== 'alignment') continue
+    const horizontal = event.attributes.get('horizontal')
+    if (horizontal !== undefined) out.horizontal = horizontal
+    const vertical = event.attributes.get('vertical')
+    if (vertical !== undefined) out.vertical = vertical
+    const wrapText = event.attributes.get('wrapText')
+    if (wrapText !== undefined) out.wrapText = flagOn(wrapText)
+    const rotation = numberAttribute(event.attributes.get('textRotation'))
+    if (rotation !== undefined) out.textRotation = rotation
+    const indent = numberAttribute(event.attributes.get('indent'))
+    if (indent !== undefined) out.indent = indent
+  }
+  return out
+}
+
+function buildAlignmentElement(alignment: AlignmentAttributes, prefix: string): string {
+  let attributes = ''
+  if (alignment.horizontal !== undefined) attributes += ` horizontal="${alignment.horizontal}"`
+  if (alignment.vertical !== undefined) attributes += ` vertical="${alignment.vertical}"`
+  if (alignment.wrapText === true) attributes += ' wrapText="1"'
+  if (alignment.textRotation !== undefined)
+    attributes += ` textRotation="${alignment.textRotation}"`
+  if (alignment.indent !== undefined) attributes += ` indent="${alignment.indent}"`
+  return `<${prefix}alignment${attributes}/>`
+}
+
+/** Drops any alignment already on `xf`, so the merged one written next to it is
+ *  the only one, and matches a prefixed or unprefixed element name. */
+const ALIGNMENT_CHILD =
+  /<(?:[A-Za-z0-9]+:)?alignment\b(?:[^>]*\/>|[\s\S]*?<\/(?:[A-Za-z0-9]+:)?alignment>)/
+
+/** Puts `alignment` in the xf as its first child, ahead of any protection or
+ *  extLst, and turns applyAlignment on. A self-closing xf is reopened, and the
+ *  close tag carries the file's prefix so a prefixed table stays well formed. */
+function withAlignmentChild(xf: string, alignment: string, prefix: string): string {
+  const close = xf.indexOf('>')
+  const selfClosing = xf.charAt(close - 1) === '/'
+  const openTag = withApplyFlag(
+    `${xf.slice(0, selfClosing ? close - 1 : close)}>`,
+    'applyAlignment',
+  )
+  const body = selfClosing ? '' : xf.slice(close + 1, xf.lastIndexOf('</'))
+  return `${openTag}${alignment}${body.replace(ALIGNMENT_CHILD, '')}</${prefix}xf>`
+}
+
+function validateAlignment(alignment: Alignment): void {
+  const { textRotation, indent } = alignment
+  if (
+    textRotation !== undefined &&
+    (!Number.isInteger(textRotation) ||
+      textRotation < 0 ||
+      (textRotation > 180 && textRotation !== 255))
+  ) {
+    throw new XlsxError('unwritable-value', `Text rotation ${textRotation} is not 0–180 or 255`, {
+      part: 'xl/styles.xml',
+    })
+  }
+  if (indent !== undefined && (!Number.isInteger(indent) || indent < 0)) {
+    throw new XlsxError('unwritable-value', `Indent ${indent} is not a whole number of steps`, {
+      part: 'xl/styles.xml',
+    })
+  }
+}
+
+/**
+ * Applies `alignment` to a cell, merging onto the alignment it already has so
+ * setting wrap does not reset its horizontal choice. The merged xf is added if
+ * the file has no identical one, and its index is returned.
+ */
+export function ensureAlignmentStyle(
+  stylesXml: string,
+  basedOn: number | undefined,
+  alignment: Alignment,
+): DateStyle {
+  validateAlignment(alignment)
+  const prefix = tablePrefix(stylesXml)
+  const base =
+    basedOn === undefined
+      ? DEFAULT_XF
+      : (readTable(stylesXml, 'cellXfs', 'xf')?.elements[basedOn] ?? DEFAULT_XF)
+  const current = parseAlignment(base)
+  const merged: AlignmentAttributes = {
+    horizontal: alignment.horizontal ?? current.horizontal,
+    vertical: alignment.vertical ?? current.vertical,
+    wrapText: alignment.wrapText ?? current.wrapText,
+    textRotation: alignment.textRotation ?? current.textRotation,
+    indent: alignment.indent ?? current.indent,
+  }
+
+  const wanted = withAlignmentChild(base, buildAlignmentElement(merged, prefix), prefix)
+  const { xml, id } = ensureInTable(stylesXml, 'cellXfs', 'xf', wanted)
+  return { xml, index: id }
+}
+
 function tablePrefix(xml: string): string {
   for (const event of readXml(xml)) {
     if (event.kind !== 'open') continue

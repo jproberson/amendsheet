@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
+  ensureAlignmentStyle,
   ensureBorderStyle,
   ensureDateStyle,
   ensureFillStyle,
@@ -12,7 +13,8 @@ import { ensureNumberFormat } from './styles-writer.js'
 import { isDateFormat, numberFormatOf, readStyles } from './styles.js'
 
 const xfAt = (xml: string, index: number) =>
-  [...xml.matchAll(/<xf [^>]*(?:\/>|>[\s\S]*?<\/xf>)/g)].map((match) => match[0])[index] ?? ''
+  [...xml.matchAll(/<xf\b[^>]*?\/>|<xf\b[^>]*?>[\s\S]*?<\/xf>/g)].map((match) => match[0])[index] ??
+  ''
 
 const fontsTable = '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>'
 
@@ -479,6 +481,126 @@ test('clones a style that has children without breaking the table', () => {
   assert.equal(isDateFormat(readStyles(result.xml), result.index), true)
   assertWellFormed(result.xml, 'styles with children')
   assert.match(result.xml, /<alignment horizontal="center"\/><\/xf><\/cellXfs>/)
+})
+
+test('centering a cell adds an alignment and turns applyAlignment on', () => {
+  const source = styles('<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>')
+
+  const result = ensureAlignmentStyle(source, 0, { horizontal: 'center', vertical: 'top' })
+
+  assert.equal(result.index, 1)
+  assertWellFormed(result.xml, 'alignment styles')
+  assert.match(xfAt(result.xml, 1), /applyAlignment="1"/)
+  assert.match(xfAt(result.xml, 1), /<alignment horizontal="center" vertical="top"\/>/)
+})
+
+test('wrap, rotation and indent are written as their attributes', () => {
+  const source = styles('<xf numFmtId="0"/>')
+
+  const result = ensureAlignmentStyle(source, 0, { wrapText: true, textRotation: 90, indent: 2 })
+
+  assert.match(xfAt(result.xml, 1), /<alignment wrapText="1" textRotation="90" indent="2"\/>/)
+})
+
+test('an alignment change merges onto the one the cell already has', () => {
+  const source = styles('<xf numFmtId="0"><alignment horizontal="center"/></xf>')
+
+  const result = ensureAlignmentStyle(source, 0, { vertical: 'bottom' })
+
+  assert.match(xfAt(result.xml, 1), /<alignment horizontal="center" vertical="bottom"\/>/)
+})
+
+test('does not add the same alignment twice', () => {
+  const source = styles('<xf numFmtId="0"/>')
+  const once = ensureAlignmentStyle(source, 0, { horizontal: 'right' })
+  const twice = ensureAlignmentStyle(once.xml, 0, { horizontal: 'right' })
+
+  assert.equal(twice.index, once.index)
+  assert.equal(twice.xml, once.xml)
+})
+
+test('a full alignment on the base is kept when one attribute is changed', () => {
+  const source = styles(
+    '<xf numFmtId="0"><alignment horizontal="left" vertical="bottom" wrapText="1"' +
+      ' textRotation="45" indent="3"/></xf>',
+  )
+
+  const result = ensureAlignmentStyle(source, 0, { horizontal: 'right' })
+
+  assert.match(
+    xfAt(result.xml, 1),
+    /<alignment horizontal="right" vertical="bottom" wrapText="1" textRotation="45" indent="3"\/>/,
+  )
+})
+
+test('accepts a text rotation of 255, which stacks the text', () => {
+  const source = styles('<xf numFmtId="0"/>')
+
+  const result = ensureAlignmentStyle(source, 0, { textRotation: 255 })
+
+  assert.match(xfAt(result.xml, 1), /textRotation="255"/)
+})
+
+test('ignores an unreadable rotation on the base alignment', () => {
+  const source = styles('<xf numFmtId="0"><alignment textRotation="tilted"/></xf>')
+
+  const result = ensureAlignmentStyle(source, 0, { horizontal: 'center' })
+
+  assert.match(xfAt(result.xml, 1), /<alignment horizontal="center"\/>/)
+})
+
+test('falls back to the default when the base cell format is missing', () => {
+  const source = styles('<xf numFmtId="0"/>')
+
+  const result = ensureAlignmentStyle(source, 99, { horizontal: 'center' })
+
+  assert.match(xfAt(result.xml, 1), /<alignment horizontal="center"\/>/)
+})
+
+test('reopens a self closing cell format to hold the alignment', () => {
+  const source = styles('<xf numFmtId="0" fontId="0"/>')
+
+  const result = ensureAlignmentStyle(source, 0, { horizontal: 'left' })
+
+  assertWellFormed(result.xml, 'reopened xf')
+  assert.match(
+    xfAt(result.xml, 1),
+    /^<xf [^>]*applyAlignment="1"><alignment horizontal="left"\/><\/xf>$/,
+  )
+})
+
+test('formats a cell that has no style yet against the default', () => {
+  const source = styles('<xf numFmtId="0"/>')
+
+  const result = ensureAlignmentStyle(source, undefined, { horizontal: 'center' })
+
+  assert.equal(result.index, 1)
+  assert.match(xfAt(result.xml, 1), /<alignment horizontal="center"\/>/)
+})
+
+test('writes the alignment into a prefixed cell format', () => {
+  const source =
+    '<x:styleSheet><x:cellXfs count="1"><x:xf numFmtId="0"/></x:cellXfs></x:styleSheet>'
+
+  const result = ensureAlignmentStyle(source, 0, { horizontal: 'center' })
+
+  assertWellFormed(result.xml, 'prefixed alignment')
+  assert.match(
+    result.xml,
+    /<x:xf [^>]*applyAlignment="1"><x:alignment horizontal="center"\/><\/x:xf>/,
+  )
+})
+
+test('refuses a text rotation outside the range a cell can hold', () => {
+  const source = styles('<xf numFmtId="0"/>')
+
+  assert.throws(() => ensureAlignmentStyle(source, 0, { textRotation: 300 }), /rotation/)
+})
+
+test('refuses a negative indent', () => {
+  const source = styles('<xf numFmtId="0"/>')
+
+  assert.throws(() => ensureAlignmentStyle(source, 0, { indent: -1 }), /[Ii]ndent/)
 })
 
 test('writes into a prefixed style table without breaking it', () => {
