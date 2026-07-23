@@ -7,6 +7,8 @@ import { XlsxError } from './errors.js'
 import type { CellInput } from './patch.js'
 
 const encode = (text: string) => new TextEncoder().encode(text)
+const decode = (bytes: Uint8Array | undefined) =>
+  new TextDecoder().decode(bytes ?? new Uint8Array())
 
 const ROOT_RELS = `<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`
 const WORKBOOK_RELS = `<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`
@@ -276,6 +278,58 @@ test('set refuses a font colour that is not hex, before recording anything', () 
   assert.throws(() => sheet?.set('A1', 'x', { font: { color: 'nope' } }), /hex/)
   // The refused edit left no trace: A1 still reads its original number.
   assert.deepEqual(sheet?.cell('A1')?.value, { kind: 'number', value: 1 })
+})
+
+test('format restyles a formula cell without touching its formula', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><f>SUM(B1:B2)</f><v>3</v></c></row>'))
+  workbook.sheets[0]?.format('A1', { font: { bold: true } })
+
+  const sheet = decode(readContainer(workbook.toBytes()).parts.get('xl/worksheets/sheet1.xml'))
+  assert.match(sheet, /<c s="\d+" r="A1"><f>SUM\(B1:B2\)<\/f><v>3<\/v><\/c>/)
+})
+
+test('format applies a number format and cell() reflects it at once', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>45292</v></c></row>'))
+  workbook.sheets[0]?.format('A1', { numberFormat: 'yyyy-mm-dd' })
+
+  assert.equal(workbook.sheets[0]?.cell('A1')?.value.kind, 'date')
+})
+
+test('format that removes a date format turns the cell back into a number', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1" s="1"><v>45292</v></c></row>'))
+  assert.equal(workbook.sheets[0]?.cell('A1')?.value.kind, 'date')
+
+  workbook.sheets[0]?.format('A1', { numberFormat: '0.00' })
+
+  assert.equal(workbook.sheets[0]?.cell('A1')?.value.kind, 'number')
+})
+
+test('format creates an empty styled cell when the cell is not there', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.format('B1', { font: { italic: true } })
+
+  const sheet = decode(readContainer(workbook.toBytes()).parts.get('xl/worksheets/sheet1.xml'))
+  assert.match(sheet, /<c r="B1" s="\d+"\/>/)
+})
+
+test('format is allowed on a shared-formula master, keeping the formula', () => {
+  const workbook = readWorkbook(
+    build(
+      '<row r="1"><c r="A1"><f t="shared" ref="A1:A2" si="0">B1</f><v>2</v></c></row>' +
+        '<row r="2"><c r="A2"><f t="shared" si="0"/><v>3</v></c></row>',
+    ),
+  )
+  assert.doesNotThrow(() => workbook.sheets[0]?.format('A1', { font: { bold: true } }))
+
+  const sheet = decode(readContainer(workbook.toBytes()).parts.get('xl/worksheets/sheet1.xml'))
+  assert.match(sheet, /<c s="\d+" r="A1"><f t="shared" ref="A1:A2" si="0">B1<\/f><v>2<\/v><\/c>/)
+})
+
+test('format with empty options is a no-op', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.format('A1', {})
+
+  assert.deepEqual(workbook.sheets[0]?.cell('A1')?.value, { kind: 'number', value: 1 })
 })
 
 test('puts new text in the shared string table when the file has one', () => {

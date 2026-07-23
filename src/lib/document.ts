@@ -99,6 +99,14 @@ export interface Worksheet {
    * edits still writes.
    */
   set(reference: string, value: CellInput, options?: SetOptions): void
+  /**
+   * Applies formatting to a cell without changing its value or formula, so a
+   * formula cell can be restyled without losing its expression. A cell that is
+   * not there yet is created empty with the formatting. Unlike `set`, this is
+   * refused by nothing: restyling a shared-formula master or a merged cell is
+   * safe, since only the cell format changes.
+   */
+  format(reference: string, options: SetOptions): void
 }
 
 export interface SetOptions {
@@ -119,6 +127,7 @@ export interface Workbook {
 }
 
 const EMPTY_STYLES: Styles = { numberFormats: new Map(), cellFormats: [] }
+const EMPTY_EDITS: ReadonlyMap<string, CellInput> = new Map()
 
 const CALCULATION_CHAIN = 'xl/calcChain.xml'
 const CONTENT_TYPES = '[Content_Types].xml'
@@ -309,15 +318,10 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     const patched = (): Uint8Array | undefined => {
       if (sheetBytes === undefined) return undefined
       const pending = edits.get(reference.path)
-      if (pending === undefined) return sheetBytes
-      return patchSheet(
-        sheetBytes,
-        pending,
-        date1904,
-        undefined,
-        styleOverrides.get(reference.path),
-        at,
-      )
+      const overrides = styleOverrides.get(reference.path)
+      // A format() with no set() leaves overrides but no pending edit.
+      if (pending === undefined && overrides === undefined) return sheetBytes
+      return patchSheet(sheetBytes, pending ?? EMPTY_EDITS, date1904, undefined, overrides, at)
     }
 
     function* readCells(source?: Uint8Array): Generator<Cell> {
@@ -387,6 +391,100 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     let byReference: Map<string, Cell> | undefined
     const overlay = new Map<string, Cell>()
 
+    const findCell = (canonical: string): Cell | undefined => {
+      const edited = overlay.get(canonical)
+      if (edited !== undefined) return edited
+      if (byReference === undefined) {
+        byReference = new Map()
+        for (const found of readCells(sheetBytes)) {
+          const where = canonicalReference(found.address)
+          if (where !== undefined) byReference.set(where, found)
+        }
+      }
+      return byReference.get(canonical)
+    }
+
+    // A restyled cell keeps its value and formula; only its number format is
+    // re-resolved, which can move a number to a date and back.
+    const restyled = (base: Cell, styleIndex: number | undefined): Cell => {
+      const styles = stylesNow()
+      const numberFormat = numberFormatOf(styles, styleIndex)
+      const dateFormat = isDateFormat(styles, styleIndex)
+      let value = base.value
+      if (value.kind === 'number' && dateFormat && value.value >= 0 && value.value <= LAST_SERIAL) {
+        value = { kind: 'date', value: serialToDate(value.value, date1904), serial: value.value }
+      } else if (value.kind === 'date' && !dateFormat) {
+        value = { kind: 'number', value: value.serial }
+      }
+      return {
+        address: base.address,
+        reference: base.reference,
+        value,
+        ...(base.formula === undefined ? {} : { formula: base.formula }),
+        ...(numberFormat === undefined ? {} : { numberFormat }),
+      }
+    }
+
+    /**
+     * A number format and a font composed into one cell format, each step landing
+     * on the one before. Undefined when there is nothing to change. Refuses at the
+     * call, before anything is recorded, so a rejected format queues nothing.
+     */
+    const resolveStyle = (
+      current: number | undefined,
+      value: CellInput | undefined,
+      options: SetOptions | undefined,
+      canonical: string,
+    ): DateStyle | undefined => {
+      if (workingStyles === undefined) {
+        if (options?.numberFormat !== undefined || options?.font !== undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Cannot format ${canonical}: the package has no style table`,
+            { part: 'xl/styles.xml', reference: canonical },
+          )
+        }
+        return undefined
+      }
+      let xml = workingStyles
+      let base = current
+      let applied: DateStyle | undefined
+      const step = (next: DateStyle) => {
+        xml = next.xml
+        base = next.index
+        applied = next
+      }
+      // An asked-for format wins; a Date only gets one because without one it
+      // displays as the serial number it is stored as.
+      if (options?.numberFormat !== undefined)
+        step(ensureNumberFormat(xml, base, options.numberFormat))
+      else if (value instanceof Date) step(ensureDateStyle(xml, base))
+      if (options?.font !== undefined) step(ensureFontStyle(xml, base, options.font))
+      return applied
+    }
+
+    const commitStyle = (
+      canonical: string,
+      current: number | undefined,
+      applied: DateStyle | undefined,
+    ): number | undefined => {
+      if (applied === undefined) return current
+      workingStyles = applied.xml
+      if (applied.index !== current) {
+        const overrides = styleOverrides.get(reference.path) ?? new Map<string, number>()
+        overrides.set(canonical, applied.index)
+        styleOverrides.set(reference.path, overrides)
+      }
+      return applied.index
+    }
+
+    const absent = (canonical: string, verb: string): XlsxError =>
+      new XlsxError(
+        'missing-part',
+        `Sheet ${reference.name} is not in the package, so ${canonical} cannot be ${verb}`,
+        { ...at, reference: canonical },
+      )
+
     return {
       name: reference.name,
       state: reference.state,
@@ -395,34 +493,17 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       cell(cellReference: string): Cell | undefined {
         const wanted = canonicalReference(parseReference(cellReference))
         if (wanted === undefined) return undefined
-        const edited = overlay.get(wanted)
-        if (edited !== undefined) return edited
-
-        if (byReference === undefined) {
-          byReference = new Map()
-          for (const found of readCells(sheetBytes)) {
-            const at = canonicalReference(found.address)
-            if (at !== undefined) byReference.set(at, found)
-          }
-        }
-        return byReference.get(wanted)
+        return findCell(wanted)
       },
       set(cellReference: string, value: CellInput, options?: SetOptions): void {
         // Normalised so `a1`, `$A$1` and `A1` are one edit, and so the file
         // never receives a reference spelled the way the caller typed it.
         const canonical = formatReference(parseWritableReference(cellReference))
 
-        // Refused here rather than at save time. An edit that only fails once
-        // the workbook is written takes the whole batch down with it, and until
-        // then cell() reports a write that is never going to happen.
-        if (sheetBytes === undefined) {
-          // Recording it would report the value from cell() and save none of it.
-          throw new XlsxError(
-            'missing-part',
-            `Sheet ${reference.name} is not in the package, so ${canonical} cannot be written`,
-            { ...at, reference: canonical },
-          )
-        }
+        // Refused here rather than at save time. An edit that only fails once the
+        // workbook is written takes the whole batch down with it, and until then
+        // cell() reports a write that is never going to happen.
+        if (sheetBytes === undefined) throw absent(canonical, 'written')
 
         checkWritable(canonical, value, date1904, at)
         // sheetBytes is present, so indexed() is too; the guard is for the type.
@@ -435,53 +516,33 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         }
 
         const current = styleAt(canonical)
-
-        // Resolved before anything is recorded. A format this file cannot hold
-        // refuses here, and a refusal that had already queued the edit would
-        // write the value it claimed to reject.
-        let applied: DateStyle | undefined
-        if (workingStyles === undefined) {
-          if (options?.numberFormat !== undefined || options?.font !== undefined) {
-            throw new XlsxError(
-              'missing-part',
-              `Cannot format ${canonical}: the package has no style table`,
-              { part: 'xl/styles.xml', reference: canonical },
-            )
-          }
-        } else {
-          // Each step lands on the one before it, so a number format and a font
-          // set at once compose into a single cell format.
-          let xml = workingStyles
-          let base = current
-          const step = (next: DateStyle) => {
-            xml = next.xml
-            base = next.index
-            applied = next
-          }
-          // An asked-for format wins; a Date only gets one because without one
-          // it displays as the serial number it is stored as.
-          if (options?.numberFormat !== undefined)
-            step(ensureNumberFormat(xml, base, options.numberFormat))
-          else if (value instanceof Date) step(ensureDateStyle(xml, base))
-          if (options?.font !== undefined) step(ensureFontStyle(xml, base, options.font))
-        }
+        const applied = resolveStyle(current, value, options, canonical)
 
         const pending = edits.get(reference.path) ?? new Map<string, CellInput>()
         pending.set(canonical, value)
         edits.set(reference.path, pending)
 
-        let resolved = current
-        if (applied !== undefined) {
-          workingStyles = applied.xml
-          resolved = applied.index
-          if (applied.index !== current) {
-            const overrides = styleOverrides.get(reference.path) ?? new Map<string, number>()
-            overrides.set(canonical, applied.index)
-            styleOverrides.set(reference.path, overrides)
-          }
-        }
+        overlay.set(canonical, predict(canonical, value, commitStyle(canonical, current, applied)))
+      },
+      format(cellReference: string, options: SetOptions): void {
+        const canonical = formatReference(parseWritableReference(cellReference))
+        if (sheetBytes === undefined) throw absent(canonical, 'formatted')
 
-        overlay.set(canonical, predict(canonical, value, resolved))
+        const current = styleAt(canonical)
+        // No value, so a Date never triggers a format; only what is asked for.
+        // Overwriting a shared-formula master or a merged cell is safe here: the
+        // value and formula are kept, so neither refusal a write needs applies.
+        const applied = resolveStyle(current, undefined, options, canonical)
+        if (applied === undefined) return
+
+        const existing = findCell(canonical)
+        const resolved = commitStyle(canonical, current, applied)
+        overlay.set(
+          canonical,
+          existing === undefined
+            ? predict(canonical, null, resolved)
+            : restyled(existing, resolved),
+        )
       },
     }
   })
@@ -490,7 +551,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     // A change carries new bytes for a part; null deletes it. Every part not
     // named here is passed through still compressed, never inflated or rebuilt.
     const changes = new Map<string, Uint8Array | null>()
-    if (edits.size === 0) return container.write(changes)
+    // A format() with no set() records a style override and no value edit.
+    if (edits.size === 0 && styleOverrides.size === 0) return container.write(changes)
 
     const encoder = new TextEncoder()
 
@@ -533,9 +595,11 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       }
     }
 
-    for (const [path, pending] of edits) {
+    // Every sheet with a value edit or a format() restyle is rewritten once.
+    for (const path of new Set([...edits.keys(), ...styleOverrides.keys()])) {
       const bytes = container.parts.get(path)
       if (bytes === undefined) continue
+      const pending = edits.get(path) ?? EMPTY_EDITS
       const at: SheetLocation = {
         sheet: part.sheets.find((s) => s.path === path)?.name,
         part: path,

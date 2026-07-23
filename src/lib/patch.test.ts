@@ -35,6 +35,49 @@ test('returns the source untouched when there is nothing to do', () => {
   assert.equal(patchSheet(source, new Map(), false), source)
 })
 
+test('restyling a cell rewrites its style and keeps its value and formula', () => {
+  const source = sheet('<row r="1"><c r="A1"><f>SUM(B1:B2)</f><v>3</v></c></row>')
+
+  const patched = patchSheet(source, new Map(), false, undefined, new Map([['A1', 7]]))
+
+  // s is inserted after the element name; attribute order is insignificant.
+  assert.match(patched, /<c s="7" r="A1"><f>SUM\(B1:B2\)<\/f><v>3<\/v><\/c>/)
+})
+
+test('restyling a cell that carries a style replaces the style', () => {
+  const source = sheet('<row r="1"><c r="A1" s="2"><v>3</v></c></row>')
+
+  const patched = patchSheet(source, new Map(), false, undefined, new Map([['A1', 9]]))
+
+  assert.match(patched, /<c r="A1" s="9"><v>3<\/v><\/c>/)
+})
+
+test('restyling a cell that is not there yet adds an empty styled cell', () => {
+  const source = sheet('<row r="1"><c r="A1"><v>1</v></c></row>')
+
+  const patched = patchSheet(source, new Map(), false, undefined, new Map([['B1', 4]]))
+
+  assert.match(patched, /<c r="A1"><v>1<\/v><\/c><c r="B1" s="4"\/><\/row>/)
+})
+
+test('a value write and a restyle of another cell both land', () => {
+  const source = sheet('<row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>2</v></c></row>')
+
+  const patched = patchSheet(
+    source,
+    new Map<string, CellInput>([['A1', 9]]),
+    false,
+    undefined,
+    new Map([
+      ['A1', 3],
+      ['B1', 5],
+    ]),
+  )
+
+  assert.match(patched, /<c r="A1" s="3"><v>9<\/v><\/c>/)
+  assert.match(patched, /<c s="5" r="B1"><v>2<\/v><\/c>/)
+})
+
 test('a styled cell no column letter can name does not break the index', () => {
   // XFE is column 16385, past the last a sheet can hold; the reader accepts it
   // leniently, so indexing must skip it rather than throw and take set() down.

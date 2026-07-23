@@ -1,7 +1,7 @@
 import { dateToSerial } from './date.js'
 import { XlsxError } from './errors.js'
 import { canonicalReference, formatReference, parseReference } from './reference.js'
-import { findUnwritableCharacter, readXmlBytes } from './xml.js'
+import { findUnwritableCharacter, readXmlBytes, withAttribute } from './xml.js'
 
 /**
  * Where a write-path error points, past the cell reference the throw site
@@ -443,7 +443,21 @@ export function patchSheet(
   styleOverrides?: ReadonlyMap<string, number>,
   at: SheetLocation = {},
 ): Uint8Array {
-  if (edits.size === 0) return bytes
+  // A style override with no value edit is a restyle: the cell keeps its value
+  // and formula and only its `s` changes, so unlike a write it needs no shared
+  // formula or merge refusal — formatting is always safe.
+  const restyleRefs =
+    styleOverrides === undefined ? [] : [...styleOverrides.keys()].filter((ref) => !edits.has(ref))
+  if (edits.size === 0 && restyleRefs.length === 0) return bytes
+
+  const operations: ReadonlyArray<{ given: string; value: CellInput; restyle: boolean }> = [
+    ...[...edits].map(([given, value]) => ({ given, value, restyle: false })),
+    ...restyleRefs.map((given): { given: string; value: CellInput; restyle: boolean } => ({
+      given,
+      value: null,
+      restyle: true,
+    })),
+  ]
 
   const shape = readShape(bytes, at)
   const splices: Splice[] = []
@@ -470,7 +484,7 @@ export function patchSheet(
     return built
   }
 
-  for (const [given, value] of edits) {
+  for (const { given, value, restyle } of operations) {
     const address = parseReference(given)
     const { row, column } = address
     // The file never receives a reference spelled the way the caller typed it.
@@ -495,6 +509,21 @@ export function patchSheet(
     }
 
     const existingCell = cellsOf(existingRow).get(column)
+    if (existingCell !== undefined && restyle) {
+      // Only the `s` on the open tag changes; the value and formula are kept.
+      const override = styleOverrides?.get(reference)
+      if (override !== undefined) {
+        const element = decoder.decode(bytes.subarray(existingCell.start, existingCell.end))
+        const openEnd = element.indexOf('>') + 1
+        splices.push({
+          start: existingCell.start,
+          end: existingCell.end,
+          text: withAttribute(element.slice(0, openEnd), 's', override) + element.slice(openEnd),
+          order: column,
+        })
+      }
+      continue
+    }
     if (existingCell?.spillingFormula !== undefined) {
       throw sharedFormulaRefusal(reference, existingCell.spillingFormula, at)
     }
