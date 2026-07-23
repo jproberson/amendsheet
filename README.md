@@ -98,7 +98,12 @@ already has. An `alignment` places the text — `horizontal`, `vertical`,
 `wrapText`, `textRotation` (0–180, or 255 to stack top to bottom) and `indent` —
 and merges the same way, so setting `wrapText` leaves a horizontal choice alone.
 A `protection` sets `locked` and `hidden`, which take effect once the worksheet
-itself is protected. Colours are `RRGGBB` or `AARRGGBB` hex.
+itself is protected. A colour is an `RRGGBB` or `AARRGGBB` hex string, a theme
+reference `{ theme, tint }` (an index into the workbook's colour scheme; `tint`
+lightens or darkens it, -1 to 1), or an indexed palette entry `{ indexed }`. A
+theme or indexed colour is read back and written as the reference it is, not
+resolved to the hex it displays as, so editing a cell keeps the theme colour its
+font already carried rather than dropping it.
 
 `worksheet.protect()` turns that worksheet protection on — it is what makes a
 cell's `locked` and `hidden` bite. With no argument it matches Excel's Protect
@@ -213,9 +218,10 @@ What a minor release is allowed to do, so you know which branches are safe:
   in memory.
 - Charts, pivot tables and drawings are preserved but never created.
 - `cell` exposes a cell's `font`, `fill`, `border` and `alignment`, but only the
-  parts this library models. Anything else on the cell format — protection, a
-  gradient or pattern fill, a themed colour — is preserved in the file but not
-  reported.
+  parts this library models. A gradient fill is preserved in the file but not
+  reported. A theme colour is reported as its `{ theme, tint }` reference rather
+  than resolved to the hex it displays as, so reading the colour a theme names
+  would need the theme part this library does not yet interpret.
 - A table grows to include a cell written directly below or to the right of it,
   the way Excel would, adding a column when it grows sideways. Other ranges that
   name cells are still copied, not adjusted: chart ranges, defined names and
