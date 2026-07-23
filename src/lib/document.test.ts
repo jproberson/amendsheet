@@ -353,6 +353,44 @@ test('format applies a border, merging onto the sides the cell has', () => {
   assert.match(sheet, /<c s="\d+" r="A1"><v>1<\/v><\/c>/)
 })
 
+test('cell() reads back the font, fill and border it was given', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.set('A1', 'x', {
+    font: { bold: true },
+    fill: { color: 'FF0000' },
+    border: { top: { style: 'thin' } },
+  })
+
+  const cell = workbook.sheets[0]?.cell('A1')
+  assert.deepEqual(cell?.font, { bold: true })
+  assert.deepEqual(cell?.fill, { color: 'FFFF0000' })
+  assert.deepEqual(cell?.border, { top: { style: 'thin' } })
+})
+
+test('cell() reads formatting a file already carries', () => {
+  const styles =
+    '<styleSheet><fonts count="2"><font/><font><b/><sz val="12"/></font></fonts>' +
+    '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>' +
+    '<border><bottom style="medium"/><left/><right/><top/><diagonal/></border></borders>' +
+    '<cellXfs count="2"><xf numFmtId="0"/><xf numFmtId="0" fontId="1" borderId="1"/></cellXfs></styleSheet>'
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1" s="1"><v>1</v></c></row>', { extra: { 'xl/styles.xml': styles } }),
+  )
+
+  const cell = workbook.sheets[0]?.cell('A1')
+  assert.deepEqual(cell?.font, { bold: true, size: 12 })
+  assert.deepEqual(cell?.border, { bottom: { style: 'medium' } })
+  assert.equal(cell?.fill, undefined)
+})
+
+test('a plain cell reports no font, fill or border', () => {
+  const cell = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>')).sheets[0]?.cell('A1')
+
+  assert.equal(cell?.font, undefined)
+  assert.equal(cell?.fill, undefined)
+  assert.equal(cell?.border, undefined)
+})
+
 test('set and format apply a solid fill, composing with a font', () => {
   const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
   workbook.sheets[0]?.set('A1', 'x', { fill: { color: '00FF00' }, font: { bold: true } })

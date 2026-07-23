@@ -25,6 +25,7 @@ import { appendSharedStrings, readSharedStrings } from './shared-strings.js'
 import { extendTables } from './tables.js'
 import {
   type BorderFormat,
+  type CellFormatting,
   type DateStyle,
   type FillFormat,
   type FontFormat,
@@ -33,6 +34,7 @@ import {
   ensureFillStyle,
   ensureFontStyle,
   ensureNumberFormat,
+  readFormatting,
 } from './styles-writer.js'
 import { type Styles, isDateFormat, numberFormatOf, readStyles } from './styles.js'
 import { readXml } from './xml.js'
@@ -74,6 +76,12 @@ export interface Cell {
   readonly value: CellValue
   readonly formula?: CellFormula
   readonly numberFormat?: string
+  /** Absent when the cell uses the default font, so carries none of its own. */
+  readonly font?: FontFormat
+  /** Absent unless the cell has a solid fill. */
+  readonly fill?: FillFormat
+  /** Absent unless at least one side has a border. */
+  readonly border?: BorderFormat
 }
 
 export interface Worksheet {
@@ -274,7 +282,13 @@ function toFormula(raw: RawCell, masters: SharedMasters | undefined): CellFormul
   return master === undefined ? { kind: 'shared' } : { kind: 'shared', master }
 }
 
-function toCell(raw: RawCell, styles: Styles, date1904: boolean, masters?: SharedMasters): Cell {
+function toCell(
+  raw: RawCell,
+  styles: Styles,
+  formatting: CellFormatting,
+  date1904: boolean,
+  masters?: SharedMasters,
+): Cell {
   const numberFormat = numberFormatOf(styles, raw.styleIndex)
   const value = toCellValue(raw, styles, date1904)
   const formula = toFormula(raw, masters)
@@ -287,6 +301,7 @@ function toCell(raw: RawCell, styles: Styles, date1904: boolean, masters?: Share
     value,
     ...(formula === undefined ? {} : { formula }),
     ...(numberFormat === undefined ? {} : { numberFormat }),
+    ...formatting,
   }
 }
 
@@ -319,6 +334,19 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     return parsedStyles
   }
 
+  // Parsed lazily, and only for the font/fill/border a read exposes, so a
+  // workbook that is never read for formatting never pays to resolve it.
+  let parsedFormatting: readonly CellFormatting[] | undefined
+  let formattingFrom: string | undefined
+  const formattingFor = (styleIndex: number | undefined): CellFormatting => {
+    if (styleIndex === undefined || workingStyles === undefined) return {}
+    if (parsedFormatting === undefined || workingStyles !== formattingFrom) {
+      parsedFormatting = readFormatting(workingStyles)
+      formattingFrom = workingStyles
+    }
+    return parsedFormatting[styleIndex] ?? {}
+  }
+
   const sheets = part.sheets.map((reference): Worksheet => {
     const sheetBytes = container.parts.get(reference.path)
     const at: SheetLocation = { sheet: reference.name, part: reference.path }
@@ -344,7 +372,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         if (raw.ownsSharedRange === true && raw.sharedIndex !== undefined) {
           masters.set(raw.sharedIndex, canonicalReference(raw.address) ?? raw.reference)
         }
-        yield toCell(raw, stylesNow(), date1904, masters)
+        yield toCell(raw, stylesNow(), formattingFor(raw.styleIndex), date1904, masters)
       }
     }
 
@@ -371,27 +399,48 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       const address = parseReference(canonical)
       const style = styleIndex === undefined ? {} : { styleIndex }
       const raw = { address, reference: canonical, ...style }
+      const formatting = formattingFor(styleIndex)
 
       if (value === null) {
-        return toCell({ ...raw, value: { kind: 'empty' } }, stylesNow(), date1904)
+        return toCell({ ...raw, value: { kind: 'empty' } }, stylesNow(), formatting, date1904)
       }
       if (typeof value === 'number') {
-        return toCell({ ...raw, value: { kind: 'number', value } }, stylesNow(), date1904)
+        return toCell(
+          { ...raw, value: { kind: 'number', value } },
+          stylesNow(),
+          formatting,
+          date1904,
+        )
       }
       if (typeof value === 'boolean') {
-        return toCell({ ...raw, value: { kind: 'boolean', value } }, stylesNow(), date1904)
+        return toCell(
+          { ...raw, value: { kind: 'boolean', value } },
+          stylesNow(),
+          formatting,
+          date1904,
+        )
       }
       if (typeof value === 'string') {
-        return toCell({ ...raw, value: { kind: 'text', value } }, stylesNow(), date1904)
+        return toCell({ ...raw, value: { kind: 'text', value } }, stylesNow(), formatting, date1904)
       }
       if (value instanceof Date) {
         // Written as the serial it becomes, so the style decides how it reads.
         const serial = dateToSerial(value, date1904)
-        return toCell({ ...raw, value: { kind: 'number', value: serial } }, stylesNow(), date1904)
+        return toCell(
+          { ...raw, value: { kind: 'number', value: serial } },
+          stylesNow(),
+          formatting,
+          date1904,
+        )
       }
       // A formula is written without a cached value, so it reads back empty.
       const formula = value.formula
-      return toCell({ ...raw, value: { kind: 'empty' }, formula }, stylesNow(), date1904)
+      return toCell(
+        { ...raw, value: { kind: 'empty' }, formula },
+        stylesNow(),
+        formatting,
+        date1904,
+      )
     }
 
     // Built from the sheet as it was read. Every edit is in the overlay, so the
@@ -430,6 +479,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         value,
         ...(base.formula === undefined ? {} : { formula: base.formula }),
         ...(numberFormat === undefined ? {} : { numberFormat }),
+        ...formattingFor(styleIndex),
       }
     }
 
