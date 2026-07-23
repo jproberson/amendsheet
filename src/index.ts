@@ -8,6 +8,8 @@ export type {
   FillFormat,
   FontFormat,
   HorizontalAlignment,
+  UnderlineStyle,
+  VerticalAlign,
   VerticalAlignment,
 } from './lib/styles-writer.js'
 export type {

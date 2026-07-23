@@ -134,6 +134,53 @@ test('treats a cell format with no fontId as using the default font', () => {
   assert.match(result.xml, /<font><b\/><sz val="11"\/><\/font>/)
 })
 
+test('applying strikethrough adds a strike to the font', () => {
+  const source = fontStyles('<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>')
+
+  const result = ensureFontStyle(source, 0, { strike: true })
+
+  assert.match(result.xml, /<font><strike\/><sz val="11"\/><name val="Calibri"\/><\/font>/)
+})
+
+test('a double underline is written with its val', () => {
+  const source = fontStyles('<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>')
+
+  assert.match(ensureFontStyle(source, 0, { underline: 'double' }).xml, /<u val="double"\/>/)
+})
+
+test('true and single underline both write a bare u', () => {
+  const source = fontStyles('<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>')
+
+  assert.match(ensureFontStyle(source, 0, { underline: true }).xml, /<font><u\/>/)
+  assert.match(ensureFontStyle(source, 0, { underline: 'single' }).xml, /<font><u\/>/)
+})
+
+test('a superscript is written as a vertAlign', () => {
+  const source = fontStyles('<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>')
+
+  assert.match(
+    ensureFontStyle(source, 0, { vertAlign: 'superscript' }).xml,
+    /<vertAlign val="superscript"\/>/,
+  )
+})
+
+test('strike, an underline style and vertAlign merge onto the cell font in order', () => {
+  const source =
+    '<styleSheet><fonts count="1"><font><b/><sz val="14"/></font></fonts>' +
+    '<cellXfs count="1"><xf numFmtId="0" fontId="0"/></cellXfs></styleSheet>'
+
+  const result = ensureFontStyle(source, 0, {
+    strike: true,
+    underline: 'double',
+    vertAlign: 'subscript',
+  })
+
+  assert.match(
+    result.xml,
+    /<font><b\/><strike\/><u val="double"\/><vertAlign val="subscript"\/><sz val="14"\/><\/font>/,
+  )
+})
+
 const fills =
   '<fills count="2"><fill><patternFill patternType="none"/></fill>' +
   '<fill><patternFill patternType="gray125"/></fill></fills>'
@@ -402,6 +449,49 @@ test('ignores an unknown horizontal or vertical alignment', () => {
     '<xf><alignment horizontal="sideways" vertical="middle"/></xf></cellXfs></styleSheet>'
 
   assert.deepEqual(readFormatting(source)[0], {})
+})
+
+test("reads a font's strike, underline style and vertAlign", () => {
+  const source =
+    '<styleSheet><fonts count="2"><font/>' +
+    '<font><strike/><u val="double"/><vertAlign val="superscript"/></font></fonts>' +
+    '<cellXfs count="2"><xf/><xf fontId="1"/></cellXfs></styleSheet>'
+
+  assert.deepEqual(readFormatting(source)[1], {
+    font: { strike: true, underline: 'double', vertAlign: 'superscript' },
+  })
+})
+
+test('a plain u reads back as a boolean underline', () => {
+  const source =
+    '<styleSheet><fonts count="2"><font/><font><u/></font></fonts>' +
+    '<cellXfs count="2"><xf/><xf fontId="1"/></cellXfs></styleSheet>'
+
+  assert.deepEqual(readFormatting(source)[1], { font: { underline: true } })
+})
+
+test('an unknown underline val reads back as a boolean underline', () => {
+  const source =
+    '<styleSheet><fonts count="2"><font/><font><u val="wavy"/></font></fonts>' +
+    '<cellXfs count="2"><xf/><xf fontId="1"/></cellXfs></styleSheet>'
+
+  assert.deepEqual(readFormatting(source)[1], { font: { underline: true } })
+})
+
+test('an explicit u val=none is not reported as underlined', () => {
+  const source =
+    '<styleSheet><fonts count="2"><font/><font><u val="none"/><b/></font></fonts>' +
+    '<cellXfs count="2"><xf/><xf fontId="1"/></cellXfs></styleSheet>'
+
+  assert.deepEqual(readFormatting(source)[1], { font: { bold: true } })
+})
+
+test('an unknown vertAlign is ignored', () => {
+  const source =
+    '<styleSheet><fonts count="2"><font/><font><vertAlign val="sideways"/><b/></font></fonts>' +
+    '<cellXfs count="2"><xf/><xf fontId="1"/></cellXfs></styleSheet>'
+
+  assert.deepEqual(readFormatting(source)[1], { font: { bold: true } })
 })
 
 test('reports no alignment for a cell format that has none', () => {

@@ -218,14 +218,46 @@ function applyCellFormat(
   return { xml, index: id }
 }
 
+/** `true` and `'single'` both write a bare `<u/>`; the accounting and double
+ * variants carry a `val`. A read reports `true` for a plain single underline. */
+export type UnderlineStyle = 'single' | 'double' | 'singleAccounting' | 'doubleAccounting'
+
+export type VerticalAlign = 'baseline' | 'superscript' | 'subscript'
+
 export interface FontFormat {
   readonly bold?: boolean
   readonly italic?: boolean
-  readonly underline?: boolean
+  readonly strike?: boolean
+  readonly underline?: boolean | UnderlineStyle
+  readonly vertAlign?: VerticalAlign
   readonly size?: number
   /** An `RRGGBB` or `AARRGGBB` hex colour; a six-digit value is stored opaque. */
   readonly color?: string
   readonly name?: string
+}
+
+// A plain <u/> is reported as the boolean true, so only the variants that carry a
+// meaningful val are narrowed here; an unknown val falls back to a bare underline.
+const REPORTED_UNDERLINES: ReadonlySet<UnderlineStyle> = new Set([
+  'double',
+  'singleAccounting',
+  'doubleAccounting',
+])
+
+const toUnderline = (value: string | undefined): UnderlineStyle | undefined => {
+  for (const known of REPORTED_UNDERLINES) if (known === value) return known
+  return undefined
+}
+
+const VERTICAL_ALIGNS: ReadonlySet<VerticalAlign> = new Set([
+  'baseline',
+  'superscript',
+  'subscript',
+])
+
+const toVertAlign = (value: string | undefined): VerticalAlign | undefined => {
+  for (const known of VERTICAL_ALIGNS) if (known === value) return known
+  return undefined
 }
 
 /** ECMA-376 stores a colour as eight hex digits, alpha first; a six-digit value
@@ -245,7 +277,9 @@ function parseFont(element: string): FontFormat {
   const font: {
     bold?: boolean
     italic?: boolean
-    underline?: boolean
+    strike?: boolean
+    underline?: boolean | UnderlineStyle
+    vertAlign?: VerticalAlign
     size?: number
     color?: string
     name?: string
@@ -259,9 +293,21 @@ function parseFont(element: string): FontFormat {
       case 'i':
         font.italic = flagOn(event.attributes.get('val'))
         break
-      case 'u':
-        font.underline = flagOn(event.attributes.get('val'))
+      case 'strike':
+        font.strike = flagOn(event.attributes.get('val'))
         break
+      case 'u': {
+        const val = event.attributes.get('val')
+        // A cell can turn an inherited underline off; that is not underlined.
+        if (val === 'none') break
+        font.underline = toUnderline(val) ?? true
+        break
+      }
+      case 'vertAlign': {
+        const vertAlign = toVertAlign(event.attributes.get('val'))
+        if (vertAlign !== undefined) font.vertAlign = vertAlign
+        break
+      }
       case 'sz': {
         const size = Number(event.attributes.get('val'))
         if (!Number.isNaN(size)) font.size = size
@@ -286,7 +332,10 @@ function buildFontElement(font: FontFormat): string {
   let inner = ''
   if (font.bold === true) inner += '<b/>'
   if (font.italic === true) inner += '<i/>'
-  if (font.underline === true) inner += '<u/>'
+  if (font.strike === true) inner += '<strike/>'
+  if (font.underline === true || font.underline === 'single') inner += '<u/>'
+  else if (typeof font.underline === 'string') inner += `<u val="${font.underline}"/>`
+  if (font.vertAlign !== undefined) inner += `<vertAlign val="${font.vertAlign}"/>`
   if (font.size !== undefined) inner += `<sz val="${font.size}"/>`
   if (font.color !== undefined) inner += `<color rgb="${normalizeColor(font.color)}"/>`
   if (font.name !== undefined) inner += `<name val="${escapeXml(font.name)}"/>`
@@ -325,7 +374,9 @@ export function ensureFontStyle(
   const merged: FontFormat = {
     bold: font.bold ?? current.bold,
     italic: font.italic ?? current.italic,
+    strike: font.strike ?? current.strike,
     underline: font.underline ?? current.underline,
+    vertAlign: font.vertAlign ?? current.vertAlign,
     size: font.size ?? current.size,
     color: font.color ?? current.color,
     name: font.name ?? current.name,
