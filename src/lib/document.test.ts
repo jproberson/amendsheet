@@ -426,13 +426,13 @@ test('cell() reads back the font, fill and border it was given', () => {
   const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
   workbook.sheets[0]?.set('A1', 'x', {
     font: { bold: true },
-    fill: { color: 'FF0000' },
+    fill: { type: 'solid', color: 'FF0000' },
     border: { top: { style: 'thin' } },
   })
 
   const cell = workbook.sheets[0]?.cell('A1')
   assert.deepEqual(cell?.font, { bold: true })
-  assert.deepEqual(cell?.fill, { color: 'FFFF0000' })
+  assert.deepEqual(cell?.fill, { type: 'solid', color: 'FFFF0000' })
   assert.deepEqual(cell?.border, { top: { style: 'thin' } })
 })
 
@@ -462,13 +462,31 @@ test('a plain cell reports no font, fill or border', () => {
 
 test('set and format apply a solid fill, composing with a font', () => {
   const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
-  workbook.sheets[0]?.set('A1', 'x', { fill: { color: '00FF00' }, font: { bold: true } })
+  workbook.sheets[0]?.set('A1', 'x', {
+    fill: { type: 'solid', color: '00FF00' },
+    font: { bold: true },
+  })
 
   const styles = decode(readContainer(workbook.toBytes()).parts.get('xl/styles.xml'))
   assert.match(styles, /<fill><patternFill patternType="solid"><fgColor rgb="FF00FF00"\//)
   const xf = [...styles.matchAll(/<xf [^>]*\/>/g)].map((match) => match[0]).at(-1) ?? ''
   assert.match(xf, /applyFill="1"/)
   assert.match(xf, /applyFont="1"/)
+})
+
+test('a pattern fill set on a cell reads back off it', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.set('A1', 'x', {
+    fill: { type: 'pattern', pattern: 'lightGrid', color: 'FF0000', background: 'FFFFFF' },
+  })
+
+  const reopened = readWorkbook(workbook.toBytes())
+  assert.deepEqual(reopened.sheets[0]?.cell('A1')?.fill, {
+    type: 'pattern',
+    pattern: 'lightGrid',
+    color: 'FFFF0000',
+    background: 'FFFFFFFF',
+  })
 })
 
 test('format restyles a formula cell without touching its formula', () => {

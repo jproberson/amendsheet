@@ -75,7 +75,7 @@ const sheet = workbook.sheet('Summary') ?? workbook.sheets[0]
 sheet.set('A1', 1234.5, {
   numberFormat: '"$"#,##0.00',
   font: { bold: true, color: 'FF0000' },
-  fill: { color: 'FFFF00' },
+  fill: { type: 'solid', color: 'FFFF00' },
   border: { all: { style: 'thin' } },
   alignment: { horizontal: 'center', wrapText: true },
 })
@@ -88,7 +88,10 @@ A `font` merges onto the cell's current one, so `{ font: { bold: true } }` adds
 bold without disturbing its size or colour. Besides `bold`, `italic`, `size`,
 `color` and `name`, a font carries `strike`, `vertAlign` (`superscript` or
 `subscript`) and `underline`, which is `true` for a single underline or one of
-`double`, `singleAccounting`, `doubleAccounting`. A `fill` is a solid background. A
+`double`, `singleAccounting`, `doubleAccounting`. A `fill` is a discriminated
+union: `{ type: 'solid', color }` for a plain background, or `{ type: 'pattern',
+pattern, color, background }` for one of the ECMA-376 pattern types such as
+`lightGrid`, where `color` is the pattern's foreground. A
 `border` sets sides by name, or `all` at once, merging onto the sides the cell
 already has. An `alignment` places the text — `horizontal`, `vertical`,
 `wrapText`, `textRotation` (0–180, or 255 to stack top to bottom) and `indent` —

@@ -387,10 +387,42 @@ export function ensureFontStyle(
   return applyCellFormat(xml, basedOn, { fontId: id })
 }
 
-export interface FillFormat {
-  /** Solid fill colour, `RRGGBB` or `AARRGGBB` hex. */
+/** ECMA-376 ST_PatternType, minus `none` (no fill) and `solid` (its own arm). */
+export type PatternStyle =
+  | 'gray125'
+  | 'gray0625'
+  | 'mediumGray'
+  | 'darkGray'
+  | 'lightGray'
+  | 'darkHorizontal'
+  | 'darkVertical'
+  | 'darkDown'
+  | 'darkUp'
+  | 'darkGrid'
+  | 'darkTrellis'
+  | 'lightHorizontal'
+  | 'lightVertical'
+  | 'lightDown'
+  | 'lightUp'
+  | 'lightGrid'
+  | 'lightTrellis'
+
+export interface SolidFill {
+  readonly type: 'solid'
+  /** `RRGGBB` or `AARRGGBB` hex; the cell's background colour. */
   readonly color: string
 }
+
+export interface PatternFill {
+  readonly type: 'pattern'
+  readonly pattern: PatternStyle
+  /** The pattern's foreground colour, `RRGGBB` or `AARRGGBB` hex. */
+  readonly color: string
+  /** The colour behind the pattern; the default window background when absent. */
+  readonly background?: string
+}
+
+export type FillFormat = SolidFill | PatternFill
 
 // fillId 0 (none) and 1 (gray125) are reserved, so a real solid fill is the
 // third entry; a file with no fills table has these seeded before ours is added.
@@ -405,16 +437,25 @@ function withReservedFills(stylesXml: string): string {
   return `${stylesXml.slice(0, position)}<${prefix}fills count="2">${seeded}</${prefix}fills>${stylesXml.slice(position)}`
 }
 
+function buildFillElement(fill: FillFormat): string {
+  const fg = `<fgColor rgb="${normalizeColor(fill.color)}"/>`
+  if (fill.type === 'solid') {
+    return `<fill><patternFill patternType="solid">${fg}<bgColor indexed="64"/></patternFill></fill>`
+  }
+  const bg =
+    fill.background === undefined
+      ? '<bgColor indexed="64"/>'
+      : `<bgColor rgb="${normalizeColor(fill.background)}"/>`
+  return `<fill><patternFill patternType="${fill.pattern}">${fg}${bg}</patternFill></fill>`
+}
+
 export function ensureFillStyle(
   stylesXml: string,
   basedOn: number | undefined,
   fill: FillFormat,
 ): DateStyle {
   const seeded = withReservedFills(stylesXml)
-  const element = withNamespacePrefix(
-    `<fill><patternFill patternType="solid"><fgColor rgb="${normalizeColor(fill.color)}"/><bgColor indexed="64"/></patternFill></fill>`,
-    tablePrefix(seeded),
-  )
+  const element = withNamespacePrefix(buildFillElement(fill), tablePrefix(seeded))
   const { xml, id } = ensureInTable(seeded, 'fills', 'fill', element)
   return applyCellFormat(xml, basedOn, { fillId: id })
 }
@@ -809,17 +850,50 @@ export interface CellFormatting {
   readonly alignment?: Alignment
 }
 
+const PATTERN_STYLES: ReadonlySet<PatternStyle> = new Set([
+  'gray125',
+  'gray0625',
+  'mediumGray',
+  'darkGray',
+  'lightGray',
+  'darkHorizontal',
+  'darkVertical',
+  'darkDown',
+  'darkUp',
+  'darkGrid',
+  'darkTrellis',
+  'lightHorizontal',
+  'lightVertical',
+  'lightDown',
+  'lightUp',
+  'lightGrid',
+  'lightTrellis',
+])
+
+const toPatternStyle = (value: string | undefined): PatternStyle | undefined => {
+  for (const known of PATTERN_STYLES) if (known === value) return known
+  return undefined
+}
+
 function parseFill(element: string): FillFormat | undefined {
-  let solid = false
-  let color: string | undefined
+  let patternType: string | undefined
+  let foreground: string | undefined
+  let background: string | undefined
   for (const event of readXml(element)) {
     if (event.kind !== 'open') continue
-    if (event.localName === 'patternFill' && event.attributes.get('patternType') === 'solid') {
-      solid = true
-    }
-    if (event.localName === 'fgColor') color = event.attributes.get('rgb') ?? color
+    if (event.localName === 'patternFill') patternType = event.attributes.get('patternType')
+    if (event.localName === 'fgColor') foreground = event.attributes.get('rgb') ?? foreground
+    // An indexed bgColor is the default window background, so only an rgb one is
+    // a background the cell chose and worth reporting.
+    if (event.localName === 'bgColor') background = event.attributes.get('rgb') ?? background
   }
-  return solid && color !== undefined ? { color } : undefined
+  if (foreground === undefined) return undefined
+  if (patternType === 'solid') return { type: 'solid', color: foreground }
+  const pattern = toPatternStyle(patternType)
+  if (pattern === undefined) return undefined
+  return background === undefined
+    ? { type: 'pattern', pattern, color: foreground }
+    : { type: 'pattern', pattern, color: foreground, background }
 }
 
 const BORDER_STYLES: ReadonlySet<BorderStyle> = new Set([

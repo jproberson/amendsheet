@@ -191,7 +191,7 @@ const fillStyles = (cellXfs: string) =>
 test('applying a fill adds a solid fill and points the cell format at it', () => {
   const source = fillStyles('<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>')
 
-  const result = ensureFillStyle(source, 0, { color: 'FFFF00' })
+  const result = ensureFillStyle(source, 0, { type: 'solid', color: 'FFFF00' })
 
   assert.match(
     result.xml,
@@ -204,10 +204,41 @@ test('applying a fill adds a solid fill and points the cell format at it', () =>
 test('a solid fill lands past the two reserved fill ids', () => {
   const source = fillStyles('<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>')
 
-  const result = ensureFillStyle(source, 0, { color: '000000' })
+  const result = ensureFillStyle(source, 0, { type: 'solid', color: '000000' })
 
   assert.match(result.xml, /<fills count="3">/)
   assert.match(xfAt(result.xml, result.index), /fillId="2"/)
+})
+
+test('a pattern fill carries its pattern, foreground and background', () => {
+  const source = fillStyles('<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>')
+
+  const result = ensureFillStyle(source, 0, {
+    type: 'pattern',
+    pattern: 'lightGrid',
+    color: 'FF0000',
+    background: 'FFFFFF',
+  })
+
+  assert.match(
+    result.xml,
+    /<fill><patternFill patternType="lightGrid"><fgColor rgb="FFFF0000"\/><bgColor rgb="FFFFFFFF"\/><\/patternFill><\/fill>/,
+  )
+})
+
+test('a pattern fill without a background falls back to the default indexed one', () => {
+  const source = fillStyles('<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>')
+
+  const result = ensureFillStyle(source, 0, {
+    type: 'pattern',
+    pattern: 'darkTrellis',
+    color: '112233',
+  })
+
+  assert.match(
+    result.xml,
+    /<patternFill patternType="darkTrellis"><fgColor rgb="FF112233"\/><bgColor indexed="64"\/><\/patternFill>/,
+  )
 })
 
 test('seeds the reserved fills when a file has no fills table', () => {
@@ -215,7 +246,7 @@ test('seeds the reserved fills when a file has no fills table', () => {
     '<styleSheet><cellXfs count="1">' +
     '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs></styleSheet>'
 
-  const result = ensureFillStyle(source, 0, { color: '000000' })
+  const result = ensureFillStyle(source, 0, { type: 'solid', color: '000000' })
 
   // the two reserved fills are seeded, then ours lands at id 2
   assert.match(
@@ -228,8 +259,8 @@ test('seeds the reserved fills when a file has no fills table', () => {
 test('does not add the same fill twice', () => {
   const source = fillStyles('<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>')
 
-  const once = ensureFillStyle(source, 0, { color: 'FF0000' })
-  const twice = ensureFillStyle(once.xml, 0, { color: 'FF0000' })
+  const once = ensureFillStyle(source, 0, { type: 'solid', color: 'FF0000' })
+  const twice = ensureFillStyle(once.xml, 0, { type: 'solid', color: 'FF0000' })
 
   assert.equal(once.index, twice.index)
   assert.equal(once.xml, twice.xml)
@@ -348,7 +379,7 @@ test('adds a prefixed fill to a prefixed styles table', () => {
   const source =
     '<x:styleSheet><x:cellXfs count="1"><x:xf numFmtId="0" fillId="0"/></x:cellXfs></x:styleSheet>'
 
-  const result = ensureFillStyle(source, 0, { color: 'FF0000' })
+  const result = ensureFillStyle(source, 0, { type: 'solid', color: 'FF0000' })
 
   assertWellFormed(result.xml, 'prefixed fill')
   assert.match(
@@ -384,9 +415,31 @@ test("reads a cell format's font, fill and border", () => {
   assert.deepEqual(formatting[0], {})
   assert.deepEqual(formatting[1], {
     font: { bold: true, size: 12 },
-    fill: { color: 'FF00FF00' },
+    fill: { type: 'solid', color: 'FF00FF00' },
     border: { left: { style: 'thin', color: 'FF000000' } },
   })
+})
+
+test('reads a pattern fill with its foreground and background', () => {
+  const source =
+    '<styleSheet><fills count="3"><fill><patternFill patternType="none"/></fill>' +
+    '<fill><patternFill patternType="gray125"/></fill>' +
+    '<fill><patternFill patternType="lightGrid"><fgColor rgb="FFFF0000"/><bgColor rgb="FFFFFFFF"/>' +
+    '</patternFill></fill></fills>' +
+    '<cellXfs count="1"><xf fillId="2"/></cellXfs></styleSheet>'
+
+  assert.deepEqual(readFormatting(source)[0], {
+    fill: { type: 'pattern', pattern: 'lightGrid', color: 'FFFF0000', background: 'FFFFFFFF' },
+  })
+})
+
+test('an unknown pattern type is not reported as a fill', () => {
+  const source =
+    '<styleSheet><fills count="1">' +
+    '<fill><patternFill patternType="woven"><fgColor rgb="FFFF0000"/></patternFill></fill></fills>' +
+    '<cellXfs count="1"><xf fillId="0"/></cellXfs></styleSheet>'
+
+  assert.deepEqual(readFormatting(source)[0], {})
 })
 
 test('reports no font for a non-default id that points at an empty font', () => {
