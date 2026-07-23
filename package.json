@@ -46,7 +46,8 @@
     "fflate": "^0.8.2"
   },
   "files": [
-    "dist"
+    "dist",
+    "COMPARISON.md"
   ],
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -73,7 +74,12 @@
     "excel",
     "spreadsheet",
     "ooxml",
-    "sheet"
+    "sheet",
+    "edit-xlsx",
+    "preserve-formatting",
+    "xlsx-charts",
+    "xlsx-round-trip",
+    "browser-xlsx"
   ],
   "license": "MIT"
 }
