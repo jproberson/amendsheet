@@ -300,13 +300,22 @@ function idOf(stylesXml: string, basedOn: number | undefined, attribute: string)
  * does not reset its size or colour. The merged font is added if the file has no
  * identical one, and a cell format pointing at it is returned.
  */
+// fontId 0 is the default font, so a file with no fonts table has one seeded
+// rather than have the first font we add become every plain cell's font.
+function withReservedFont(stylesXml: string): string {
+  if (readTable(stylesXml, 'fonts', 'font') !== undefined) return stylesXml
+  const { position, prefix } = tableInsertPoint(stylesXml)
+  return `${stylesXml.slice(0, position)}<${prefix}fonts count="1"><${prefix}font/></${prefix}fonts>${stylesXml.slice(position)}`
+}
+
 export function ensureFontStyle(
   stylesXml: string,
   basedOn: number | undefined,
   font: FontFormat,
 ): DateStyle {
+  const seeded = withReservedFont(stylesXml)
   const current = parseFont(
-    readTable(stylesXml, 'fonts', 'font')?.elements[idOf(stylesXml, basedOn, 'fontId')] ?? '',
+    readTable(seeded, 'fonts', 'font')?.elements[idOf(seeded, basedOn, 'fontId')] ?? '',
   )
   const merged: FontFormat = {
     bold: font.bold ?? current.bold,
@@ -317,7 +326,7 @@ export function ensureFontStyle(
     name: font.name ?? current.name,
   }
 
-  const { xml, id } = ensureInTable(stylesXml, 'fonts', 'font', buildFontElement(merged))
+  const { xml, id } = ensureInTable(seeded, 'fonts', 'font', buildFontElement(merged))
   return applyCellFormat(xml, basedOn, { fontId: id })
 }
 

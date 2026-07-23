@@ -101,14 +101,15 @@ test('formats a cell that has no style yet against the default font', () => {
   assert.match(result.xml, /<font><u\/><sz val="11"\/><name val="Courier"\/><\/font>/)
 })
 
-test('creates a fonts table when the file has none', () => {
+test('seeds a default font and lands ours past it when the file has none', () => {
   const source =
     '<styleSheet><cellXfs count="1">' +
     '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs></styleSheet>'
 
   const result = ensureFontStyle(source, 0, { bold: true })
 
-  assert.match(result.xml, /<fonts count="1"><font><b\/><\/font><\/fonts><cellXfs/)
+  assert.match(result.xml, /<fonts count="2"><font\/><font><b\/><\/font><\/fonts><cellXfs/)
+  assert.match(xfAt(result.xml, result.index), /fontId="1"/)
 })
 
 test('ignores a themed colour and an unparseable size in the base font', () => {
