@@ -286,6 +286,40 @@ test('does not add the same border twice', () => {
   assert.equal(once.xml, twice.xml)
 })
 
+test('adds a prefixed font to a prefixed styles table', () => {
+  const source =
+    '<x:styleSheet><x:fonts count="1"><x:font/></x:fonts>' +
+    '<x:cellXfs count="1"><x:xf numFmtId="0" fontId="0"/></x:cellXfs></x:styleSheet>'
+
+  const result = ensureFontStyle(source, 0, { bold: true, name: 'Courier' })
+
+  assertWellFormed(result.xml, 'prefixed font')
+  assert.match(result.xml, /<x:font><x:b\/><x:name val="Courier"\/><\/x:font>/)
+})
+
+test('adds a prefixed fill to a prefixed styles table', () => {
+  const source =
+    '<x:styleSheet><x:cellXfs count="1"><x:xf numFmtId="0" fillId="0"/></x:cellXfs></x:styleSheet>'
+
+  const result = ensureFillStyle(source, 0, { color: 'FF0000' })
+
+  assertWellFormed(result.xml, 'prefixed fill')
+  assert.match(
+    result.xml,
+    /<x:fill><x:patternFill patternType="solid"><x:fgColor rgb="FFFF0000"\/><x:bgColor indexed="64"\/><\/x:patternFill><\/x:fill>/,
+  )
+})
+
+test('adds a prefixed border, colour and all, to a prefixed styles table', () => {
+  const source =
+    '<x:styleSheet><x:cellXfs count="1"><x:xf numFmtId="0" borderId="0"/></x:cellXfs></x:styleSheet>'
+
+  const result = ensureBorderStyle(source, 0, { top: { style: 'thick', color: '112233' } })
+
+  assertWellFormed(result.xml, 'prefixed border')
+  assert.match(result.xml, /<x:top style="thick"><x:color rgb="FF112233"\/><\/x:top>/)
+})
+
 test("reads a cell format's font, fill and border", () => {
   const source =
     '<styleSheet>' +

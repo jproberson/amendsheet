@@ -22,6 +22,12 @@ const prefixOf = (name: string) => {
   return colon === -1 ? '' : name.slice(0, colon + 1)
 }
 
+/** Prefixes every element name in a freshly built fragment. The builders emit
+ *  plain names, and `ensureInTable` fixes only the outer open tag, so without
+ *  this a fragment added to a prefixed table closed and nested unprefixed. */
+const withNamespacePrefix = (fragment: string, prefix: string): string =>
+  prefix === '' ? fragment : fragment.replace(/<(\/?)([A-Za-z])/g, `<$1${prefix}$2`)
+
 /** One of the styles sub-tables — `fonts`, `fills`, `borders`, `cellXfs`. */
 interface StyleTable {
   readonly elements: string[]
@@ -314,9 +320,8 @@ export function ensureFontStyle(
   font: FontFormat,
 ): DateStyle {
   const seeded = withReservedFont(stylesXml)
-  const current = parseFont(
-    readTable(seeded, 'fonts', 'font')?.elements[idOf(seeded, basedOn, 'fontId')] ?? '',
-  )
+  const fonts = readTable(seeded, 'fonts', 'font')
+  const current = parseFont(fonts?.elements[idOf(seeded, basedOn, 'fontId')] ?? '')
   const merged: FontFormat = {
     bold: font.bold ?? current.bold,
     italic: font.italic ?? current.italic,
@@ -326,7 +331,8 @@ export function ensureFontStyle(
     name: font.name ?? current.name,
   }
 
-  const { xml, id } = ensureInTable(seeded, 'fonts', 'font', buildFontElement(merged))
+  const element = withNamespacePrefix(buildFontElement(merged), tablePrefix(seeded))
+  const { xml, id } = ensureInTable(seeded, 'fonts', 'font', element)
   return applyCellFormat(xml, basedOn, { fontId: id })
 }
 
@@ -354,7 +360,10 @@ export function ensureFillStyle(
   fill: FillFormat,
 ): DateStyle {
   const seeded = withReservedFills(stylesXml)
-  const element = `<fill><patternFill patternType="solid"><fgColor rgb="${normalizeColor(fill.color)}"/><bgColor indexed="64"/></patternFill></fill>`
+  const element = withNamespacePrefix(
+    `<fill><patternFill patternType="solid"><fgColor rgb="${normalizeColor(fill.color)}"/><bgColor indexed="64"/></patternFill></fill>`,
+    tablePrefix(seeded),
+  )
   const { xml, id } = ensureInTable(seeded, 'fills', 'fill', element)
   return applyCellFormat(xml, basedOn, { fillId: id })
 }
@@ -470,7 +479,8 @@ export function ensureBorderStyle(
     if (side !== undefined) merged[name] = side
   }
 
-  const { xml, id } = ensureInTable(seeded, 'borders', 'border', buildBorderElement(merged))
+  const element = withNamespacePrefix(buildBorderElement(merged), tablePrefix(seeded))
+  const { xml, id } = ensureInTable(seeded, 'borders', 'border', element)
   return applyCellFormat(xml, basedOn, { borderId: id })
 }
 
