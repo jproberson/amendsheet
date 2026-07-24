@@ -187,6 +187,17 @@ export function checkWritable(
 }
 
 /**
+ * Refuses a `protect()` argument that is not an options object, at the call.
+ * Types stop a TypeScript caller; a JS caller or an `any` reaches here, where
+ * reading a flag off null crashed at save time and took the whole batch down.
+ */
+export function checkProtection(options: unknown, at: SheetLocation = {}): void {
+  if (typeof options !== 'object' || options === null) {
+    throw new XlsxError('unwritable-value', 'Sheet protection options must be an object', { ...at })
+  }
+}
+
+/**
  * A formula whose result covers more cells than the one holding it. The others
  * carry a cached value and no formula of their own, so replacing this cell
  * leaves them owned by nothing.
@@ -230,7 +241,13 @@ const canonicalMerge = (merge: MergeRange): string =>
  * The canonical `A1:B2` form of a range to merge, so `b2:a1` and `A1:B2` are the
  * same merge. Refuses anything that is not two references either side of a colon.
  */
-export function mergeRangeReference(range: string, at: SheetLocation = {}): string {
+export function mergeRangeReference(range: unknown, at: SheetLocation = {}): string {
+  if (typeof range !== 'string') {
+    throw new XlsxError('bad-reference', `A merge range must be a string, not ${typeof range}`, {
+      ...at,
+      reference: String(range),
+    })
+  }
   const parsed = parseMergeRange(range)
   if (parsed === undefined) {
     throw new XlsxError('bad-reference', `"${range}" is not an A1:B2 style range to merge`, {

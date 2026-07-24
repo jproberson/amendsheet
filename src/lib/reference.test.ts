@@ -110,3 +110,15 @@ test('still converts a column past the last one a sheet can hold', () => {
   // parseReference is lenient on purpose, and it converts through here.
   assert.equal(columnToIndex('XFE'), 16385)
 })
+
+test('parseWritableReference refuses a non-string reference', () => {
+  const refuses = (reference: unknown) =>
+    assert.throws(
+      () => parseWritableReference(reference),
+      (error: unknown) => error instanceof XlsxError && error.code === 'bad-reference',
+    )
+  refuses(123)
+  refuses(null)
+  refuses(undefined)
+  refuses({})
+})

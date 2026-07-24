@@ -79,7 +79,18 @@ export function parseReference(reference: string): CellAddress {
  * really hold, such as row zero. Writing does not: a reference the caller
  * supplies has to be one Excel will accept.
  */
-export function parseWritableReference(reference: string): CellAddress {
+export function parseWritableReference(reference: unknown): CellAddress {
+  // Types stop a TypeScript caller passing a non-string; a JS caller or an `any`
+  // at a boundary reaches here, where reading it as a reference crashed raw.
+  if (typeof reference !== 'string') {
+    throw new XlsxError(
+      'bad-reference',
+      `A cell reference must be a string, not ${typeof reference}`,
+      {
+        reference: String(reference),
+      },
+    )
+  }
   const address = parseReference(reference)
   const { row, column } = address
   if (row < 1 || row > LAST_ROW || column < 1 || column > LAST_COLUMN) {

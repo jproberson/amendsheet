@@ -3,8 +3,10 @@ import { test } from 'node:test'
 import {
   type CellInput,
   type SheetEdits,
+  checkProtection,
   checkWritable,
   indexSheet,
+  mergeRangeReference,
   patchSheet as patchSheetBytes,
   readSheetProtection,
 } from './patch.js'
@@ -719,4 +721,28 @@ test('refuses an object that is not a date and names no formula', () => {
       `${JSON.stringify(value)} is not a cell value`,
     )
   }
+})
+
+test('mergeRangeReference refuses a non-string range', () => {
+  const refuses = (range: unknown) =>
+    assert.throws(
+      () => mergeRangeReference(range),
+      (error: unknown) => error instanceof XlsxError && error.code === 'bad-reference',
+    )
+  refuses(123)
+  refuses(null)
+  refuses(undefined)
+})
+
+test('checkProtection refuses an argument that is not an options object', () => {
+  const refuses = (options: unknown) =>
+    assert.throws(
+      () => checkProtection(options),
+      (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+    )
+  refuses(null)
+  refuses('locked')
+  refuses(7)
+  checkProtection({}) // a valid empty options object does not throw
+  checkProtection({ formatCells: true })
 })

@@ -3,6 +3,7 @@ import { XlsxError } from './errors.js'
 import { LAST_SERIAL, dateToSerial, parseIsoDate, serialToDate } from './date.js'
 import {
   type CellInput,
+  checkProtection,
   checkWritable,
   mergeAnchorFor,
   mergeRangeReference,
@@ -699,6 +700,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             at,
           )
         }
+        checkProtection(options, at)
         sheetProtections.set(reference.path, options)
       },
       unprotect(): void {
