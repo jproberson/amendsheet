@@ -67,11 +67,7 @@ function directoryStart(view: DataView, end: number): { count: number; offset: n
     throw notAZip('Archive maxes out a directory field but has no ZIP64 locator')
   }
   const record = readU64(view, locator + 8)
-  if (
-    record < 0 ||
-    record + 56 > view.byteLength ||
-    view.getUint32(record, true) !== ZIP64_EOCD_SIG
-  ) {
+  if (record + 56 > view.byteLength || view.getUint32(record, true) !== ZIP64_EOCD_SIG) {
     throw notAZip('ZIP64 end-of-central-directory record is missing or malformed')
   }
   return { count: readU64(view, record + 32), offset: readU64(view, record + 48) }
@@ -121,11 +117,7 @@ export function readZip(bytes: Uint8Array): ZipEntry[] {
   for (let index = 0; index < count; index++) {
     // The offset comes from the file, so it can point past the buffer; reading
     // there throws a bare RangeError unless the fixed 46-byte header is in range.
-    if (
-      offset < 0 ||
-      offset + 46 > view.byteLength ||
-      view.getUint32(offset, true) !== CENTRAL_SIG
-    ) {
+    if (offset + 46 > view.byteLength || view.getUint32(offset, true) !== CENTRAL_SIG) {
       throw notAZip('Central directory is malformed')
     }
     const method = view.getUint16(offset + 10, true)
@@ -146,11 +138,7 @@ export function readZip(bytes: Uint8Array): ZipEntry[] {
       if (localOffset === U32_MAX) localOffset = next()
     }
 
-    if (
-      localOffset < 0 ||
-      localOffset + 30 > view.byteLength ||
-      view.getUint32(localOffset, true) !== LOCAL_SIG
-    ) {
+    if (localOffset + 30 > view.byteLength || view.getUint32(localOffset, true) !== LOCAL_SIG) {
       throw notAZip(`Local header for ${name} is malformed`)
     }
     // The local header repeats the name and extra fields; the data follows them,
