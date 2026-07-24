@@ -1,6 +1,8 @@
 import { dateToSerial } from './date.js'
 import { XlsxError } from './errors.js'
 import {
+  LAST_COLUMN,
+  LAST_ROW,
   canonicalReference,
   formatReference,
   parseFileReference,
@@ -232,6 +234,20 @@ export function mergeRangeReference(range: string, at: SheetLocation = {}): stri
   const parsed = parseMergeRange(range)
   if (parsed === undefined) {
     throw new XlsxError('bad-reference', `"${range}" is not an A1:B2 style range to merge`, {
+      ...at,
+      reference: range,
+    })
+  }
+  // A caller's merge, like a caller's cell, must name cells the sheet can hold;
+  // parseMergeRange itself stays lenient because it also parses merges read from
+  // a file, where an odd range is left alone rather than refused.
+  if (
+    parsed.minRow < 1 ||
+    parsed.maxRow > LAST_ROW ||
+    parsed.minColumn < 1 ||
+    parsed.maxColumn > LAST_COLUMN
+  ) {
+    throw new XlsxError('bad-reference', `"${range}" is outside the sheet`, {
       ...at,
       reference: range,
     })

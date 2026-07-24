@@ -542,6 +542,19 @@ test('merge canonicalises the range and refuses one without a colon', () => {
   )
 })
 
+test('merge refuses a range whose cells are outside the sheet, the way set does', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  const sheet = workbook.sheets[0]
+
+  const refuses = (range: string) =>
+    assert.throws(
+      () => sheet?.merge(range),
+      (error: unknown) => error instanceof XlsxError && error.code === 'bad-reference',
+    )
+  refuses('A0:B2') // row zero, which set() also refuses
+  refuses('A1:B1048577') // past the last row a sheet can hold
+})
+
 test('a value written into a merged non-anchor cell is still refused', () => {
   const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
   workbook.sheets[0]?.merge('A1:B2')
