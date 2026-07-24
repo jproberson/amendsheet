@@ -49,7 +49,12 @@ test('a malformed cell reference in the file reads as a file fault, not a caller
 
   assert.throws(
     () => [...(workbook.sheets[0]?.cells() ?? [])],
-    (error: unknown) => error instanceof XlsxError && error.code === 'invalid-content',
+    (error: unknown) =>
+      error instanceof XlsxError &&
+      error.code === 'invalid-content' &&
+      error.reference === 'A' &&
+      error.sheet === 'Data' &&
+      error.part === 'xl/worksheets/sheet1.xml',
   )
 })
 

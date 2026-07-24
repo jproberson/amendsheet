@@ -502,6 +502,30 @@ test('refuses to overwrite the master of a shared formula', () => {
   )
 })
 
+test('a malformed cell reference on the edit path is a located file fault', () => {
+  // The caller's edit is fine; the sheet's own <c r="A"> is not. It must surface
+  // as located invalid content, not a caller-fault bad-reference or a raw crash.
+  const source = sheet('<row r="1"><c r="A"><v>1</v></c></row>')
+  const at = { sheet: 'Sheet1', part: 'xl/worksheets/sheet1.xml' }
+
+  assert.throws(
+    () =>
+      patchSheetBytes(
+        encode(source),
+        new Map<string, CellInput>([['B2', 5]]),
+        false,
+        undefined,
+        undefined,
+        at,
+      ),
+    (error: unknown) =>
+      error instanceof XlsxError &&
+      error.code === 'invalid-content' &&
+      error.reference === 'A' &&
+      error.sheet === 'Sheet1',
+  )
+})
+
 test('writes over a cell that follows a shared formula', () => {
   const source = sheet(
     '<row r="1"><c r="A1"><f t="shared" ref="A1:A3" si="0">B1*2</f><v>2</v></c></row>' +
