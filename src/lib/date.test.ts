@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { dateToSerial, serialToDate } from './date.js'
+import { dateToSerial, parseIsoDate, serialToDate } from './date.js'
 
 /** Dates are wall clock, so they are asserted with local components. */
 const stamp = (serial: number, date1904 = false) => {
@@ -177,4 +177,37 @@ test('a date survives the serial round trip to the millisecond', () => {
       }
     }
   }
+})
+
+test('an ISO date-only literal is the same wall-clock day in every timezone', () => {
+  const date = parseIsoDate('2024-03-15')
+  assert.ok(date !== undefined)
+  assert.equal(date?.getDate(), 15)
+  assert.equal(dateToSerial(date ?? new Date(Number.NaN), false), 45366)
+})
+
+test('an ISO datetime literal keeps its time of day', () => {
+  const date = parseIsoDate('2024-03-15T12:00:00')
+
+  assert.equal(dateToSerial(date ?? new Date(Number.NaN), false), 45366.5)
+})
+
+test('an ISO literal with a trailing Z is still read as its wall-clock day', () => {
+  const date = parseIsoDate('2024-03-15T00:00:00Z')
+
+  assert.equal(dateToSerial(date ?? new Date(Number.NaN), false), 45366)
+})
+
+test('an ISO literal carries a sub-second fraction', () => {
+  const date = parseIsoDate('2024-03-15T00:00:00.250')
+
+  assert.equal(date?.getMilliseconds(), 250)
+})
+
+test('a non-date literal is rejected', () => {
+  assert.equal(parseIsoDate('not a date'), undefined)
+  assert.equal(parseIsoDate('2024-02-30'), undefined)
+  // Below 100 the Date constructor maps the year into the 1900s, so the year no
+  // longer matches what was written and the literal is left as text.
+  assert.equal(parseIsoDate('0050-01-01'), undefined)
 })

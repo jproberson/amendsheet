@@ -49,6 +49,39 @@ export function serialToDate(serial: number, date1904: boolean, at: XlsxErrorCon
   )
 }
 
+const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d+))?)?)?/
+
+/**
+ * A `t="d"` cell holds an ISO-8601 literal. A spreadsheet date is a wall-clock
+ * calendar date, so its components are read as written and any timezone
+ * designator is ignored: `new Date(iso)` anchors a date-only or `Z`-suffixed
+ * value to UTC, which shifts the day for a reader west of it. Returns undefined
+ * when the text is not a real calendar date.
+ */
+export function parseIsoDate(text: string): Date | undefined {
+  const match = ISO_DATE.exec(text)
+  if (match === null) return undefined
+  const [, year, month, day, hours, minutes, seconds, fraction] = match
+  const milliseconds = fraction === undefined ? 0 : Math.round(Number(`0.${fraction}`) * 1000)
+  const date = new Date(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hours ?? 0),
+    Number(minutes ?? 0),
+    Number(seconds ?? 0),
+    milliseconds,
+  )
+  // A rolled-over field is not the date it was written as: a day past the end of
+  // the month bumps the month, and a month past twelve bumps the year, so these
+  // two checks catch a bad day too. A year below 100, which the Date constructor
+  // maps into the 1900s, fails the year check and is left as text.
+  if (date.getFullYear() !== Number(year) || date.getMonth() !== Number(month) - 1) {
+    return undefined
+  }
+  return date
+}
+
 export function dateToSerial(date: Date, date1904: boolean, at: XlsxErrorContext = {}): number {
   const where = at.reference === undefined ? '' : ` to cell ${at.reference}`
 

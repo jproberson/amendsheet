@@ -1,6 +1,6 @@
 import { type Container, decodeXmlPart } from './container.js'
 import { XlsxError } from './errors.js'
-import { LAST_SERIAL, dateToSerial, serialToDate } from './date.js'
+import { LAST_SERIAL, dateToSerial, parseIsoDate, serialToDate } from './date.js'
 import {
   type CellInput,
   checkWritable,
@@ -304,8 +304,8 @@ function toCellValue(raw: RawCell, styles: Styles, date1904: boolean): CellValue
   const value = raw.value
 
   if (value.kind === 'date') {
-    const parsed = new Date(value.value)
-    if (Number.isNaN(parsed.getTime())) return { kind: 'text', value: value.value }
+    const parsed = parseIsoDate(value.value)
+    if (parsed === undefined) return { kind: 'text', value: value.value }
     return { kind: 'date', value: parsed, serial: dateToSerial(parsed, date1904) }
   }
 
