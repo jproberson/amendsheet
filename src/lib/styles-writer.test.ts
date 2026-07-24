@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
+  checkStyleOptions,
   ensureAlignmentStyle,
   ensureBorderStyle,
   ensureDateStyle,
@@ -166,6 +167,30 @@ test('true and single underline both write a bare u', () => {
 
   assert.match(ensureFontStyle(source, 0, { underline: true }).xml, /<font><u\/>/)
   assert.match(ensureFontStyle(source, 0, { underline: 'single' }).xml, /<font><u\/>/)
+})
+
+test('checkStyleOptions refuses an out-of-union style value at the call', () => {
+  // The value never reaches styles.xml, where raw it broke the whole workbook.
+  const refuses = (options: unknown) =>
+    assert.throws(
+      () => checkStyleOptions(options, 'A1'),
+      (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+    )
+  refuses({ alignment: { horizontal: 'sideways' } })
+  refuses({ alignment: { vertical: 'a&b' } })
+  refuses({ font: { underline: 'wobbly' } })
+  refuses({ font: { verticalAlign: '"><x' } })
+  refuses({ border: { top: { style: 'zigzag' } } })
+  refuses({ fill: { type: 'pattern', pattern: 'plaid', color: 'FF0000' } })
+  refuses({ fill: { type: 'solid' } }) // no colour
+})
+
+test('checkStyleOptions passes valid options and a missing one', () => {
+  checkStyleOptions(undefined, 'A1')
+  checkStyleOptions({ alignment: { horizontal: 'center', vertical: 'top' } }, 'A1')
+  checkStyleOptions({ font: { underline: 'double', verticalAlign: 'superscript' } }, 'A1')
+  checkStyleOptions({ border: { all: { style: 'thin' } } }, 'A1')
+  checkStyleOptions({ fill: { type: 'solid', color: 'FF0000' } }, 'A1')
 })
 
 test('a superscript is written as a vertAlign', () => {

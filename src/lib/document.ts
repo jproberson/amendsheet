@@ -37,6 +37,7 @@ import {
   type DateStyle,
   type FillFormat,
   type FontFormat,
+  checkStyleOptions,
   ensureAlignmentStyle,
   ensureBorderStyle,
   ensureDateStyle,
@@ -650,6 +651,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         if (sheetBytes === undefined) throw absent(canonical, 'written')
 
         checkWritable(canonical, value, date1904, at)
+        checkStyleOptions(options, canonical)
         // sheetBytes is present, so indexed() is too; the guard is for the type.
         const index = indexed()
         if (index !== undefined) {
@@ -671,6 +673,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       format(cellReference: string, options: SetOptions): void {
         const canonical = formatReference(parseWritableReference(cellReference))
         if (sheetBytes === undefined) throw absent(canonical, 'formatted')
+        checkStyleOptions(options, canonical)
 
         const current = styleAt(canonical)
         // No value, so a Date never triggers a format; only what is asked for.

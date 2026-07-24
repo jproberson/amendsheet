@@ -1248,3 +1248,84 @@ export function readFormatting(stylesXml: string): readonly CellFormatting[] {
     }
   })
 }
+
+const WRITABLE_UNDERLINES: ReadonlySet<UnderlineStyle> = new Set([
+  'single',
+  'double',
+  'singleAccounting',
+  'doubleAccounting',
+])
+
+const inUnion = <T>(known: ReadonlySet<T>, value: unknown): boolean => {
+  for (const member of known) if (member === value) return true
+  return false
+}
+
+/**
+ * Refuses a style option outside its union at the `set()`/`format()` call. Types
+ * stop a TypeScript caller; a JS caller, a JSON payload or an `any` at a boundary
+ * reaches here, and an out-of-union enum was otherwise interpolated raw into
+ * styles.xml — a bad value that broke the whole workbook, not just the one edit.
+ */
+export function checkStyleOptions(options: unknown, reference: string): void {
+  if (typeof options !== 'object' || options === null) return
+
+  const refuse = (what: string, value: unknown): never => {
+    throw new XlsxError(
+      'unwritable-value',
+      `Cell ${reference} was given ${what} "${String(value)}", which is not one this library writes`,
+      { part: 'xl/styles.xml', reference },
+    )
+  }
+
+  if (
+    'alignment' in options &&
+    typeof options.alignment === 'object' &&
+    options.alignment !== null
+  ) {
+    const alignment = options.alignment
+    if ('horizontal' in alignment && alignment.horizontal !== undefined) {
+      if (!inUnion(HORIZONTAL_ALIGNMENTS, alignment.horizontal))
+        refuse('a horizontal alignment', alignment.horizontal)
+    }
+    if ('vertical' in alignment && alignment.vertical !== undefined) {
+      if (!inUnion(VERTICAL_ALIGNMENTS, alignment.vertical))
+        refuse('a vertical alignment', alignment.vertical)
+    }
+  }
+
+  if ('font' in options && typeof options.font === 'object' && options.font !== null) {
+    const font = options.font
+    if ('underline' in font && typeof font.underline === 'string') {
+      if (!inUnion(WRITABLE_UNDERLINES, font.underline))
+        refuse('an underline style', font.underline)
+    }
+    if ('verticalAlign' in font && font.verticalAlign !== undefined) {
+      if (!inUnion(VERTICAL_ALIGNS, font.verticalAlign))
+        refuse('a font vertical alignment', font.verticalAlign)
+    }
+  }
+
+  if ('border' in options && typeof options.border === 'object' && options.border !== null) {
+    const border = options.border
+    const side = (value: unknown, name: string): void => {
+      if (typeof value === 'object' && value !== null && 'style' in value) {
+        if (!inUnion(BORDER_STYLES, value.style)) refuse(`a ${name} border style`, value.style)
+      }
+    }
+    if ('all' in border) side(border.all, 'all')
+    if ('left' in border) side(border.left, 'left')
+    if ('right' in border) side(border.right, 'right')
+    if ('top' in border) side(border.top, 'top')
+    if ('bottom' in border) side(border.bottom, 'bottom')
+  }
+
+  if ('fill' in options && typeof options.fill === 'object' && options.fill !== null) {
+    const fill = options.fill
+    const color = 'color' in fill ? fill.color : undefined
+    if (color === undefined) refuse('a fill', 'with no colour')
+    if ('type' in fill && fill.type === 'pattern' && 'pattern' in fill) {
+      if (!inUnion(PATTERN_STYLES, fill.pattern)) refuse('a fill pattern', fill.pattern)
+    }
+  }
+}
