@@ -283,6 +283,20 @@ test('seeds the reserved fills when the fills table is present but empty', () =>
   assert.match(xfAt(result.xml, result.index), /fillId="2"/)
 })
 
+test('seeds the reserved default border when the borders table is present but empty', () => {
+  const source =
+    '<styleSheet><borders count="0"/><cellXfs count="1">' +
+    '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs></styleSheet>'
+
+  const result = ensureBorderStyle(source, 0, { all: { style: 'thin' } })
+
+  assert.match(
+    result.xml,
+    /<borders count="2"><border><left\/><right\/><top\/><bottom\/><diagonal\/><\/border><border><left style="thin"/,
+  )
+  assert.match(xfAt(result.xml, result.index), /borderId="1"/)
+})
+
 test('does not add the same fill twice', () => {
   const source = fillStyles('<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>')
 
