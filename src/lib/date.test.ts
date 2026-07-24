@@ -211,3 +211,14 @@ test('a non-date literal is rejected', () => {
   // longer matches what was written and the literal is left as text.
   assert.equal(parseIsoDate('0050-01-01'), undefined)
 })
+
+test('an ISO literal whose time field is out of range is left as text', () => {
+  // An hour past 23 rolls into the next day, a second past 59 into the next
+  // minute; either would silently shift the value if the fields were not checked.
+  assert.equal(parseIsoDate('2024-01-15T25:00:00'), undefined)
+  assert.equal(parseIsoDate('2024-01-15T12:30:60'), undefined)
+})
+
+test('an ISO literal whose fraction rounds to a full second is left as text', () => {
+  assert.equal(parseIsoDate('2024-01-15T12:30:30.9995'), undefined)
+})

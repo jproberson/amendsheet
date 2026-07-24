@@ -72,11 +72,19 @@ export function parseIsoDate(text: string): Date | undefined {
     Number(seconds ?? 0),
     milliseconds,
   )
-  // A rolled-over field is not the date it was written as: a day past the end of
-  // the month bumps the month, and a month past twelve bumps the year, so these
-  // two checks catch a bad day too. A year below 100, which the Date constructor
-  // maps into the 1900s, fails the year check and is left as text.
-  if (date.getFullYear() !== Number(year) || date.getMonth() !== Number(month) - 1) {
+  // A rolled-over field is not the date it was written as, and each overflow
+  // spills into a larger unit: a day past the month's end bumps the month, an
+  // hour past 23 the day, a second past 59 the minute, a fraction that rounds to
+  // a full second likewise. Comparing every supplied component back rejects them
+  // all, a bad day included. A year below 100, which the Date constructor maps
+  // into the 1900s, fails the year check and is left as text.
+  if (
+    date.getFullYear() !== Number(year) ||
+    date.getMonth() !== Number(month) - 1 ||
+    date.getHours() !== Number(hours ?? 0) ||
+    date.getMinutes() !== Number(minutes ?? 0) ||
+    date.getSeconds() !== Number(seconds ?? 0)
+  ) {
     return undefined
   }
   return date
