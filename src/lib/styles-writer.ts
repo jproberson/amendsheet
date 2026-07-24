@@ -456,12 +456,38 @@ function isPlainFormat(stylesXml: string, index: number): boolean {
  * does not reset its size or colour. The merged font is added if the file has no
  * identical one, and a cell format pointing at it is returned.
  */
-// fontId 0 is the default font, so a file with no fonts table has one seeded
-// rather than have the first font we add become every plain cell's font.
+/**
+ * Seeds the reserved leading entries a plain cell points at (fontId 0, fillId 0
+ * and 1, borderId 0) when the sub-table is absent — or present but empty, which
+ * an odd file can be (`<fonts count="0"/>`). Without the seed a font, fill or
+ * border we add lands on a reserved index and restyles every default cell.
+ */
+function withReservedTable(
+  stylesXml: string,
+  container: string,
+  child: string,
+  reservedInner: (prefix: string) => string,
+  reservedCount: number,
+): string {
+  const table = readTable(stylesXml, container, child)
+  if (table !== undefined && table.elements.length > 0) return stylesXml
+
+  if (table === undefined) {
+    const { position, prefix } = tableInsertPoint(stylesXml)
+    const block = `<${prefix}${container} count="${reservedCount}">${reservedInner(prefix)}</${prefix}${container}>`
+    return stylesXml.slice(0, position) + block + stylesXml.slice(position)
+  }
+
+  const { prefix } = table
+  const block = `<${prefix}${container} count="${reservedCount}">${reservedInner(prefix)}</${prefix}${container}>`
+  const end = table.selfClosing ? table.openEnd : table.insertAt + `</${prefix}${container}>`.length
+  return stylesXml.slice(0, table.openStart) + block + stylesXml.slice(end)
+}
+
+// fontId 0 is the default font, so a file with no fonts (or an empty table) has
+// one seeded rather than have the first font we add become every plain cell's.
 function withReservedFont(stylesXml: string): string {
-  if (readTable(stylesXml, 'fonts', 'font') !== undefined) return stylesXml
-  const { position, prefix } = tableInsertPoint(stylesXml)
-  return `${stylesXml.slice(0, position)}<${prefix}fonts count="1"><${prefix}font/></${prefix}fonts>${stylesXml.slice(position)}`
+  return withReservedTable(stylesXml, 'fonts', 'font', (prefix) => `<${prefix}font/>`, 1)
 }
 
 export function ensureFontStyle(
@@ -532,10 +558,13 @@ const RESERVED_FILLS =
   '<fill><patternFill patternType="gray125"/></fill>'
 
 function withReservedFills(stylesXml: string): string {
-  if (readTable(stylesXml, 'fills', 'fill') !== undefined) return stylesXml
-  const { position, prefix } = tableInsertPoint(stylesXml)
-  const seeded = RESERVED_FILLS.replace(/<(\/?)(fill|patternFill)/g, `<$1${prefix}$2`)
-  return `${stylesXml.slice(0, position)}<${prefix}fills count="2">${seeded}</${prefix}fills>${stylesXml.slice(position)}`
+  return withReservedTable(
+    stylesXml,
+    'fills',
+    'fill',
+    (prefix) => RESERVED_FILLS.replace(/<(\/?)(fill|patternFill)/g, `<$1${prefix}$2`),
+    2,
+  )
 }
 
 function buildFillElement(fill: FillFormat): string {
@@ -610,13 +639,14 @@ const SIDE_NAMES = ['left', 'right', 'top', 'bottom'] as const
 const RESERVED_BORDER = '<border><left/><right/><top/><bottom/><diagonal/></border>'
 
 function withReservedBorder(stylesXml: string): string {
-  if (readTable(stylesXml, 'borders', 'border') !== undefined) return stylesXml
-  const { position, prefix } = tableInsertPoint(stylesXml)
-  const seeded = RESERVED_BORDER.replace(
-    /<(\/?)(border|left|right|top|bottom|diagonal)/g,
-    `<$1${prefix}$2`,
+  return withReservedTable(
+    stylesXml,
+    'borders',
+    'border',
+    (prefix) =>
+      RESERVED_BORDER.replace(/<(\/?)(border|left|right|top|bottom|diagonal)/g, `<$1${prefix}$2`),
+    1,
   )
-  return `${stylesXml.slice(0, position)}<${prefix}borders count="1">${seeded}</${prefix}borders>${stylesXml.slice(position)}`
 }
 
 function parseBorder(element: string): Sides {

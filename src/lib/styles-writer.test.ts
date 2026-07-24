@@ -116,6 +116,17 @@ test('seeds a default font and lands ours past it when the file has none', () =>
   assert.match(xfAt(result.xml, result.index), /fontId="1"/)
 })
 
+test('seeds the reserved default font when the fonts table is present but empty', () => {
+  const source =
+    '<styleSheet><fonts count="0"/><cellXfs count="1">' +
+    '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs></styleSheet>'
+
+  const result = ensureFontStyle(source, 0, { bold: true })
+
+  assert.match(result.xml, /<fonts count="2"><font\/><font><b\/><\/font><\/fonts><cellXfs/)
+  assert.match(xfAt(result.xml, result.index), /fontId="1"/)
+})
+
 test('keeps a themed colour and ignores an unparseable size in the base font', () => {
   const source =
     '<styleSheet><fonts count="1"><font><sz/><color theme="1"/><name val="Calibri"/></font></fonts>' +
@@ -251,6 +262,20 @@ test('seeds the reserved fills when a file has no fills table', () => {
   const result = ensureFillStyle(source, 0, { type: 'solid', color: '000000' })
 
   // the two reserved fills are seeded, then ours lands at id 2
+  assert.match(
+    result.xml,
+    /<fills count="3"><fill><patternFill patternType="none"\/><\/fill><fill><patternFill patternType="gray125"\/><\/fill><fill><patternFill patternType="solid"/,
+  )
+  assert.match(xfAt(result.xml, result.index), /fillId="2"/)
+})
+
+test('seeds the reserved fills when the fills table is present but empty', () => {
+  const source =
+    '<styleSheet><fills count="0"></fills><cellXfs count="1">' +
+    '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs></styleSheet>'
+
+  const result = ensureFillStyle(source, 0, { type: 'solid', color: '000000' })
+
   assert.match(
     result.xml,
     /<fills count="3"><fill><patternFill patternType="none"\/><\/fill><fill><patternFill patternType="gray125"\/><\/fill><fill><patternFill patternType="solid"/,
