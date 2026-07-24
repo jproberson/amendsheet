@@ -178,6 +178,14 @@ test('round-trips an archive with more than 65535 entries (ZIP64 count)', () => 
   assert.equal(dec(inflate(read[12345] ?? unreachable())), 'x')
 })
 
+test('round-trips an archive of exactly 65535 entries', () => {
+  const count = 65535
+  const read = readZip(manyEntryArchive(count))
+
+  assert.equal(read.length, count)
+  assert.equal(read[count - 1]?.name, `p${count - 1}.xml`)
+})
+
 test('refuses a ZIP64 count whose end-of-central-directory record is corrupt', () => {
   const bytes = manyEntryArchive(65536)
   // The ZIP64 record sits before the 20-byte locator and the 22-byte end record.

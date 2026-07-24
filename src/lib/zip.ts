@@ -261,7 +261,10 @@ export function writeZip(entries: readonly ZipEntry[]): Uint8Array {
     return { ...item, offsetZip64, centralExtra }
   })
 
-  const eocdZip64 = entries.length > U16_MAX || centralStart >= U32_MAX || centralTotal >= U32_MAX
+  // >= not >: at exactly U16_MAX the plain count field is written as the ZIP64
+  // sentinel 0xffff, so the ZIP64 record has to exist for a reader to find the
+  // real count. This mirrors the >= the size and offset thresholds use.
+  const eocdZip64 = entries.length >= U16_MAX || centralStart >= U32_MAX || centralTotal >= U32_MAX
   const out = new Uint8Array(localTotal + centralTotal + (eocdZip64 ? 76 : 0) + 22)
   const view = new DataView(out.buffer)
   let offset = 0
