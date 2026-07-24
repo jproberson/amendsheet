@@ -526,6 +526,15 @@ test('a malformed cell reference on the edit path is a located file fault', () =
   )
 })
 
+test('a row whose r is not a number on the edit path is a located file fault', () => {
+  const source = sheet('<row r="abc"><c r="A1"><v>1</v></c></row>')
+
+  assert.throws(
+    () => patchSheet(source, new Map<string, CellInput>([['B2', 5]]), false),
+    (error: unknown) => error instanceof XlsxError && error.code === 'invalid-content',
+  )
+})
+
 test('writes over a cell that follows a shared formula', () => {
   const source = sheet(
     '<row r="1"><c r="A1"><f t="shared" ref="A1:A3" si="0">B1*2</f><v>2</v></c></row>' +

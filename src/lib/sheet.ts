@@ -69,7 +69,17 @@ export function* readSheet(
       switch (event.localName) {
         case 'row': {
           const declared = event.attributes.get('r')
-          row = declared === undefined ? row + 1 : Number(declared)
+          if (declared === undefined) row += 1
+          else {
+            row = Number(declared)
+            if (!Number.isInteger(row)) {
+              throw new XlsxError(
+                'invalid-content',
+                `Row number "${declared}" in the file is not a valid row`,
+                { ...at },
+              )
+            }
+          }
           column = 0
           break
         }

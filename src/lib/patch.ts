@@ -464,7 +464,17 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
         // A row without r is the one after the row before it, which is not the
         // same as the count of rows seen once any row declares its number.
         const declared = event.attributes.get('r')
-        lastRow = declared === undefined ? lastRow + 1 : Number(declared)
+        if (declared === undefined) lastRow += 1
+        else {
+          lastRow = Number(declared)
+          if (!Number.isInteger(lastRow)) {
+            throw new XlsxError(
+              'invalid-content',
+              `Row number "${declared}" in the file is not a valid row`,
+              { ...at },
+            )
+          }
+        }
         currentRow = { row: lastRow, start: event.start, openEnd: event.end }
         currentCells = []
         cellColumn = 0

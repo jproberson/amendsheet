@@ -101,6 +101,15 @@ test('reads rows that appear out of order', () => {
   )
 })
 
+test('rejects a row whose r attribute is not a number', () => {
+  // The file is at fault: a non-numeric row number would otherwise read back as a
+  // NaN address and a reference like "ANaN" handed to the caller as if it were data.
+  assert.throws(
+    () => cells('<row r="abc"><c r="A1"><v>1</v></c></row>'),
+    (error: unknown) => error instanceof XlsxError && error.code === 'invalid-content',
+  )
+})
+
 test('reads cells beyond the range the dimension claims', () => {
   const found = [
     ...readSheet(encode(sheet('<row r="1"><c r="C3"><v>9</v></c></row>', 'A1:A1')), []),
