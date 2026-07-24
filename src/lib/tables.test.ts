@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { Container } from './container.js'
+import { XlsxError } from './errors.js'
 import { extendTables } from './tables.js'
 
 const encode = (text: string) => new TextEncoder().encode(text)
@@ -48,6 +49,21 @@ test('grows a table down to a cell written just below it', () => {
 
 test('does not grow a table across a gap', () => {
   assert.deepEqual(extend(withOneTable('A1:B2'), ['A5']), [])
+})
+
+test('a table rels part that is not valid utf-8 is a located unreadable-part', () => {
+  const parts = new Map<string, Uint8Array>([
+    [SHEET_PATH, encode(sheetWith('<tableParts count="1"><tablePart r:id="rId1"/></tableParts>'))],
+    [RELS_PATH, new Uint8Array([0x80, 0x81, 0xff, 0xfe])],
+    ['xl/tables/table1.xml', encode(table('A1:B2'))],
+  ])
+  const parts_: Container = { parts }
+
+  assert.throws(
+    () => extendTables(parts.get(SHEET_PATH) ?? new Uint8Array(), SHEET_PATH, parts_, ['A3']),
+    (error: unknown) =>
+      error instanceof XlsxError && error.code === 'unreadable-part' && error.part === RELS_PATH,
+  )
 })
 
 test('grows a table right to a cell written just past it, adding a column', () => {

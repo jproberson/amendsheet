@@ -1,4 +1,4 @@
-import type { Container } from './container.js'
+import { type Container, decodeXmlPart } from './container.js'
 import { formatReference, parseReference } from './reference.js'
 import { readRelationships, resolveTarget } from './relationships.js'
 import { readXml, readXmlBytes, withAttribute } from './xml.js'
@@ -67,7 +67,7 @@ function tablePartPaths(sheetBytes: Uint8Array, sheetPath: string, container: Co
   const relsPath = sheetPath.replace(/([^/]+)$/, '_rels/$1.rels')
   const relsBytes = container.parts.get(relsPath)
   if (relsBytes === undefined) return []
-  const relationships = readRelationships(decode(relsBytes), relsPath)
+  const relationships = readRelationships(decodeXmlPart(relsBytes, relsPath), relsPath)
 
   const paths: string[] = []
   for (const id of ids) {
