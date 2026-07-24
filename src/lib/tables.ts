@@ -196,11 +196,15 @@ function spanWritten(
   return false
 }
 
-/** Excel names a fresh column `ColumnN`, so we take the first N free of both. */
-function freshColumnName(taken: Set<string>): string {
-  let n = 1
+/**
+ * Excel names a fresh column `ColumnN`, so we take the first free of both,
+ * resuming from `from` rather than rescanning from 1: a name once taken stays
+ * taken through the batch, so the smallest free index never moves backwards.
+ */
+function freshColumnName(taken: Set<string>, from: number): { name: string; next: number } {
+  let n = from
   while (taken.has(`column${n}`)) n++
-  return `Column${n}`
+  return { name: `Column${n}`, next: n + 1 }
 }
 
 /**
@@ -214,8 +218,10 @@ function addColumns(xml: string, count: number, ids: number[], names: string[]):
   let nextId = ids.reduce((max, id) => Math.max(max, id), 0) + 1
 
   const added: string[] = []
+  let cursor = 1
   for (let index = 0; index < count; index++) {
-    const name = freshColumnName(taken)
+    const { name, next } = freshColumnName(taken, cursor)
+    cursor = next
     taken.add(name.toLowerCase())
     added.push(`<tableColumn id="${nextId++}" name="${name}"/>`)
   }

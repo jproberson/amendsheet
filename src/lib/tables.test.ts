@@ -112,6 +112,16 @@ test('names an added column so it collides with none that exist', () => {
   assert.equal(new Set(names).size, 3, `names must be unique: ${names.join(', ')}`)
 })
 
+test('resumes fresh column names past ones already taken when growing by several', () => {
+  const named = table('A1:B2').replace('name="a"', 'name="Column2"').replace('name="b"', 'name="x"')
+  const [result] = extend(withOneTable('A1:B2', { 'xl/tables/table1.xml': named }), ['C1', 'D1'])
+
+  const names = [...(result?.xml ?? '').matchAll(/<tableColumn [^>]*name="([^"]+)"/g)].map(
+    (m) => m[1],
+  )
+  assert.deepEqual(names, ['Column2', 'x', 'Column1', 'Column3'])
+})
+
 test('grows right even when existing columns declare no name or id', () => {
   const bare =
     '<table xmlns="http://x" ref="A1:B2"><autoFilter ref="A1:B2"/>' +
