@@ -189,10 +189,10 @@ function toValue(
     default: {
       if (raw === '') return { kind: 'empty' }
       const value = Number(raw)
-      if (Number.isNaN(value)) {
+      if (!Number.isFinite(value)) {
         throw new XlsxError(
           'invalid-content',
-          `Cell ${reference} holds "${raw}", which is not a number`,
+          `Cell ${reference} holds "${raw}", which is not a finite number`,
           { ...at, reference },
         )
       }

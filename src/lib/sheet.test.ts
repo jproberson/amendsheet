@@ -153,6 +153,16 @@ test('rejects a number it cannot read', () => {
   )
 })
 
+test('rejects a numeric value that overflows to a non-finite number', () => {
+  // 1e999 parses to Infinity, which is not a value a cell can hold; it must be a
+  // located fault, not a silent Infinity handed back as the cell's number.
+  assert.throws(
+    () => cells('<row r="1"><c r="A1"><v>1e999</v></c></row>'),
+    (error: unknown) =>
+      error instanceof XlsxError && error.code === 'invalid-content' && error.reference === 'A1',
+  )
+})
+
 test('reads every sheet in the fixtures', async () => {
   const files = (await readdir('fixtures/real')).filter((name) => name.endsWith('.xlsx'))
   const failures: string[] = []
