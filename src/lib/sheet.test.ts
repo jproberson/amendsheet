@@ -121,10 +121,18 @@ test('reads columns past Z', () => {
   )
 })
 
-test('treats an out of range shared string index as empty text', () => {
-  const [cell] = cells('<row r="1"><c r="A1" t="s"><v>9</v></c></row>', ['only'])
-
-  assert.deepEqual(cell?.value, { kind: 'text', value: '' })
+test('rejects a shared string index the table does not hold', () => {
+  // The file is at fault, not the caller: a t="s" cell must point at a string the
+  // shared table actually holds. A missing one is corrupt content, not empty text.
+  const rejects = (raw: string) =>
+    assert.throws(
+      () => cells(`<row r="1"><c r="A1" t="s"><v>${raw}</v></c></row>`, ['only']),
+      (error: unknown) =>
+        error instanceof XlsxError && error.code === 'invalid-content' && error.reference === 'A1',
+    )
+  rejects('9') // past the end of the table
+  rejects('-1')
+  rejects('abc')
 })
 
 test('rejects a number it cannot read', () => {

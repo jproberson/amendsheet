@@ -158,8 +158,15 @@ function toValue(
 
   switch (type) {
     case 's': {
-      const index = Number(raw)
-      return { kind: 'text', value: sharedStrings[index] ?? '' }
+      const value = sharedStrings[Number(raw)]
+      if (value === undefined) {
+        throw new XlsxError(
+          'invalid-content',
+          `Cell ${reference} references shared string ${raw}, which the table does not hold`,
+          { ...at, reference },
+        )
+      }
+      return { kind: 'text', value }
     }
     case 'str':
       return { kind: 'text', value: raw }
