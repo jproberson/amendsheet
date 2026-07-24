@@ -422,12 +422,28 @@ function buildFontElement(font: FontFormat): string {
   return `<font>${inner}</font>`
 }
 
+// readFormatting reads three of these off every xf, so the pattern per attribute
+// is compiled once and reused rather than rebuilt on each read.
+const numericAttributePatterns = new Map<string, RegExp>()
+const numericAttributePattern = (attribute: string): RegExp => {
+  const cached = numericAttributePatterns.get(attribute)
+  if (cached !== undefined) return cached
+  const pattern = new RegExp(`\\b${attribute}\\s*=\\s*["'](\\d+)["']`)
+  numericAttributePatterns.set(attribute, pattern)
+  return pattern
+}
+
+/** The value of a numeric xf attribute like `fontId`, or 0 (the default) when it names none. */
+const attrId = (element: string, attribute: string): number => {
+  const match = element.match(numericAttributePattern(attribute))
+  return match?.[1] === undefined ? 0 : Number(match[1])
+}
+
 /** The id a cell format points at for one sub-table, or 0 (the default) when it names none. */
 function idOf(stylesXml: string, basedOn: number | undefined, attribute: string): number {
   if (basedOn === undefined) return 0
   const element = readTable(stylesXml, 'cellXfs', 'xf')?.elements[basedOn]
-  const match = element?.match(new RegExp(`\\b${attribute}\\s*=\\s*["'](\\d+)["']`))
-  return match?.[1] === undefined ? 0 : Number(match[1])
+  return element === undefined ? 0 : attrId(element, attribute)
 }
 
 /**
@@ -438,10 +454,7 @@ function idOf(stylesXml: string, basedOn: number | undefined, attribute: string)
 function isPlainFormat(stylesXml: string, index: number): boolean {
   const element = readTable(stylesXml, 'cellXfs', 'xf')?.elements[index]
   if (element === undefined) return true
-  const idIsZero = (attribute: string) => {
-    const match = element.match(new RegExp(`\\b${attribute}\\s*=\\s*["'](\\d+)["']`))
-    return match?.[1] === undefined || match[1] === '0'
-  }
+  const idIsZero = (attribute: string) => attrId(element, attribute) === 0
   return (
     idIsZero('fontId') &&
     idIsZero('fillId') &&
@@ -1126,11 +1139,6 @@ const BORDER_STYLES: ReadonlySet<BorderStyle> = new Set([
 function toBorderStyle(value: string): BorderStyle | undefined {
   for (const known of BORDER_STYLES) if (known === value) return known
   return undefined
-}
-
-const attrId = (xf: string, attribute: string): number => {
-  const match = xf.match(new RegExp(`\\b${attribute}\\s*=\\s*["'](\\d+)["']`))
-  return match?.[1] === undefined ? 0 : Number(match[1])
 }
 
 /** The default font is 0, so a non-zero id is a font the cell was given. */
