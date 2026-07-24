@@ -60,6 +60,10 @@ function directoryStart(view: DataView, end: number): { count: number; offset: n
   // the ZIP64 end-of-central-directory record, which holds the real values.
   const locator = end - 20
   if (locator < 0 || view.getUint32(locator, true) !== ZIP64_LOCATOR_SIG) {
+    // 0xffff is a legal real entry count, so a conforming writer stores exactly
+    // 65535 entries with no ZIP64 record. Only a maxed 32-bit offset truly needs
+    // one, so that is the field that still cannot be resolved without a locator.
+    if (offset !== U32_MAX) return { count, offset }
     throw notAZip('Archive maxes out a directory field but has no ZIP64 locator')
   }
   const record = readU64(view, locator + 8)

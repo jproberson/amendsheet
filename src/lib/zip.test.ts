@@ -104,11 +104,8 @@ test('rejects bytes with no end-of-central-directory record', () => {
   assert.throws(() => readZip(enc('nowhere near a zip archive')), isNotAZip)
 })
 
-test('rejects a ZIP64 archive rather than misreading it', () => {
-  const manyEntries = corrupted((view, _bytes, end) => view.setUint16(end + 10, 0xffff, true))
+test('refuses a maxed directory offset with no ZIP64 record to resolve it', () => {
   const hugeOffset = corrupted((view, _bytes, end) => view.setUint32(end + 16, 0xffffffff, true))
-
-  assert.throws(() => readZip(manyEntries), notAZipMatching(/ZIP64/))
   assert.throws(() => readZip(hugeOffset), isNotAZip)
 })
 
@@ -184,6 +181,27 @@ test('round-trips an archive of exactly 65535 entries', () => {
 
   assert.equal(read.length, count)
   assert.equal(read[count - 1]?.name, `p${count - 1}.xml`)
+})
+
+/** A conforming archive of exactly 65535 entries: the plain end record stores
+ * the real count (0xffff fits a u16) and offset with no ZIP64 record at all. Our
+ * own writer emits ZIP64 at this count, so it is built by writing then stripping
+ * the ZIP64 record and locator that sit before the end record. */
+function plainMaxCountArchive(): Uint8Array {
+  const zip64 = manyEntryArchive(65535)
+  const end = zip64.subarray(zip64.length - 22)
+  const body = zip64.subarray(0, zip64.length - 22 - 76) // 56-byte record + 20-byte locator
+  const out = new Uint8Array(body.length + 22)
+  out.set(body, 0)
+  out.set(end, body.length)
+  return out
+}
+
+test('reads a plain 65535-entry archive that carries no ZIP64 record', () => {
+  const read = readZip(plainMaxCountArchive())
+
+  assert.equal(read.length, 65535)
+  assert.equal(read[65534]?.name, 'p65534.xml')
 })
 
 test('refuses a ZIP64 count whose end-of-central-directory record is corrupt', () => {
@@ -291,13 +309,15 @@ test('refuses an entry that maxes a field but carries no ZIP64 extra', () => {
   )
 })
 
-test('refuses a ZIP64 directory with no locator before the end record', () => {
+test('refuses a directory that claims 65535 entries it does not have', () => {
   const bytes = writeZip([
     { name: 'a', method: 0, crc: 0, compressed: enc('x'), uncompressedSize: 1 },
   ])
-  // Force the plain end record to claim ZIP64 without any ZIP64 structures.
+  // 0xffff now reads as a real entry count, so a file that lies about it is
+  // caught while reading past the entries it actually has, not at a missing
+  // locator.
   new DataView(bytes.buffer).setUint16(endOffset(bytes) + 10, 0xffff, true)
-  assert.throws(() => readZip(bytes), notAZipMatching(/no ZIP64 locator/))
+  assert.throws(() => readZip(bytes), notAZipMatching(/central/i))
 })
 
 /**
