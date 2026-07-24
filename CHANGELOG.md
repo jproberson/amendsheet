@@ -1,13 +1,56 @@
 # Changelog
 
 Follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and semantic
-versioning. Nothing has been published yet, so everything below is unreleased
-and the API is still free to change.
+versioning. The API is pre-1.0, so it is still free to change between minor
+versions.
 
-## Unreleased
+## 0.1.0 — 2026-07-24
+
+First published release.
 
 ### Added
 
+- `worksheet.setRowHeight(row, height)` sizes a row in points, and
+  `worksheet.setColumnWidth(column, width)` sizes a column in Excel's width units.
+  A width lands in the `cols` range covering its column, splitting a range that
+  spans more than the one column so the rest keeps its own width. Both refuse a
+  negative size, and the row refuses a number below 1.
+- `worksheet.merge('A1:B2')` merges a range, joining any mergeCells the sheet
+  already has and refusing a range that is not two references either side of a
+  colon. A written value in a non-anchor cell of the new merge is refused, as it
+  already was for a merge the file was read with. Covered values are left as they
+  are, the way Excel keeps them.
+- `worksheet.protect(options?)` turns on worksheet protection — the thing that
+  makes a cell's `locked` and `hidden` flags bite. With no argument it matches
+  Excel's Protect Sheet default; `options` names the actions that stay permitted.
+  Written as a `sheetProtection` element after `sheetData`, replacing any the
+  sheet already had. No password is written. It is this library's first edit to
+  something other than a cell. `worksheet.unprotect()` drops it again, and
+  `worksheet.protection` reads it back, reflecting a pending change as well as the
+  file.
+- `set(reference, value, { protection })` and `format(reference, { protection })`
+  set a cell's `locked` and `hidden` flags, which take effect once the worksheet
+  is protected. Written as an `xf` child after any alignment, merged onto the
+  protection the cell has, and read back as `cell.protection`.
+- A colour on a font, fill or border can be a theme reference `{ theme, tint }`
+  or an indexed palette entry `{ indexed }`, alongside the existing `RRGGBB` /
+  `AARRGGBB` hex string, as the `Color` union. A theme or indexed colour is a
+  reference, so it is read back and written as one rather than resolved to the
+  hex it displays as. Reading a malformed theme or index drops it, the way an
+  unreadable attribute is dropped.
+- Pattern fills, as the second arm of the `FillFormat` union: `{ type: 'pattern',
+  pattern, color, background }` for an ECMA-376 pattern type (`lightGrid`,
+  `darkTrellis`, and the rest), `color` being the pattern's foreground. Written,
+  and read back off a cell.
+- A cell's `font` carries `strike`, `verticalAlign` (`superscript`/`subscript`) and a
+  richer `underline` — `true`, or one of `double`, `singleAccounting`,
+  `doubleAccounting` — alongside the existing bold, italic, size, colour and name.
+  Each is written, merged onto the font the cell has, and read back off it.
+- `set(reference, value, { alignment })` and `format(reference, { alignment })`
+  place a cell's text: `horizontal`, `vertical`, `wrapText`, `textRotation`
+  (0–180, or 255 to stack) and `indent`, merged onto the alignment the cell
+  already has. `cell.alignment` reads it back. A rotation outside the range or a
+  negative indent is refused with `unwritable-value`, naming the cell.
 - A cell written directly below or to the right of a table grows the table to
   include it, the way Excel does, so the new row or column is inside the table
   rather than stranded next to it. Growing sideways adds a column, named so it
@@ -23,6 +66,9 @@ and the API is still free to change.
   reader can honour. `XlsxErrorCode` is now an open union: new codes arrive in
   minor releases and a switch over it needs a default. Which codes mean the
   caller is at fault and which mean the file is is written down in the README.
+- `part-too-large`, for a part that decompresses to more bytes than the runtime
+  can hold in one buffer, reported against the part instead of surfacing as a
+  bare allocation error.
 - `set(reference, { formula })` writes a formula. Written without a cached
   result, so the cell reads back empty until a spreadsheet application opens the
   file and calculates it. The workbook is marked for recalculation.
@@ -45,6 +91,9 @@ and the API is still free to change.
 
 ### Changed
 
+- A solid fill is now `{ type: 'solid', color }` rather than `{ color }`, so the
+  `FillFormat` union can name a pattern as well. `cell.fill` reads back the same
+  shape.
 - A part the edit does not touch is copied through still compressed, never
   inflated or rebuilt. Editing one cell in a workbook full of images or other
   sheets no longer pays to decompress and recompress them: over ~86MB of
@@ -55,6 +104,11 @@ and the API is still free to change.
   or archive past 4GB, is handled rather than refused. A package within the plain
   ZIP limits — every ordinary workbook — comes out byte for byte as before; the
   ZIP64 records only appear when a count, size or offset needs them.
+- A worksheet is read, edited and written through its raw bytes, never decoded
+  into one string. A sheet whose xml is larger than V8's ~512MB string limit —
+  a few million rows — used to die on a bare `RangeError` before parsing; now the
+  ceiling is the largest single buffer the runtime allocates, and a part past
+  even that is refused with `part-too-large`.
 - `cell.formula` is a union rather than a string. A cell following a shared
   formula reported `''`, which is falsy, so `if (cell.formula)` treated it as a
   cell holding a literal. It now reports `{ kind: 'shared', master }`, naming the
@@ -93,6 +147,33 @@ and the API is still free to change.
 
 ### Fixed
 
+- A `t="s"` cell pointing at a shared-string index the table does not hold is
+  reported as located invalid content instead of read as empty text. A negative,
+  fractional, non-numeric or past-the-end index silently became an empty string,
+  losing the corruption rather than naming it.
+- A `t="d"` ISO literal whose time field is out of range is left as text instead
+  of silently shifting the day. An hour past 23 rolled into the next day and a
+  fraction that rounded up to a full second into the next minute, and only the
+  year and month were checked, so the wrong day was read as a real date.
+- An archive of exactly 65535 entries written without a ZIP64 record now reads.
+  0xffff is a legal entry count that fits the plain end record, so a conforming
+  writer stores it directly; the reader treated the value as a ZIP64 sentinel and
+  demanded a locator that was never required. A file that instead lies about its
+  count is still caught while reading the entries it does not have.
+- A crafted or truncated ZIP64 extra field is reported as a located not-a-zip
+  instead of crashing with a bare `RangeError`. An entry that maxed a 32-bit
+  size or offset but carried too few u64s behind it — or an extra length that ran
+  off the end of the archive — read past the buffer, throwing outside the error
+  contract with no `code` and no location.
+- Editing a cell keeps a theme or indexed colour its font, fill or border already
+  carried. Only an `rgb` colour was read, so the colour was dropped when the style
+  was merged and rewritten — making an accent-coloured cell bold turned it
+  colourless. Default text is `<color theme="1"/>`, so this fired on ordinary
+  files.
+- A font, fill or border added to a `styles.xml` written with a namespace prefix
+  (`<x:styleSheet>`) is now prefixed throughout. Only the outer opening tag was
+  rewritten, so the new element closed and nested unprefixed — `<x:font><b/></font>`
+  — which is malformed and made a stricter reader reject the file.
 - An OLE2 compound file — a password-protected `.xlsx` or a legacy `.xls` — is
   reported as what it is, naming decryption or conversion, rather than as a bare
   "not a zip archive" that pointed at the wrong problem.
