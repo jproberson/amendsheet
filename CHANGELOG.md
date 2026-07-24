@@ -4,6 +4,39 @@ Follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and semantic
 versioning. The API is pre-1.0, so it is still free to change between minor
 versions.
 
+## 0.1.1 — 2026-07-24
+
+### Performance
+
+- A single styled edit on a heavily-formatted workbook no longer scales with the
+  square of the cell-format count: the borrow scan parses the cell-format table
+  once, not once per candidate xf.
+- Growing a default-named table by many columns is linear, not quadratic: the
+  fresh-name counter resumes across added columns instead of rescanning from the
+  first column each time.
+
+### Fixed
+
+- `merge()` refuses a range whose cells are outside the sheet — row 0, a row past
+  the last, a precision-lost giant — at the call, the way `set()` already did.
+  These were silently written into a `mergeCell`.
+- A style option outside its union (an `alignment`, `border`, `font` or `fill`
+  enum, or a `fill` with no colour) is refused with `unwritable-value` at the
+  `set()`/`format()` call. Such a value was interpolated raw into `styles.xml`,
+  and a refused edit could leave the whole workbook unwritable.
+- A non-string reference or merge range, and a non-object `protect()` argument,
+  are refused at the call rather than crashing raw — a `bad-reference` or
+  `unwritable-value` for a JS caller or an `any` that slips past the types.
+- A worksheet's `.rels` part that is not valid UTF-8 is reported as a located
+  `unreadable-part` instead of escaping `toBytes()` as a bare `TypeError`.
+- A `<row r="...">` whose number is not an integer (`NaN`, a fraction, non-numeric
+  text) is rejected as located `invalid-content` instead of read back as a `NaN`
+  address and a reference like `ANaN`, on both the read and the edit path.
+- A table with a very large column count grows on edit without overflowing the
+  call stack; the next column id is folded rather than spread into `Math.max`.
+- A numeric cell holding `Infinity`/`1e999` is rejected as `invalid-content`; the
+  guard checked for `NaN` but not for a non-finite overflow.
+
 ## 0.1.0 — 2026-07-24
 
 First published release.
