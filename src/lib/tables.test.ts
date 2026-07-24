@@ -51,6 +51,21 @@ test('does not grow a table across a gap', () => {
   assert.deepEqual(extend(withOneTable('A1:B2'), ['A5']), [])
 })
 
+test('grows a table with a huge column count without overflowing the call stack', () => {
+  const columns = 200_000
+  let cols = ''
+  for (let index = 1; index <= columns; index++)
+    cols += `<tableColumn id="${index}" name="c${index}"/>`
+  const wide =
+    '<table xmlns="http://x" id="1" name="T" displayName="T" ref="A1:C3"><autoFilter ref="A1:C3"/>' +
+    `<tableColumns count="${columns}">${cols}</tableColumns></table>`
+  const parts = withOneTable('A1:C3', { 'xl/tables/table1.xml': wide })
+
+  const [result] = extend(parts, ['D1'])
+
+  assert.match(result?.xml ?? '', new RegExp(`id="${columns + 1}" name="Column1"/>`))
+})
+
 test('a table rels part that is not valid utf-8 is a located unreadable-part', () => {
   const parts = new Map<string, Uint8Array>([
     [SHEET_PATH, encode(sheetWith('<tableParts count="1"><tablePart r:id="rId1"/></tableParts>'))],

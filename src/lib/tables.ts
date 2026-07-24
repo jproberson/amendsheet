@@ -209,7 +209,9 @@ function freshColumnName(taken: Set<string>): string {
  */
 function addColumns(xml: string, count: number, ids: number[], names: string[]): string {
   const taken = new Set(names.map((name) => name.toLowerCase()))
-  let nextId = Math.max(0, ...ids) + 1
+  // A fold, not Math.max(...ids): spreading a file-sized id array as call
+  // arguments overflows the stack on a table with hundreds of thousands of columns.
+  let nextId = ids.reduce((max, id) => Math.max(max, id), 0) + 1
 
   const added: string[] = []
   for (let index = 0; index < count; index++) {
