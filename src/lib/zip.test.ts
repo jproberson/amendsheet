@@ -300,6 +300,65 @@ test('refuses a ZIP64 directory with no locator before the end record', () => {
   assert.throws(() => readZip(bytes), notAZipMatching(/no ZIP64 locator/))
 })
 
+/**
+ * A one-entry archive whose central header claims all three 32-bit fields
+ * overflowed but whose ZIP64 extra carries no values, so a reader that trusts
+ * the maxed fields must read past the extra. `declaredExtraLength` overrides the
+ * length written into the central header, to model a length that itself runs off
+ * the end of the archive.
+ */
+function zip64MissingValues(declaredExtraLength?: number): Uint8Array {
+  const name = enc('big.bin')
+  const data = enc('hello')
+  const U32 = 0xffffffff
+
+  const local = new Uint8Array(30 + name.length + data.length)
+  const lv = new DataView(local.buffer)
+  lv.setUint32(0, 0x04034b50, true)
+  lv.setUint16(8, 0, true) // stored
+  lv.setUint32(18, data.length, true)
+  lv.setUint32(22, data.length, true)
+  lv.setUint16(26, name.length, true)
+  local.set(name, 30)
+  local.set(data, 30 + name.length)
+
+  const centralExtra = 4 // a ZIP64 header declaring zero value bytes
+  const central = new Uint8Array(46 + name.length + centralExtra)
+  const cv = new DataView(central.buffer)
+  cv.setUint32(0, 0x02014b50, true)
+  cv.setUint16(10, 0, true)
+  cv.setUint32(20, U32, true) // compressed size overflow
+  cv.setUint32(24, U32, true) // uncompressed size overflow
+  cv.setUint16(28, name.length, true)
+  cv.setUint16(30, declaredExtraLength ?? centralExtra, true)
+  cv.setUint32(42, U32, true) // local offset overflow
+  central.set(name, 46)
+  cv.setUint16(46 + name.length, 0x0001, true)
+  cv.setUint16(46 + name.length + 2, 0, true) // size: no value bytes follow
+
+  const end = new Uint8Array(22)
+  const ev = new DataView(end.buffer)
+  ev.setUint32(0, 0x06054b50, true)
+  ev.setUint16(8, 1, true)
+  ev.setUint16(10, 1, true)
+  ev.setUint32(12, central.length, true)
+  ev.setUint32(16, local.length, true)
+
+  const out = new Uint8Array(local.length + central.length + end.length)
+  out.set(local, 0)
+  out.set(central, local.length)
+  out.set(end, local.length + central.length)
+  return out
+}
+
+test('locates an entry whose ZIP64 extra is too short for its overflowed fields', () => {
+  assert.throws(() => readZip(zip64MissingValues()), notAZipMatching(/ZIP64 extra/))
+})
+
+test('locates an entry whose ZIP64 extra length runs past the archive', () => {
+  assert.throws(() => readZip(zip64MissingValues(0x7fff)), notAZipMatching(/ZIP64 extra/))
+})
+
 test('refuses a value beyond what a JS number can hold exactly', () => {
   const bytes = zip64EntryArchive({ sizeOverflow: true, offsetOverflow: false })
   const centralStart = bytes.length - 22 - (46 + enc('big.bin').length + 20)

@@ -79,14 +79,23 @@ function directoryStart(view: DataView, end: number): { count: number; offset: n
  * only the ones whose 32-bit field was maxed out.
  */
 function readZip64Extra(view: DataView, start: number, length: number, name: string): () => number {
+  if (start + length > view.byteLength) {
+    throw notAZip(`Entry ${name} declares a ZIP64 extra field that runs past the archive`)
+  }
   let position = start
   const end = start + length
   while (position + 4 <= end) {
     const id = view.getUint16(position, true)
     const size = view.getUint16(position + 2, true)
     if (id === ZIP64_EXTRA_ID) {
+      // The field's own size bounds its values; a maxed 32-bit field with no u64
+      // behind it here would otherwise read into the next field or off the end.
+      const valuesEnd = Math.min(position + 4 + size, end)
       let cursor = position + 4
       return () => {
+        if (cursor + 8 > valuesEnd) {
+          throw notAZip(`Entry ${name} ZIP64 extra field is too short for its overflowed fields`)
+        }
         const value = readU64(view, cursor)
         cursor += 8
         return value
