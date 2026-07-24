@@ -199,8 +199,9 @@ export function ensureDateStyle(stylesXml: string, basedOn: number | undefined):
   // but only from a plain xf: borrowing carries the whole xf, so a decorated one
   // would hand the blank cell a font, fill or border it never asked for.
   if (basedOn === undefined) {
+    const xfs = readTable(stylesXml, 'cellXfs', 'xf')?.elements
     for (let index = 0; index < parsed.cellFormats.length; index++) {
-      if (isDateFormat(parsed, index) && isPlainFormat(stylesXml, index)) {
+      if (isDateFormat(parsed, index) && isPlainFormat(xfs?.[index])) {
         return { xml: stylesXml, index }
       }
     }
@@ -451,8 +452,7 @@ function idOf(stylesXml: string, basedOn: number | undefined, attribute: string)
  * alignment or protection child. Only such a format is safe for a blank cell to
  * borrow, since a borrow carries the whole xf, not just its number format.
  */
-function isPlainFormat(stylesXml: string, index: number): boolean {
-  const element = readTable(stylesXml, 'cellXfs', 'xf')?.elements[index]
+function isPlainFormat(element: string | undefined): boolean {
   if (element === undefined) return true
   const idIsZero = (attribute: string) => attrId(element, attribute) === 0
   return (
@@ -1031,8 +1031,9 @@ export function ensureNumberFormat(
   // otherwise the borrowed xf brings its font, fill and border along and the
   // target's are silently dropped.
   if (basedOn === undefined) {
+    const xfs = readTable(stylesXml, 'cellXfs', 'xf')?.elements
     for (let index = 0; index < parsed.cellFormats.length; index++) {
-      if (numberFormatOf(parsed, index) === formatCode && isPlainFormat(stylesXml, index)) {
+      if (numberFormatOf(parsed, index) === formatCode && isPlainFormat(xfs?.[index])) {
         return { xml: stylesXml, index }
       }
     }
