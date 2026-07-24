@@ -172,7 +172,7 @@ test('a superscript is written as a vertAlign', () => {
   const source = fontStyles('<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>')
 
   assert.match(
-    ensureFontStyle(source, 0, { vertAlign: 'superscript' }).xml,
+    ensureFontStyle(source, 0, { verticalAlign: 'superscript' }).xml,
     /<vertAlign val="superscript"\/>/,
   )
 })
@@ -185,7 +185,7 @@ test('strike, an underline style and vertAlign merge onto the cell font in order
   const result = ensureFontStyle(source, 0, {
     strike: true,
     underline: 'double',
-    vertAlign: 'subscript',
+    verticalAlign: 'subscript',
   })
 
   assert.match(
@@ -538,7 +538,7 @@ test("reads a font's strike, underline style and vertAlign", () => {
     '<cellXfs count="2"><xf/><xf fontId="1"/></cellXfs></styleSheet>'
 
   assert.deepEqual(readFormatting(source)[1], {
-    font: { strike: true, underline: 'double', vertAlign: 'superscript' },
+    font: { strike: true, underline: 'double', verticalAlign: 'superscript' },
   })
 })
 

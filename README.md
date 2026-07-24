@@ -101,7 +101,7 @@ sheet.format('B2', { font: { italic: true }, border: { bottom: { style: 'medium'
 
 A `font` merges onto the cell's current one, so `{ font: { bold: true } }` adds
 bold without disturbing its size or colour. Besides `bold`, `italic`, `size`,
-`color` and `name`, a font carries `strike`, `vertAlign` (`superscript` or
+`color` and `name`, a font carries `strike`, `verticalAlign` (`superscript` or
 `subscript`) and `underline`, which is `true` for a single underline or one of
 `double`, `singleAccounting`, `doubleAccounting`. A `fill` is a discriminated
 union: `{ type: 'solid', color }` for a plain background, or `{ type: 'pattern',

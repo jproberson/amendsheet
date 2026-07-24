@@ -336,13 +336,13 @@ test('set refuses a bad text rotation, before recording anything', () => {
 test('strikethrough, a superscript and an underline style read back off a cell', () => {
   const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
   workbook.sheets[0]?.set('A1', 'x', {
-    font: { strike: true, vertAlign: 'superscript', underline: 'double' },
+    font: { strike: true, verticalAlign: 'superscript', underline: 'double' },
   })
 
   const reopened = readWorkbook(workbook.toBytes())
   assert.deepEqual(reopened.sheets[0]?.cell('A1')?.font, {
     strike: true,
-    vertAlign: 'superscript',
+    verticalAlign: 'superscript',
     underline: 'double',
   })
 })

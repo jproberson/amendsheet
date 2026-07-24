@@ -244,7 +244,7 @@ export interface FontFormat {
   readonly italic?: boolean
   readonly strike?: boolean
   readonly underline?: boolean | UnderlineStyle
-  readonly vertAlign?: FontVerticalAlign
+  readonly verticalAlign?: FontVerticalAlign
   readonly size?: number
   readonly color?: Color
   readonly name?: string
@@ -352,7 +352,7 @@ function parseFont(element: string): FontFormat {
     italic?: boolean
     strike?: boolean
     underline?: boolean | UnderlineStyle
-    vertAlign?: FontVerticalAlign
+    verticalAlign?: FontVerticalAlign
     size?: number
     color?: Color
     name?: string
@@ -377,8 +377,8 @@ function parseFont(element: string): FontFormat {
         break
       }
       case 'vertAlign': {
-        const vertAlign = toVertAlign(event.attributes.get('val'))
-        if (vertAlign !== undefined) font.vertAlign = vertAlign
+        const verticalAlign = toVertAlign(event.attributes.get('val'))
+        if (verticalAlign !== undefined) font.verticalAlign = verticalAlign
         break
       }
       case 'sz': {
@@ -408,7 +408,7 @@ function buildFontElement(font: FontFormat): string {
   if (font.strike === true) inner += '<strike/>'
   if (font.underline === true || font.underline === 'single') inner += '<u/>'
   else if (typeof font.underline === 'string') inner += `<u val="${font.underline}"/>`
-  if (font.vertAlign !== undefined) inner += `<vertAlign val="${font.vertAlign}"/>`
+  if (font.verticalAlign !== undefined) inner += `<vertAlign val="${font.verticalAlign}"/>`
   if (font.size !== undefined) {
     if (!Number.isFinite(font.size) || font.size <= 0) {
       throw new XlsxError('unwritable-value', `Font size ${font.size} is not a positive number`, {
@@ -503,7 +503,7 @@ export function ensureFontStyle(
     italic: font.italic ?? current.italic,
     strike: font.strike ?? current.strike,
     underline: font.underline ?? current.underline,
-    vertAlign: font.vertAlign ?? current.vertAlign,
+    verticalAlign: font.verticalAlign ?? current.verticalAlign,
     size: font.size ?? current.size,
     color: font.color ?? current.color,
     name: font.name ?? current.name,
