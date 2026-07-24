@@ -1077,6 +1077,18 @@ test('a blank cell does not borrow a decorated date xf just because its format i
   assert.doesNotMatch(xfAt(result.xml, result.index), /fontId="1"|fillId="2"/)
 })
 
+test('a blank cell does not borrow a date xf carrying a border, alignment or protection', () => {
+  // Each of these is a date format but not plain, so borrowing it would hand the
+  // blank cell a border, an alignment or a protection flag it never asked for.
+  const rejects = (decorated: string) => {
+    const source = `<styleSheet><cellXfs count="2"><xf numFmtId="0"/>${decorated}</cellXfs></styleSheet>`
+    assert.notEqual(ensureDateStyle(source, undefined).index, 1)
+  }
+  rejects('<xf numFmtId="14" borderId="1"/>')
+  rejects('<xf numFmtId="14"><alignment horizontal="center"/></xf>')
+  rejects('<xf numFmtId="14"><protection locked="0"/></xf>')
+})
+
 test('writes a format into a prefixed document', () => {
   const source =
     '<x:styleSheet><x:cellXfs count="1"><x:xf numFmtId="0"/></x:cellXfs></x:styleSheet>'
