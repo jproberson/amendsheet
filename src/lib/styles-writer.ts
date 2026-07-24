@@ -452,11 +452,6 @@ function isPlainFormat(stylesXml: string, index: number): boolean {
 }
 
 /**
- * Applies `font` to a cell, merging onto the font it already has so setting bold
- * does not reset its size or colour. The merged font is added if the file has no
- * identical one, and a cell format pointing at it is returned.
- */
-/**
  * Seeds the reserved leading entries a plain cell points at (fontId 0, fillId 0
  * and 1, borderId 0) when the sub-table is absent — or present but empty, which
  * an odd file can be (`<fonts count="0"/>`). Without the seed a font, fill or
@@ -490,6 +485,11 @@ function withReservedFont(stylesXml: string): string {
   return withReservedTable(stylesXml, 'fonts', 'font', (prefix) => `<${prefix}font/>`, 1)
 }
 
+/**
+ * Applies `font` to a cell, merging onto the font it already has so setting bold
+ * does not reset its size or colour. The merged font is added if the file has no
+ * identical one, and a cell format pointing at it is returned.
+ */
 export function ensureFontStyle(
   stylesXml: string,
   basedOn: number | undefined,
