@@ -72,6 +72,32 @@ test('shiftSheet numbers an implicit row and makes the shift explicit', () => {
   assert.match(out, /<row r="5"><c r="A5"\/><\/row><row r="6"><c r="A6"\/><\/row>/)
 })
 
+const deleteAt = (at: number, count = 1): ShiftSpec => ({
+  axis: 'row',
+  at,
+  delta: -count,
+  editedSheet: 'Sheet1',
+  onCurrentSheet: true,
+})
+
+test('shiftSheet drops deleted rows, renumbers the rest and #REF!s a lost reference', () => {
+  const sheet =
+    '<sheetData><row r="1"><c r="A1"><v>1</v></c></row>' +
+    '<row r="2"><c r="A2"><v>2</v></c></row>' +
+    '<row r="3"><c r="A3"><f>A2+A5</f></c></row>' +
+    '<row r="5"><c r="A5"/></row></sheetData>'
+  const out = shiftSheet(sheet, deleteAt(2))
+  assert.doesNotMatch(out, /<v>2<\/v>/)
+  assert.match(out, /<row r="2"><c r="A2"><f>#REF!\+A4<\/f>/)
+  assert.match(out, /<row r="4"><c r="A4"\/>/)
+})
+
+test('shiftSheet drops a self-closing deleted row', () => {
+  const sheet = '<sheetData><row r="2"/><row r="3"><c r="A3"><v>1</v></c></row></sheetData>'
+  const out = shiftSheet(sheet, deleteAt(2))
+  assert.equal(out, '<sheetData><row r="2"><c r="A2"><v>1</v></c></row></sheetData>')
+})
+
 test('shiftSheet shifts columns, cols bounds and cell columns without renumbering rows', () => {
   const sheet =
     '<worksheet><cols><col min="2" max="2" width="9"/><col min="1" max="5" width="4"/></cols>' +

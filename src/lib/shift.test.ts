@@ -100,6 +100,11 @@ test('shiftFormula turns a single cell on a deleted row into #REF!', () => {
   assert.equal(shiftFormula('SUM(A3,B1)', deleteRows(3)), 'SUM(#REF!,B1)')
 })
 
+test('shiftFormula drops the sheet qualifier from a destroyed reference', () => {
+  assert.equal(shiftFormula('Sheet1!A3', deleteRows(3, 1, false)), '#REF!')
+  assert.equal(shiftFormula("'Sheet1'!A3:A3", deleteRows(3, 1, false)), '#REF!')
+})
+
 test('shiftFormula clamps a range that a deletion trims rather than destroying it', () => {
   assert.equal(shiftFormula('SUM(A5:A10)', deleteRows(5)), 'SUM(A5:A9)')
   assert.equal(shiftFormula('SUM(A3:A6)', deleteRows(5, 2)), 'SUM(A3:A4)')

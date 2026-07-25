@@ -241,7 +241,9 @@ export function shiftFormula(formula: string, spec: ShiftSpec): string {
 
     const reference = shiftReference(formula, cursor, spec, targets)
     if (reference !== undefined) {
-      out += formula.slice(index, cursor) + reference.text
+      // A destroyed reference drops its sheet qualifier too: Sheet1!A1 becomes
+      // #REF!, not Sheet1!#REF!.
+      out += reference.text === REF ? REF : formula.slice(index, cursor) + reference.text
       index = reference.end
       continue
     }

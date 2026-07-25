@@ -2184,3 +2184,80 @@ test('insertColumns refuses a bad count, an off-sheet column and a table', () =>
     (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
   )
 })
+
+test('deleteRows pulls rows up, #REF!s a lost cell and shrinks an overlapping range', () => {
+  const workbook = createWorkbook('Data')
+  const sheet = workbook.sheets[0]
+  sheet?.set('A1', 1)
+  sheet?.set('A2', 2)
+  sheet?.set('A4', { formula: 'A2+SUM(A1:A4)' })
+  workbook.addSheet('Calc').set('A1', { formula: 'Data!A2+Data!A4' })
+  sheet?.deleteRows(2)
+
+  const back = readWorkbook(workbook.toBytes())
+  const data = [...(back.sheet('Data')?.cells() ?? [])]
+  const at = (reference: string) => data.find((cell) => cell.reference === reference)
+  assert.deepEqual(at('A1')?.value, { kind: 'number', value: 1 })
+  assert.equal(at('A2'), undefined)
+  assert.equal(expressionOf(at('A3')), '#REF!+SUM(A1:A3)')
+  const calc = [...(back.sheet('Calc')?.cells() ?? [])]
+  assert.equal(expressionOf(calc.find((cell) => cell.reference === 'A1')), '#REF!+Data!A3')
+})
+
+test('deleteRows refuses a bad row, a bad count and a collapsing merge', () => {
+  const workbook = readWorkbook(
+    build(
+      '<row r="5"><c r="A5"><v>1</v></c></row></sheetData><mergeCells count="1"><mergeCell ref="A5:B5"/></mergeCells><sheetData>',
+    ),
+  )
+  const sheet = workbook.sheets[0]
+  assert.throws(
+    () => sheet?.deleteRows(0),
+    (error: unknown) => error instanceof XlsxError && error.code === 'bad-reference',
+  )
+  assert.throws(
+    () => sheet?.deleteRows(1, 0),
+    (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+  )
+  assert.throws(
+    () => sheet?.deleteRows(5),
+    (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+  )
+})
+
+test('deleteRows refuses destroying a shared formula master and a sheet with a table', () => {
+  const master = readWorkbook(
+    build('<row r="2"><c r="B2"><f t="shared" ref="B2:B9" si="0">A2</f></c></row>'),
+  )
+  assert.throws(
+    () => master.sheets[0]?.deleteRows(2),
+    (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+  )
+  const tabled = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      extra: {
+        'xl/worksheets/_rels/sheet1.xml.rels':
+          '<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/></Relationships>',
+        'xl/tables/table1.xml': '<table ref="A1:B2"/>',
+      },
+    }),
+  )
+  assert.throws(
+    () => tabled.sheets[0]?.deleteRows(1),
+    (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+  )
+})
+
+test('deleteRows keeps a merge it only clips and a master above the deletion', () => {
+  const workbook = readWorkbook(
+    build(
+      '<row r="1"><c r="B1"><f t="shared" ref="B1:B9" si="0">A1</f></c></row>' +
+        '<row r="6"><c r="A6"><v>1</v></c></row>' +
+        '</sheetData><mergeCells count="1"><mergeCell ref="A4:A6"/></mergeCells><sheetData>',
+    ),
+  )
+  workbook.sheets[0]?.deleteRows(5)
+  const out = decode(readContainer(workbook.toBytes()).parts.get('xl/worksheets/sheet1.xml'))
+  assert.match(out, /<mergeCell ref="A4:A5"\/>/)
+  assert.match(out, /<row r="5"><c r="A5"><v>1<\/v>/)
+})

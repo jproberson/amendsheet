@@ -54,6 +54,8 @@ export function shiftSheet(xml: string, spec: ShiftSpec): string {
   const splices: Splice[] = []
   let rowNumber = 0
   let inFormula = false
+  // While a deleted row is being skipped, the offset its removal splice starts at.
+  let removingFrom = -1
 
   const spliceAttribute = (
     event: { start: number; end: number },
@@ -66,6 +68,15 @@ export function shiftSheet(xml: string, spec: ShiftSpec): string {
   }
 
   for (const event of readXml(xml)) {
+    // A deleted row takes its cells, formulas and text with it, so everything up
+    // to its close is dropped in one splice rather than shifted.
+    if (removingFrom !== -1) {
+      if (event.kind === 'close' && event.localName === 'row') {
+        splices.push({ start: removingFrom, end: event.end, text: '' })
+        removingFrom = -1
+      }
+      continue
+    }
     if (event.kind === 'close') {
       if (event.localName === 'f') inFormula = false
       continue
@@ -81,6 +92,13 @@ export function shiftSheet(xml: string, spec: ShiftSpec): string {
     if (event.localName === 'row' && spec.axis === 'row') {
       const declared = event.attributes.get('r')
       rowNumber = declared === undefined ? rowNumber + 1 : Number(declared)
+      // A row inside a deletion is dropped: a self-closing one at once, otherwise
+      // from here to its close.
+      if (spec.delta < 0 && rowNumber >= spec.at && rowNumber < spec.at - spec.delta) {
+        if (event.selfClosing) splices.push({ start: event.start, end: event.end, text: '' })
+        else removingFrom = event.start
+        continue
+      }
       // A row past the point moves; withAttribute makes its number explicit even
       // when the row left it implicit, so an inserted gap cannot renumber it wrong.
       const moved = shiftedIndex(rowNumber, spec)

@@ -215,6 +215,14 @@ export interface Worksheet {
    * and an off-the-sheet shift included.
    */
   insertColumns(before: string, count?: number): void
+  /**
+   * Deletes `count` rows from row `from`, pulling the rows below up over them. A
+   * reference into a deleted row becomes #REF! where a formula named the cell, and
+   * shrinks where a range only overlapped. Refused when a whole merged range,
+   * filter, format or shared formula sat inside the deletion, none of which can
+   * survive as #REF!, or when the sheet carries a table.
+   */
+  deleteRows(from: number, count?: number): void
 }
 
 export interface SetOptions {
@@ -377,6 +385,43 @@ function highestColumn(bytes: Uint8Array): number {
     }
   }
   return highest
+}
+
+// Elements whose reference a deletion could collapse to nothing. A formula's own
+// text may become #REF! and still be valid, but a structural range or a shared
+// formula's home cell cannot, so a deletion that would do it is refused instead.
+const COLLAPSIBLE = new Map([
+  ['mergeCell', { attribute: 'ref', reason: 'a merged range' }],
+  ['autoFilter', { attribute: 'ref', reason: 'the filter' }],
+  ['hyperlink', { attribute: 'ref', reason: 'a hyperlink' }],
+  ['conditionalFormatting', { attribute: 'sqref', reason: 'a conditional format' }],
+  ['dataValidation', { attribute: 'sqref', reason: 'a data validation' }],
+  ['dimension', { attribute: 'ref', reason: 'the used range' }],
+])
+
+/** What a deletion would destroy that cannot survive as #REF!, or undefined. */
+function deletionDamage(bytes: Uint8Array, spec: ShiftSpec): string | undefined {
+  let line = 0
+  for (const event of readXmlBytes(bytes)) {
+    if (event.kind !== 'open') continue
+    if (event.localName === 'row' && spec.axis === 'row') {
+      const declared = event.attributes.get('r')
+      line = declared === undefined ? line + 1 : Number(declared)
+      continue
+    }
+    if (event.localName === 'f' && event.attributes.get('ref') !== undefined) {
+      if (spec.axis === 'row' && line >= spec.at && line < spec.at - spec.delta) {
+        return 'a shared or array formula'
+      }
+    }
+    const collapsible = COLLAPSIBLE.get(event.localName)
+    if (collapsible !== undefined) {
+      const value = event.attributes.get(collapsible.attribute)
+      if (value !== undefined && shiftFormula(value, spec).includes('#REF!'))
+        return collapsible.reason
+    }
+  }
+  return undefined
 }
 
 const TABLE_RELATIONSHIP = 'relationships/table'
@@ -1082,6 +1127,50 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             onCurrentSheet: true,
           },
         })
+      },
+      deleteRows(from: number, count = 1): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so no rows can be deleted`,
+            at,
+          )
+        }
+        if (!Number.isInteger(from) || from < 1 || from > LAST_ROW) {
+          throw new XlsxError('bad-reference', `Row ${from} is not a row this sheet can hold`, {
+            ...at,
+          })
+        }
+        if (!Number.isInteger(count) || count < 1) {
+          throw new XlsxError('unwritable-value', `${count} is not a number of rows to delete`, {
+            ...at,
+          })
+        }
+        const relationshipsPath = reference.path.replace(/([^/]+)$/, '_rels/$1.rels')
+        const relationshipsXml = partText(container, relationshipsPath)
+        if (relationshipsXml !== undefined && ownsTable(relationshipsXml)) {
+          throw new XlsxError(
+            'unwritable-value',
+            `Sheet ${reference.name} carries a table, so its rows cannot be deleted yet`,
+            { ...at },
+          )
+        }
+        const spec: ShiftSpec = {
+          axis: 'row',
+          at: from,
+          delta: -count,
+          editedSheet: reference.name,
+          onCurrentSheet: true,
+        }
+        const damage = deletionDamage(sheetBytes, spec)
+        if (damage !== undefined) {
+          throw new XlsxError(
+            'unwritable-value',
+            `Deleting rows from ${reference.name} would destroy ${damage}`,
+            { ...at },
+          )
+        }
+        lineOps.push({ path: reference.path, spec })
       },
     }
   }
