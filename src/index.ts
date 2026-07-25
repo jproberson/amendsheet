@@ -1,4 +1,4 @@
-export { readWorkbook } from './lib/document.js'
+export { createWorkbook, readWorkbook } from './lib/document.js'
 export type { CellInput, FormulaInput, SheetProtection } from './lib/patch.js'
 export type {
   Alignment,

@@ -1,3 +1,4 @@
+import { blankWorkbookBytes } from './blank.js'
 import { type Container, decodeXmlPart } from './container.js'
 import { XlsxError } from './errors.js'
 import { LAST_SERIAL, dateToSerial, parseIsoDate, serialToDate } from './date.js'
@@ -358,6 +359,15 @@ function toCell(
     ...(numberFormat === undefined ? {} : { numberFormat }),
     ...formatting,
   }
+}
+
+/**
+ * A blank workbook — one empty sheet named `Sheet1` — to fill with `set()` and
+ * the rest of the edit API, then write with `toBytes()`. Creating is amending an
+ * empty file, so it comes back through the same path a read one does.
+ */
+export function createWorkbook(): Workbook {
+  return readWorkbook(blankWorkbookBytes())
 }
 
 export function readWorkbook(bytes: Uint8Array): Workbook {

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile, readdir } from 'node:fs/promises'
 import { test } from 'node:test'
 import { readContainer, writeContainer } from './container.js'
-import { readWorkbook } from './document.js'
+import { createWorkbook, readWorkbook } from './document.js'
 import { XlsxError } from './errors.js'
 import type { CellInput } from './patch.js'
 
@@ -34,6 +34,25 @@ function build(
   for (const [path, content] of Object.entries(options.extra ?? {})) parts[path] = encode(content)
   return writeContainer({ parts: new Map(Object.entries(parts)) })
 }
+
+test('createWorkbook makes an empty one-sheet workbook that fills and writes back', () => {
+  const workbook = createWorkbook()
+
+  assert.deepEqual(
+    workbook.sheets.map((sheet) => sheet.name),
+    ['Sheet1'],
+  )
+  assert.deepEqual([...(workbook.sheets[0]?.cells() ?? [])], [])
+
+  workbook.sheets[0]?.set('A1', 'hi')
+  workbook.sheets[0]?.set('B2', 42, { font: { bold: true } })
+
+  const back = readWorkbook(workbook.toBytes())
+  const cell = (reference: string) =>
+    [...(back.sheets[0]?.cells() ?? [])].find((c) => c.reference === reference)
+  assert.deepEqual(cell('A1')?.value, { kind: 'text', value: 'hi' })
+  assert.deepEqual(cell('B2')?.value, { kind: 'number', value: 42 })
+})
 
 test('exposes sheets by name', () => {
   const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
