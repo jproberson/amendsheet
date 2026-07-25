@@ -4,6 +4,7 @@ import {
   checkSheetName,
   withSheetContentTypes,
   withSheetRelationships,
+  withSheetRemoved,
   withSheetRenamed,
   withSheetsAdded,
 } from './add-sheet.js'
@@ -114,6 +115,8 @@ export interface Worksheet {
   readonly name: string
   /** Renames the sheet. The name follows the same rules as `addSheet`. */
   rename(name: string): void
+  /** Removes the sheet from the workbook. A workbook must keep at least one. */
+  remove(): void
   readonly state: SheetState
   /**
    * As the workbook part spells it, so a defined name or a part this library
@@ -443,6 +446,9 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   // A sheet renamed since the read, path -> its new name. toBytes() rewrites the
   // workbook's <sheet> for a sheet the file had, and the wiring for an added one.
   const renames = new Map<string, string>()
+  // Sheets removed since the read, by path. A sheet the file had is unwired and
+  // its part dropped; an added one is simply never written.
+  const removed = new Set<string>()
 
   const makeWorksheet = (reference: SheetRef): Worksheet => {
     const sheetBytes = container.parts.get(reference.path) ?? addedSheets.get(reference.path)
@@ -675,6 +681,24 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         )
         renames.set(reference.path, name)
       },
+      remove(): void {
+        if (sheets.length <= 1) {
+          throw new XlsxError('unwritable-value', 'A workbook must keep at least one sheet', {
+            ...at,
+          })
+        }
+        const current = renames.get(reference.path) ?? reference.name
+        const index = sheets.findIndex((sheet) => sheet.name === current)
+        if (index !== -1) sheets.splice(index, 1)
+        removed.add(reference.path)
+        // An added sheet has no part in the package, so undo its registration and
+        // it is simply never written; a read sheet is unwired at toBytes().
+        if (addedSheets.has(reference.path)) {
+          addedSheets.delete(reference.path)
+          const addedIndex = addedRefs.findIndex((added) => added.reference.path === reference.path)
+          if (addedIndex !== -1) addedRefs.splice(addedIndex, 1)
+        }
+      },
       state: reference.state,
       sheetId: reference.sheetId,
       get protection(): SheetProtection | undefined {
@@ -873,7 +897,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       sheetRowHeights.size === 0 &&
       sheetColumnWidths.size === 0 &&
       addedRefs.length === 0 &&
-      renames.size === 0
+      renames.size === 0 &&
+      removed.size === 0
     ) {
       return container.write(changes)
     }
@@ -919,6 +944,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       ...sheetColumnWidths.keys(),
       ...addedSheets.keys(),
     ])) {
+      if (removed.has(path)) continue
       const bytes = container.parts.get(path) ?? addedSheets.get(path)
       if (bytes === undefined) continue
       const pending = edits.get(path) ?? EMPTY_EDITS
@@ -949,12 +975,17 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       ),
     )
 
-    // The workbook, its relationships and the content types each take up to two
-    // edits — a formula's recalculation flag or the added sheets on the workbook,
-    // the dropped calculation chain or the added sheets on the other two — so each
-    // is composed from its current text and written once.
-    // An added sheet is renamed by the name its wiring is written with; a sheet
-    // the file already had is renamed by rewriting its existing <sheet>.
+    // A removed sheet the file had is dropped and unwired below; a removed added
+    // one was already taken out of the added set, so it never reaches here.
+    const removedExisting = [...removed].filter((path) => container.parts.has(path))
+    for (const path of removedExisting) changes.set(path, null)
+    const originalName = (path: string) => part.sheets.find((sheet) => sheet.path === path)?.name
+
+    // The workbook, its relationships and the content types each take a handful of
+    // edits — the calculation chain, a recalculation flag, the sheets added,
+    // renamed or removed — so each is composed from its current text and written
+    // once. An added sheet is renamed by the name its wiring is written with; a
+    // sheet the file already had by rewriting its existing <sheet>.
     const renamedAdded = addedRefs.map((added) => ({
       ...added,
       reference: {
@@ -966,21 +997,30 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     if (workbookXml !== undefined) {
       let updated = wroteFormula ? withRecalculation(workbookXml) : workbookXml
       for (const [path, name] of renames) {
-        const original = part.sheets.find((sheet) => sheet.path === path)?.name
-        if (original !== undefined) updated = withSheetRenamed(updated, original, name)
+        const original = originalName(path)
+        if (original !== undefined && !removed.has(path)) {
+          updated = withSheetRenamed(updated, original, name)
+        }
       }
       updated = withSheetsAdded(updated, renamedAdded)
+      for (const path of removedExisting) {
+        const original = originalName(path)
+        if (original !== undefined) updated = withSheetRemoved(updated, original)
+      }
       if (updated !== workbookXml) changes.set(part.path, encoder.encode(updated))
     }
 
     const relationshipsXml = partText(container, part.relationshipsPath)
     if (relationshipsXml !== undefined) {
-      const updated = withSheetRelationships(
+      let updated = withSheetRelationships(
         hadCalcChain
           ? withoutRelationship(relationshipsXml, part.path, CALCULATION_CHAIN)
           : relationshipsXml,
         addedRefs,
       )
+      for (const path of removedExisting) {
+        updated = withoutRelationship(updated, part.path, path)
+      }
       if (updated !== relationshipsXml) {
         changes.set(part.relationshipsPath, encoder.encode(updated))
       }
@@ -988,10 +1028,11 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
 
     const contentTypesXml = partText(container, CONTENT_TYPES)
     if (contentTypesXml !== undefined) {
-      const updated = withSheetContentTypes(
+      let updated = withSheetContentTypes(
         hadCalcChain ? withoutOverride(contentTypesXml, CALCULATION_CHAIN) : contentTypesXml,
         addedRefs,
       )
+      for (const path of removedExisting) updated = withoutOverride(updated, path)
       if (updated !== contentTypesXml) changes.set(CONTENT_TYPES, encoder.encode(updated))
     }
 

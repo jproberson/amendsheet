@@ -157,6 +157,48 @@ test('rename refuses a duplicate but allows a sheet its own name', () => {
   assert.equal(workbook.sheets[0]?.name, 'A')
 })
 
+test('remove drops a sheet and refuses the last one', () => {
+  const workbook = createWorkbook('One')
+  workbook.sheets[0]?.set('A1', 'keep')
+  workbook.addSheet('Two').set('A1', 'gone')
+  workbook.addSheet('Three').set('A1', 'stay')
+
+  workbook.sheet('Two')?.remove()
+  assert.deepEqual(
+    workbook.sheets.map((sheet) => sheet.name),
+    ['One', 'Three'],
+  )
+
+  const back = readWorkbook(workbook.toBytes())
+  assert.deepEqual(
+    back.sheets.map((sheet) => sheet.name),
+    ['One', 'Three'],
+  )
+  assert.deepEqual(
+    [...(back.sheet('Three')?.cells() ?? [])].map((c) => c.reference),
+    ['A1'],
+  )
+
+  const solo = createWorkbook()
+  assert.throws(
+    () => solo.sheets[0]?.remove(),
+    (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+  )
+})
+
+test('remove drops a sheet the file was read with, and its part', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.addSheet('Extra')
+  workbook.sheet('Data')?.remove()
+
+  const out = workbook.toBytes()
+  assert.ok(![...readContainer(out).parts.keys()].includes('xl/worksheets/sheet1.xml'))
+  assert.deepEqual(
+    readWorkbook(out).sheets.map((sheet) => sheet.name),
+    ['Extra'],
+  )
+})
+
 test('exposes sheets by name', () => {
   const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
 

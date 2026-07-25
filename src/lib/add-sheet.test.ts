@@ -5,6 +5,7 @@ import {
   checkSheetName,
   withSheetContentTypes,
   withSheetRelationships,
+  withSheetRemoved,
   withSheetRenamed,
   withSheetsAdded,
 } from './add-sheet.js'
@@ -97,6 +98,22 @@ test('withSheetRenamed escapes the new name and leaves an unmatched name alone',
   )
   const xml = '<sheets><sheet name="A"/></sheets>'
   assert.equal(withSheetRenamed(xml, 'Missing', 'New'), xml)
+})
+
+test('withSheetRemoved deletes the matching sheet, keeping the rest and the prefix', () => {
+  assert.equal(
+    withSheetRemoved(
+      '<sheets><sheet name="A" r:id="rId1"/><sheet name="B" r:id="rId2"/></sheets>',
+      'A',
+    ),
+    '<sheets><sheet name="B" r:id="rId2"/></sheets>',
+  )
+  assert.equal(
+    withSheetRemoved('<x:sheets><x:sheet name="A"/></x:sheets>', 'A'),
+    '<x:sheets></x:sheets>',
+  )
+  const xml = '<sheets><sheet name="A"/></sheets>'
+  assert.equal(withSheetRemoved(xml, 'Missing'), xml)
 })
 
 test('checkSheetName accepts a valid name and refuses the rest', () => {

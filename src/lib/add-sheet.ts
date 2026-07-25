@@ -86,6 +86,15 @@ export function withSheetRenamed(workbookXml: string, oldName: string, newName: 
   return workbookXml.replace(pattern, (_match, lead) => `${lead}${escapeSheetName(newName)}"`)
 }
 
+/** Removes the `<sheet>` carrying `name` from the workbook's `<sheets>`. */
+export function withSheetRemoved(workbookXml: string, name: string): string {
+  const pattern = new RegExp(
+    `<([a-z0-9]*:)?sheet\\b[^>]*\\bname="${escapeRegExp(escapeSheetName(name))}"[^>]*/?>`,
+    'i',
+  )
+  return workbookXml.replace(pattern, '')
+}
+
 /** Adds a relationship for each new sheet to the workbook's relationships part. */
 export function withSheetRelationships(relsXml: string, added: readonly AddedSheet[]): string {
   if (added.length === 0) return relsXml
