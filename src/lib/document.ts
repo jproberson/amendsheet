@@ -591,6 +591,22 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   const sheetFreezes = new Map<string, string>()
   const sheetHiddenRows = new Map<string, Set<number>>()
   const sheetHiddenColumns = new Map<string, Set<number>>()
+  // The per-sheet maps patchSheet applies in one rewrite. Both the "anything
+  // pending?" check and the set of sheets to rewrite read this list, so a new
+  // kind of sheet edit is registered in one place rather than two enumerations
+  // that have to be kept in step.
+  const patchInputs: ReadonlyArray<ReadonlyMap<string, unknown>> = [
+    edits,
+    styleOverrides,
+    sheetProtections,
+    sheetMerges,
+    sheetRowHeights,
+    sheetColumnWidths,
+    sheetAutoFilters,
+    sheetFreezes,
+    sheetHiddenRows,
+    sheetHiddenColumns,
+  ]
   const fileNames = readDefinedNames(partText(container, part.path) ?? '')
   const pendingNames = new Map<string, string>()
   const sheetHyperlinks = new Map<string, Map<string, Hyperlink>>()
@@ -1292,22 +1308,13 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     // A format() with no set() records a style override and no value edit; a
     // protect(), merge() or setRowHeight() records neither and still rewrites.
     if (
-      edits.size === 0 &&
-      styleOverrides.size === 0 &&
-      sheetProtections.size === 0 &&
-      sheetMerges.size === 0 &&
-      sheetRowHeights.size === 0 &&
-      sheetColumnWidths.size === 0 &&
-      sheetAutoFilters.size === 0 &&
-      sheetFreezes.size === 0 &&
-      sheetHiddenRows.size === 0 &&
-      sheetHiddenColumns.size === 0 &&
+      patchInputs.every((map) => map.size === 0) &&
+      sheetHyperlinks.size === 0 &&
       addedRefs.length === 0 &&
       renames.size === 0 &&
       removed.size === 0 &&
       pendingNames.size === 0 &&
-      lineOps.length === 0 &&
-      sheetHyperlinks.size === 0
+      lineOps.length === 0
     ) {
       return container.write(changes)
     }
@@ -1345,16 +1352,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     // Every sheet with a value edit, a format() restyle, a protect(), a merge()
     // or a setRowHeight() is rewritten once.
     for (const path of new Set([
-      ...edits.keys(),
-      ...styleOverrides.keys(),
-      ...sheetProtections.keys(),
-      ...sheetMerges.keys(),
-      ...sheetRowHeights.keys(),
-      ...sheetColumnWidths.keys(),
-      ...sheetAutoFilters.keys(),
-      ...sheetFreezes.keys(),
-      ...sheetHiddenRows.keys(),
-      ...sheetHiddenColumns.keys(),
+      ...patchInputs.flatMap((map) => [...map.keys()]),
       ...addedSheets.keys(),
     ])) {
       if (removed.has(path)) continue
