@@ -1,3 +1,4 @@
+import { escapeSheetName } from './add-sheet.js'
 import { writeContainer } from './container.js'
 
 /**
@@ -20,11 +21,6 @@ const BLANK_PARTS: Readonly<Record<string, string>> = {
     '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
     '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>' +
     '</Relationships>',
-  'xl/workbook.xml':
-    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-    '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
-    '<sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>' +
-    '</workbook>',
   'xl/_rels/workbook.xml.rels':
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
     '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
@@ -45,10 +41,18 @@ const BLANK_PARTS: Readonly<Record<string, string>> = {
     '</styleSheet>',
 }
 
+// The one part that carries the caller's sheet name, so it is built per call.
+const workbookPart = (sheetName: string): string =>
+  '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+  '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+  `<sheets><sheet name="${escapeSheetName(sheetName)}" sheetId="1" r:id="rId1"/></sheets>` +
+  '</workbook>'
+
 /** A blank `.xlsx` as bytes, ready for `readWorkbook` to hand back as a workbook. */
-export function blankWorkbookBytes(): Uint8Array {
+export function blankWorkbookBytes(sheetName: string): Uint8Array {
   const encoder = new TextEncoder()
   const parts = new Map<string, Uint8Array>()
   for (const [path, xml] of Object.entries(BLANK_PARTS)) parts.set(path, encoder.encode(xml))
+  parts.set('xl/workbook.xml', encoder.encode(workbookPart(sheetName)))
   return writeContainer({ parts })
 }

@@ -376,12 +376,14 @@ function toCell(
 }
 
 /**
- * A blank workbook — one empty sheet named `Sheet1` — to fill with `set()` and
- * the rest of the edit API, then write with `toBytes()`. Creating is amending an
- * empty file, so it comes back through the same path a read one does.
+ * A blank workbook with one empty sheet — named `Sheet1` unless a name is given —
+ * to fill with `set()` and the rest of the edit API, then write with `toBytes()`.
+ * Creating is amending an empty file, so it comes back through the same path a
+ * read one does. The name must be one Excel accepts, the way `addSheet()` asks.
  */
-export function createWorkbook(): Workbook {
-  return readWorkbook(blankWorkbookBytes())
+export function createWorkbook(sheetName = 'Sheet1'): Workbook {
+  checkSheetName(sheetName, [])
+  return readWorkbook(blankWorkbookBytes(sheetName))
 }
 
 export function readWorkbook(bytes: Uint8Array): Workbook {

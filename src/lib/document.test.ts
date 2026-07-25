@@ -54,6 +54,17 @@ test('createWorkbook makes an empty one-sheet workbook that fills and writes bac
   assert.deepEqual(cell('B2')?.value, { kind: 'number', value: 42 })
 })
 
+test('createWorkbook names its sheet and refuses a bad name', () => {
+  assert.equal(createWorkbook().sheets[0]?.name, 'Sheet1')
+  const named = createWorkbook('Budget')
+  assert.equal(named.sheets[0]?.name, 'Budget')
+  assert.equal(readWorkbook(named.toBytes()).sheets[0]?.name, 'Budget')
+  assert.throws(
+    () => createWorkbook('bad/name'),
+    (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+  )
+})
+
 test('addSheet adds editable sheets a created workbook writes back', () => {
   const workbook = createWorkbook()
   workbook.sheets[0]?.set('A1', 'first')

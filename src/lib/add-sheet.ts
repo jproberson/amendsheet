@@ -44,13 +44,13 @@ export function checkSheetName(name: unknown, existing: readonly string[]): void
   }
 }
 
-// A sheet name is written into an attribute, so the five markup characters are
+// A sheet name is written into an attribute, so the markup characters are
 // escaped; the caller-facing addSheet() has already refused the ones Excel bans.
-const escapeAttribute = (text: string) =>
+export const escapeSheetName = (text: string) =>
   text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
 const sheetElement = (prefix: string, sheet: AddedSheet) =>
-  `<${prefix}sheet name="${escapeAttribute(sheet.reference.name)}" sheetId="${sheet.reference.sheetId}"` +
+  `<${prefix}sheet name="${escapeSheetName(sheet.reference.name)}" sheetId="${sheet.reference.sheetId}"` +
   ` r:id="${sheet.relationshipId}"/>`
 
 /** Adds each new `<sheet>` to the workbook's `<sheets>`, opening a self-closing one. */
