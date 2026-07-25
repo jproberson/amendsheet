@@ -244,6 +244,18 @@ test('hideRow and hideColumn write the hidden flag, refusing a bad reference', (
   )
 })
 
+test('defineName creates and reads back a global name, replacing a redefine', () => {
+  const workbook = createWorkbook()
+  workbook.defineName('Tax', 'Sheet1!$B$1')
+  assert.deepEqual([...workbook.definedNames], [['Tax', 'Sheet1!$B$1']])
+
+  const back = readWorkbook(workbook.toBytes())
+  assert.deepEqual([...back.definedNames], [['Tax', 'Sheet1!$B$1']])
+
+  back.defineName('Tax', 'Sheet1!$C$1')
+  assert.deepEqual([...readWorkbook(back.toBytes()).definedNames], [['Tax', 'Sheet1!$C$1']])
+})
+
 test('exposes sheets by name', () => {
   const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
 

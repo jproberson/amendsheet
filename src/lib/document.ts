@@ -9,6 +9,7 @@ import {
   withSheetsAdded,
 } from './add-sheet.js'
 import { blankWorkbookBytes } from './blank.js'
+import { checkDefinedName, readDefinedNames, withDefinedNames } from './defined-names.js'
 import { type Container, decodeXmlPart } from './container.js'
 import { XlsxError } from './errors.js'
 import { LAST_SERIAL, dateToSerial, parseIsoDate, serialToDate } from './date.js'
@@ -223,6 +224,17 @@ export interface Workbook {
    * sheet already uses. Written into the workbook by `toBytes()`.
    */
   addSheet(name: string): Worksheet
+  /**
+   * The workbook's global named ranges, each mapped to what it refers to (a
+   * formula like `Sheet1!$A$1:$B$2`). Reflects a pending `defineName`.
+   */
+  readonly definedNames: ReadonlyMap<string, string>
+  /**
+   * Defines a global named range, replacing one of the same name. The name
+   * follows Excel's rules — a letter, underscore or backslash then letters,
+   * digits, periods or underscores, no spaces. `refersTo` is a formula.
+   */
+  defineName(name: string, refersTo: string): void
   /** Which year serials count from. A 1904 workbook is 1462 days behind. */
   readonly epoch: 1900 | 1904
   /** Parts that were never interpreted are written exactly as they were read. */
@@ -428,6 +440,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   const sheetFreezes = new Map<string, string>()
   const sheetHiddenRows = new Map<string, Set<number>>()
   const sheetHiddenColumns = new Map<string, Set<number>>()
+  const fileNames = readDefinedNames(partText(container, part.path) ?? '')
+  const pendingNames = new Map<string, string>()
   let workingStyles = stylesXml
   let parsedStyles = styles
   let parsedFrom = stylesXml
@@ -973,7 +987,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       sheetHiddenColumns.size === 0 &&
       addedRefs.length === 0 &&
       renames.size === 0 &&
-      removed.size === 0
+      removed.size === 0 &&
+      pendingNames.size === 0
     ) {
       return container.write(changes)
     }
@@ -1090,6 +1105,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         const original = originalName(path)
         if (original !== undefined) updated = withSheetRemoved(updated, original)
       }
+      updated = withDefinedNames(updated, pendingNames)
       if (updated !== workbookXml) changes.set(part.path, encoder.encode(updated))
     }
 
@@ -1126,6 +1142,13 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     sheets,
     sheet: (name: string) => sheets.find((candidate) => candidate.name === name),
     addSheet: addWorksheet,
+    get definedNames(): ReadonlyMap<string, string> {
+      return new Map([...fileNames, ...pendingNames])
+    },
+    defineName(name: string, refersTo: string): void {
+      checkDefinedName(name, refersTo)
+      pendingNames.set(name, refersTo)
+    },
     epoch: date1904 ? 1904 : 1900,
     toBytes,
   }
