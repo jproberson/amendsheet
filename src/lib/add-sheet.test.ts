@@ -5,6 +5,7 @@ import {
   checkSheetName,
   withSheetContentTypes,
   withSheetRelationships,
+  withSheetRenamed,
   withSheetsAdded,
 } from './add-sheet.js'
 import { XlsxError } from './errors.js'
@@ -72,6 +73,30 @@ test('withSheetsAdded escapes a name for the attribute', () => {
     added('A & B', 'xl/worksheets/s.xml'),
   ])
   assert.match(out, /name="A &amp; B"/)
+})
+
+test('withSheetRenamed rewrites the matching sheet, keeping the prefix', () => {
+  assert.match(
+    withSheetRenamed(
+      '<workbook><sheets><sheet name="Old" sheetId="1" r:id="rId1"/></sheets></workbook>',
+      'Old',
+      'New',
+    ),
+    /<sheet name="New" sheetId="1"/,
+  )
+  assert.match(
+    withSheetRenamed('<x:sheets><x:sheet name="Old" r:id="rId1"/></x:sheets>', 'Old', 'New'),
+    /<x:sheet name="New"/,
+  )
+})
+
+test('withSheetRenamed escapes the new name and leaves an unmatched name alone', () => {
+  assert.match(
+    withSheetRenamed('<sheets><sheet name="A"/></sheets>', 'A', 'X & Y'),
+    /name="X &amp; Y"/,
+  )
+  const xml = '<sheets><sheet name="A"/></sheets>'
+  assert.equal(withSheetRenamed(xml, 'Missing', 'New'), xml)
 })
 
 test('checkSheetName accepts a valid name and refuses the rest', () => {

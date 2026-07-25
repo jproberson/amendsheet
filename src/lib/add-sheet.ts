@@ -75,6 +75,17 @@ export function withSheetsAdded(workbookXml: string, added: readonly AddedSheet[
   return workbookXml.replace(close[0], `${inner}${close[0]}`)
 }
 
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/** Renames the `<sheet>` carrying `oldName` in the workbook's `<sheets>`. */
+export function withSheetRenamed(workbookXml: string, oldName: string, newName: string): string {
+  const pattern = new RegExp(
+    `(<([a-z0-9]*:)?sheet\\b[^>]*\\bname=")${escapeRegExp(escapeSheetName(oldName))}"`,
+    'i',
+  )
+  return workbookXml.replace(pattern, (_match, lead) => `${lead}${escapeSheetName(newName)}"`)
+}
+
 /** Adds a relationship for each new sheet to the workbook's relationships part. */
 export function withSheetRelationships(relsXml: string, added: readonly AddedSheet[]): string {
   if (added.length === 0) return relsXml

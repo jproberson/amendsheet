@@ -4,6 +4,7 @@ import {
   checkSheetName,
   withSheetContentTypes,
   withSheetRelationships,
+  withSheetRenamed,
   withSheetsAdded,
 } from './add-sheet.js'
 import { blankWorkbookBytes } from './blank.js'
@@ -111,6 +112,8 @@ export interface Cell {
 
 export interface Worksheet {
   readonly name: string
+  /** Renames the sheet. The name follows the same rules as `addSheet`. */
+  rename(name: string): void
   readonly state: SheetState
   /**
    * As the workbook part spells it, so a defined name or a part this library
@@ -437,6 +440,9 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   // writes the new part and wires it into the workbook, its rels and the types.
   const addedSheets = new Map<string, Uint8Array>()
   const addedRefs: AddedSheet[] = []
+  // A sheet renamed since the read, path -> its new name. toBytes() rewrites the
+  // workbook's <sheet> for a sheet the file had, and the wiring for an added one.
+  const renames = new Map<string, string>()
 
   const makeWorksheet = (reference: SheetRef): Worksheet => {
     const sheetBytes = container.parts.get(reference.path) ?? addedSheets.get(reference.path)
@@ -658,7 +664,17 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       )
 
     return {
-      name: reference.name,
+      get name(): string {
+        return renames.get(reference.path) ?? reference.name
+      },
+      rename(name: string): void {
+        const current = renames.get(reference.path) ?? reference.name
+        checkSheetName(
+          name,
+          sheets.map((sheet) => sheet.name).filter((other) => other !== current),
+        )
+        renames.set(reference.path, name)
+      },
       state: reference.state,
       sheetId: reference.sheetId,
       get protection(): SheetProtection | undefined {
@@ -856,7 +872,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       sheetMerges.size === 0 &&
       sheetRowHeights.size === 0 &&
       sheetColumnWidths.size === 0 &&
-      addedRefs.length === 0
+      addedRefs.length === 0 &&
+      renames.size === 0
     ) {
       return container.write(changes)
     }
@@ -936,12 +953,23 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     // edits — a formula's recalculation flag or the added sheets on the workbook,
     // the dropped calculation chain or the added sheets on the other two — so each
     // is composed from its current text and written once.
+    // An added sheet is renamed by the name its wiring is written with; a sheet
+    // the file already had is renamed by rewriting its existing <sheet>.
+    const renamedAdded = addedRefs.map((added) => ({
+      ...added,
+      reference: {
+        ...added.reference,
+        name: renames.get(added.reference.path) ?? added.reference.name,
+      },
+    }))
     const workbookXml = partText(container, part.path)
     if (workbookXml !== undefined) {
-      const updated = withSheetsAdded(
-        wroteFormula ? withRecalculation(workbookXml) : workbookXml,
-        addedRefs,
-      )
+      let updated = wroteFormula ? withRecalculation(workbookXml) : workbookXml
+      for (const [path, name] of renames) {
+        const original = part.sheets.find((sheet) => sheet.path === path)?.name
+        if (original !== undefined) updated = withSheetRenamed(updated, original, name)
+      }
+      updated = withSheetsAdded(updated, renamedAdded)
       if (updated !== workbookXml) changes.set(part.path, encoder.encode(updated))
     }
 

@@ -121,6 +121,42 @@ test('addSheet refuses a name Excel will not take', () => {
   refuses('bad/name') // a character Excel forbids
 })
 
+test('rename changes a sheet name on both a read and an added sheet', () => {
+  const workbook = createWorkbook('Old')
+  workbook.sheets[0]?.set('A1', 'keep')
+  workbook.sheets[0]?.rename('Renamed')
+  const added = workbook.addSheet('Temp')
+  added.set('A1', 'x')
+  added.rename('Final')
+
+  assert.deepEqual(
+    workbook.sheets.map((sheet) => sheet.name),
+    ['Renamed', 'Final'],
+  )
+  assert.equal(workbook.sheet('Renamed'), workbook.sheets[0])
+
+  const back = readWorkbook(workbook.toBytes())
+  assert.deepEqual(
+    back.sheets.map((sheet) => sheet.name),
+    ['Renamed', 'Final'],
+  )
+  assert.deepEqual(
+    [...(back.sheets[0]?.cells() ?? [])].map((c) => c.reference),
+    ['A1'],
+  )
+})
+
+test('rename refuses a duplicate but allows a sheet its own name', () => {
+  const workbook = createWorkbook('A')
+  workbook.addSheet('B')
+  assert.throws(
+    () => workbook.sheets[0]?.rename('B'),
+    (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+  )
+  workbook.sheets[0]?.rename('A')
+  assert.equal(workbook.sheets[0]?.name, 'A')
+})
+
 test('exposes sheets by name', () => {
   const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
 
