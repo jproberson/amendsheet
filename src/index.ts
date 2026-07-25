@@ -7,6 +7,7 @@ export type {
   BorderStyle,
   CellProtection,
   Color,
+  DiagonalBorder,
   FillFormat,
   FontFormat,
   FontVerticalAlign,

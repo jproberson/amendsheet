@@ -181,6 +181,7 @@ test('checkStyleOptions refuses an out-of-union style value at the call', () => 
   refuses({ font: { underline: 'wobbly' } })
   refuses({ font: { verticalAlign: '"><x' } })
   refuses({ border: { top: { style: 'zigzag' } } })
+  refuses({ border: { diagonal: { style: 'zigzag' } } })
   refuses({ fill: { type: 'pattern', pattern: 'plaid', color: 'FF0000' } })
   refuses({ fill: { type: 'solid' } }) // no colour
 })
@@ -190,6 +191,7 @@ test('checkStyleOptions passes valid options and a missing one', () => {
   checkStyleOptions({ alignment: { horizontal: 'center', vertical: 'top' } }, 'A1')
   checkStyleOptions({ font: { underline: 'double', verticalAlign: 'superscript' } }, 'A1')
   checkStyleOptions({ border: { all: { style: 'thin' } } }, 'A1')
+  checkStyleOptions({ border: { diagonal: { style: 'thick', up: true } } }, 'A1')
   checkStyleOptions({ fill: { type: 'solid', color: 'FF0000' } }, 'A1')
 })
 

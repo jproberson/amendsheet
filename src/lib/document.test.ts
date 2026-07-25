@@ -874,6 +874,33 @@ test('cell() reads back the font, fill and border it was given', () => {
   assert.deepEqual(cell?.border, { top: { style: 'thin' } })
 })
 
+test('a diagonal border is written and read back', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.set('A1', 'x', {
+    border: { diagonal: { style: 'thin', color: 'FF0000', down: true } },
+  })
+
+  const styles = decode(readContainer(workbook.toBytes()).parts.get('xl/styles.xml'))
+  assert.match(
+    styles,
+    /<border diagonalDown="1"><left\/><right\/><top\/><bottom\/><diagonal style="thin"><color rgb="FFFF0000"\/><\/diagonal><\/border>/,
+  )
+  assert.deepEqual(workbook.sheets[0]?.cell('A1')?.border, {
+    diagonal: { style: 'thin', color: 'FFFF0000', down: true },
+  })
+})
+
+test('a diagonal-up border sets diagonalUp and reads back', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.set('A1', 'x', { border: { diagonal: { style: 'thin', up: true } } })
+
+  const styles = decode(readContainer(workbook.toBytes()).parts.get('xl/styles.xml'))
+  assert.match(styles, /<border diagonalUp="1">.*<diagonal style="thin"\/><\/border>/)
+  assert.deepEqual(workbook.sheets[0]?.cell('A1')?.border, {
+    diagonal: { style: 'thin', up: true },
+  })
+})
+
 test('cell() reads formatting a file already carries', () => {
   const styles =
     '<styleSheet><fonts count="2"><font/><font><b/><sz val="12"/></font></fonts>' +
