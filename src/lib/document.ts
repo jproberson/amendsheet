@@ -1407,6 +1407,16 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       return partText(container, path)
     }
 
+    // Composes a top-level part written once this pass — the workbook, its rels,
+    // the content types — from its current text, and writes it back only when the
+    // transform changed something, so an untouched part is never rewritten.
+    const rewritePart = (path: string, transform: (xml: string) => string): void => {
+      const xml = partText(container, path)
+      if (xml === undefined) return
+      const updated = transform(xml)
+      if (updated !== xml) changes.set(path, encoder.encode(updated))
+    }
+
     // Hyperlinks are written before the line-ops below, so an inserted or deleted
     // line shifts their `ref` along with every other reference. An external link
     // takes a fresh relationship id in the sheet's rels part; an internal one is
@@ -1491,8 +1501,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         name: renames.get(added.reference.path) ?? added.reference.name,
       },
     }))
-    const workbookXml = partText(container, part.path)
-    if (workbookXml !== undefined) {
+    rewritePart(part.path, (workbookXml) => {
       let updated = wroteFormula ? withRecalculation(workbookXml) : workbookXml
       for (const [path, name] of renames) {
         const original = originalName(path)
@@ -1505,12 +1514,10 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         const original = originalName(path)
         if (original !== undefined) updated = withSheetRemoved(updated, original)
       }
-      updated = withDefinedNames(updated, namesToWrite)
-      if (updated !== workbookXml) changes.set(part.path, encoder.encode(updated))
-    }
+      return withDefinedNames(updated, namesToWrite)
+    })
 
-    const relationshipsXml = partText(container, part.relationshipsPath)
-    if (relationshipsXml !== undefined) {
+    rewritePart(part.relationshipsPath, (relationshipsXml) => {
       let updated = withSheetRelationships(
         hadCalcChain
           ? withoutRelationship(relationshipsXml, part.path, CALCULATION_CHAIN)
@@ -1520,20 +1527,17 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       for (const path of removedExisting) {
         updated = withoutRelationship(updated, part.path, path)
       }
-      if (updated !== relationshipsXml) {
-        changes.set(part.relationshipsPath, encoder.encode(updated))
-      }
-    }
+      return updated
+    })
 
-    const contentTypesXml = partText(container, CONTENT_TYPES)
-    if (contentTypesXml !== undefined) {
+    rewritePart(CONTENT_TYPES, (contentTypesXml) => {
       let updated = withSheetContentTypes(
         hadCalcChain ? withoutOverride(contentTypesXml, CALCULATION_CHAIN) : contentTypesXml,
         addedRefs,
       )
       for (const path of removedExisting) updated = withoutOverride(updated, path)
-      if (updated !== contentTypesXml) changes.set(CONTENT_TYPES, encoder.encode(updated))
-    }
+      return updated
+    })
 
     return container.write(changes)
   }
