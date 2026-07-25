@@ -115,6 +115,11 @@ test('shiftFormula leaves a range or whole range qualified with another sheet al
   assert.equal(shiftFormula('Sheet3!5:5', insertRows(3, false)), 'Sheet3!5:5')
 })
 
+test('shiftFormula leaves an external workbook reference alone', () => {
+  assert.equal(shiftFormula('[1]Sheet1!A5', insertRows(3, false)), '[1]Sheet1!A5')
+  assert.equal(shiftFormula('[1]Sheet1!A5+A5', insertRows(3)), '[1]Sheet1!A5+A6')
+})
+
 test('shiftFormula copies through fragments that are not references', () => {
   assert.equal(shiftFormula('A5:', insertRows(3)), 'A5:')
   assert.equal(shiftFormula('5:', insertRows(3)), '5:')

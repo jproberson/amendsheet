@@ -60,8 +60,10 @@ import {
   ensureProtectionStyle,
   readFormatting,
 } from './styles-writer.js'
+import { type ShiftSpec, shiftFormula } from './shift.js'
+import { shiftForeignFormulas, shiftSheetRows } from './shift-sheet.js'
 import { type Styles, isDateFormat, numberFormatOf, readStyles } from './styles.js'
-import { readXml } from './xml.js'
+import { readXml, readXmlBytes } from './xml.js'
 import { type SheetRef, type SheetState, readWorkbookPart } from './workbook.js'
 
 export type CellValue =
@@ -197,6 +199,15 @@ export interface Worksheet {
   hideRow(row: number): void
   /** Hides a column, keeping any width it also has. The column is a letter. */
   hideColumn(column: string): void
+  /**
+   * Inserts `count` blank rows before row `before`, pushing the rows at and below
+   * it down. References that point into the moved rows — formulas anywhere in the
+   * workbook, merges, the dimension, filters, conditional formats and defined
+   * names — move with them. Cell edits made in this session land first, so they
+   * ride along too. Refused when the sheet carries a table, whose stored range
+   * this does not yet adjust, or when the shift would push a row off the sheet.
+   */
+  insertRows(before: number, count?: number): void
 }
 
 export interface SetOptions {
@@ -330,6 +341,31 @@ function withoutRelationship(xml: string, ownerPath: string, part: string): stri
   return xml
 }
 
+/** The highest row a sheet stores, so a shift that would push one off is refused. */
+function highestRow(bytes: Uint8Array): number {
+  let highest = 0
+  let current = 0
+  for (const event of readXmlBytes(bytes)) {
+    if (event.kind === 'open' && event.localName === 'row') {
+      const declared = event.attributes.get('r')
+      current = declared === undefined ? current + 1 : Number(declared)
+      highest = Math.max(highest, current)
+    }
+  }
+  return highest
+}
+
+const TABLE_RELATIONSHIP = 'relationships/table'
+
+/** Whether a sheet owns a table, whose stored range a row shift does not adjust. */
+function ownsTable(relationshipsXml: string): boolean {
+  for (const event of readXml(relationshipsXml)) {
+    if (event.kind !== 'open' || event.localName !== 'Relationship') continue
+    if (event.attributes.get('Type')?.endsWith(TABLE_RELATIONSHIP) === true) return true
+  }
+  return false
+}
+
 /** Removes one Override element, leaving every other byte of the part alone. */
 function withoutOverride(xml: string, part: string): string {
   for (const event of readXml(xml)) {
@@ -442,6 +478,10 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   const sheetHiddenColumns = new Map<string, Set<number>>()
   const fileNames = readDefinedNames(partText(container, part.path) ?? '')
   const pendingNames = new Map<string, string>()
+  // Row and column inserts and deletes, in call order. Each names the sheet it
+  // was called on; toBytes applies them after the per-sheet patch so an edit made
+  // this session lands in the old grid and then moves with the shift.
+  const lineOps: { readonly path: string; readonly spec: ShiftSpec }[] = []
   let workingStyles = stylesXml
   let parsedStyles = styles
   let parsedFrom = stylesXml
@@ -926,6 +966,51 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         hidden.add(index)
         sheetHiddenColumns.set(reference.path, hidden)
       },
+      insertRows(before: number, count = 1): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so no rows can be inserted`,
+            at,
+          )
+        }
+        if (!Number.isInteger(before) || before < 1 || before > LAST_ROW) {
+          throw new XlsxError('bad-reference', `Row ${before} is not a row this sheet can hold`, {
+            ...at,
+          })
+        }
+        if (!Number.isInteger(count) || count < 1) {
+          throw new XlsxError('unwritable-value', `${count} is not a number of rows to insert`, {
+            ...at,
+          })
+        }
+        if (highestRow(sheetBytes) + count > LAST_ROW) {
+          throw new XlsxError(
+            'unwritable-value',
+            `Inserting ${count} row(s) would push a row off ${reference.name}`,
+            { ...at },
+          )
+        }
+        const relationshipsPath = reference.path.replace(/([^/]+)$/, '_rels/$1.rels')
+        const relationshipsXml = partText(container, relationshipsPath)
+        if (relationshipsXml !== undefined && ownsTable(relationshipsXml)) {
+          throw new XlsxError(
+            'unwritable-value',
+            `Sheet ${reference.name} carries a table, so its rows cannot be inserted into yet`,
+            { ...at },
+          )
+        }
+        lineOps.push({
+          path: reference.path,
+          spec: {
+            axis: 'row',
+            at: before,
+            delta: count,
+            editedSheet: reference.name,
+            onCurrentSheet: true,
+          },
+        })
+      },
     }
   }
 
@@ -988,7 +1073,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       addedRefs.length === 0 &&
       renames.size === 0 &&
       removed.size === 0 &&
-      pendingNames.size === 0
+      pendingNames.size === 0 &&
+      lineOps.length === 0
     ) {
       return container.write(changes)
     }
@@ -1067,17 +1153,65 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       }
     }
 
-    const wroteFormula = [...edits.values()].some((pending) =>
-      [...pending.values()].some(
-        (value) => typeof value === 'object' && value !== null && !(value instanceof Date),
-      ),
-    )
+    // A moved reference leaves the cached results stale, so a shift asks for a
+    // recalculation just as writing a formula does.
+    const wroteFormula =
+      lineOps.length > 0 ||
+      [...edits.values()].some((pending) =>
+        [...pending.values()].some(
+          (value) => typeof value === 'object' && value !== null && !(value instanceof Date),
+        ),
+      )
 
     // A removed sheet the file had is dropped and unwired below; a removed added
     // one was already taken out of the added set, so it never reaches here.
     const removedExisting = [...removed].filter((path) => container.parts.has(path))
     for (const path of removedExisting) changes.set(path, null)
     const originalName = (path: string) => part.sheets.find((sheet) => sheet.path === path)?.name
+
+    // Inserting or deleting a line moves references across the whole workbook. The
+    // per-sheet patch above has already landed this session's edits in the old
+    // grid, so each sheet's current text is shifted here: the edited sheet's own
+    // rows and cells, and every other sheet's formulas that point into it. Defined
+    // names, global to the workbook, shift into the set written below.
+    let namesToWrite: ReadonlyMap<string, string> = pendingNames
+    if (lineOps.length > 0) {
+      const decoder = new TextDecoder()
+      const sheetText = (path: string): string | undefined => {
+        const changed = changes.get(path)
+        if (changed !== undefined && changed !== null) return decoder.decode(changed)
+        return partText(container, path)
+      }
+      const sheetPaths = [...part.sheets.map((sheet) => sheet.path), ...addedSheets.keys()]
+      for (const path of sheetPaths) {
+        if (removed.has(path)) continue
+        let xml = sheetText(path)
+        if (xml === undefined) continue
+        const before = xml
+        for (const op of lineOps) {
+          xml =
+            op.path === path
+              ? shiftSheetRows(xml, op.spec)
+              : shiftForeignFormulas(xml, { ...op.spec, onCurrentSheet: false })
+        }
+        if (xml !== before) changes.set(path, encoder.encode(xml))
+      }
+
+      let names = new Map([...fileNames, ...pendingNames])
+      for (const op of lineOps) {
+        names = new Map(
+          [...names].map(([name, refersTo]) => [
+            name,
+            shiftFormula(refersTo, { ...op.spec, onCurrentSheet: false }),
+          ]),
+        )
+      }
+      const written = new Map(pendingNames)
+      for (const [name, refersTo] of names) {
+        if (pendingNames.has(name) || refersTo !== fileNames.get(name)) written.set(name, refersTo)
+      }
+      namesToWrite = written
+    }
 
     // The workbook, its relationships and the content types each take a handful of
     // edits — the calculation chain, a recalculation flag, the sheets added,
@@ -1105,7 +1239,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         const original = originalName(path)
         if (original !== undefined) updated = withSheetRemoved(updated, original)
       }
-      updated = withDefinedNames(updated, pendingNames)
+      updated = withDefinedNames(updated, namesToWrite)
       if (updated !== workbookXml) changes.set(part.path, encoder.encode(updated))
     }
 

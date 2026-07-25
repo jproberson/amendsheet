@@ -216,12 +216,15 @@ export function shiftFormula(formula: string, spec: ShiftSpec): string {
     }
 
     // A quoted or bare sheet name before a '!' qualifies the reference after it.
+    // A ']' just before it means [n]Sheet1! — a reference into another workbook,
+    // whose Sheet1 is not ours however its name reads.
     let cursor = index
     let targets = spec.onCurrentSheet
+    const external = index > 0 && formula[index - 1] === ']'
     if (character === "'") {
       const close = skipQuoted(formula, index, "'")
       if (formula[close] === '!') {
-        targets = normalizeSheet(formula.slice(index, close)) === edited
+        targets = !external && normalizeSheet(formula.slice(index, close)) === edited
         cursor = close + 1
       } else {
         out += formula.slice(index, close)
@@ -231,7 +234,7 @@ export function shiftFormula(formula: string, spec: ShiftSpec): string {
     } else {
       const nameEnd = matchName(formula, index)
       if (nameEnd !== undefined && formula[nameEnd] === '!') {
-        targets = normalizeSheet(formula.slice(index, nameEnd)) === edited
+        targets = !external && normalizeSheet(formula.slice(index, nameEnd)) === edited
         cursor = nameEnd + 1
       }
     }

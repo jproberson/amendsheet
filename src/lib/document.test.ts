@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile, readdir } from 'node:fs/promises'
 import { test } from 'node:test'
 import { readContainer, writeContainer } from './container.js'
-import { createWorkbook, readWorkbook } from './document.js'
+import { type Cell, createWorkbook, readWorkbook } from './document.js'
 import { XlsxError } from './errors.js'
 import type { CellInput } from './patch.js'
 
@@ -2009,4 +2009,106 @@ test('an untouched part is copied through still compressed after an edit', async
   // compressed bytes were passed through rather than inflated and rebuilt.
   const theme = 'xl/theme/theme1.xml'
   assert.deepEqual([...(after.get(theme) ?? [])], [...(before.get(theme) ?? [])])
+})
+const expressionOf = (cell: Cell | undefined): string | undefined =>
+  cell?.formula?.kind === 'expression' ? cell.formula.expression : undefined
+
+test('insertRows pushes rows down and moves formulas with them', () => {
+  const workbook = readWorkbook(
+    build(
+      '<row r="1"><c r="A1"><v>1</v></c></row>' +
+        '<row r="2"><c r="A2"><v>2</v></c></row>' +
+        '<row r="3"><c r="A3"><f>A1+A2</f><v>3</v></c><c r="B3"><f>A3*2</f><v>6</v></c></row>',
+    ),
+  )
+  workbook.sheets[0]?.insertRows(2)
+
+  const back = readWorkbook(workbook.toBytes())
+  const cells = [...(back.sheets[0]?.cells() ?? [])]
+  const at = (reference: string) => cells.find((cell) => cell.reference === reference)
+  assert.deepEqual(at('A1')?.value, { kind: 'number', value: 1 })
+  assert.equal(at('A2'), undefined)
+  assert.deepEqual(at('A3')?.value, { kind: 'number', value: 2 })
+  assert.equal(expressionOf(at('A4')), 'A1+A3')
+  assert.equal(expressionOf(at('B4')), 'A4*2')
+})
+
+test('insertRows carries a cell edited this session along with the shift', () => {
+  const workbook = readWorkbook(build('<row r="5"><c r="A5"><v>1</v></c></row>'))
+  workbook.sheets[0]?.set('A5', 'moved')
+  workbook.sheets[0]?.insertRows(3)
+
+  const cells = [...(readWorkbook(workbook.toBytes()).sheets[0]?.cells() ?? [])]
+  assert.deepEqual(cells.find((cell) => cell.reference === 'A6')?.value, {
+    kind: 'text',
+    value: 'moved',
+  })
+})
+
+test('insertRows moves references from other sheets and defined names', () => {
+  const workbook = createWorkbook('Data')
+  workbook.sheets[0]?.set('A5', 10)
+  workbook.addSheet('Calc').set('A1', { formula: 'Data!A5*2' })
+  workbook.defineName('Target', 'Data!$A$5')
+  workbook.sheets[0]?.insertRows(3)
+
+  const back = readWorkbook(workbook.toBytes())
+  const data = [...(back.sheet('Data')?.cells() ?? [])]
+  const calc = [...(back.sheet('Calc')?.cells() ?? [])]
+  assert.deepEqual(data.find((cell) => cell.reference === 'A6')?.value, {
+    kind: 'number',
+    value: 10,
+  })
+  assert.equal(expressionOf(calc.find((cell) => cell.reference === 'A1')), 'Data!A6*2')
+  assert.equal(back.definedNames.get('Target'), 'Data!$A$6')
+})
+
+test('insertRows refuses a bad row, a bad count and an overflow', () => {
+  const workbook = readWorkbook(build('<row r="1048576"><c r="A1048576"><v>1</v></c></row>'))
+  const sheet = workbook.sheets[0]
+  assert.throws(
+    () => sheet?.insertRows(0),
+    (error: unknown) => error instanceof XlsxError && error.code === 'bad-reference',
+  )
+  assert.throws(
+    () => sheet?.insertRows(1, 0),
+    (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+  )
+  assert.throws(
+    () => sheet?.insertRows(1),
+    (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+  )
+})
+
+test('insertRows refuses a sheet that carries a table', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      extra: {
+        'xl/worksheets/_rels/sheet1.xml.rels':
+          '<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/></Relationships>',
+        'xl/tables/table1.xml': '<table ref="A1:B2"/>',
+      },
+    }),
+  )
+  assert.throws(
+    () => workbook.sheets[0]?.insertRows(1),
+    (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+  )
+})
+
+test('insertRows allows a sheet whose relationships are not a table', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      extra: {
+        'xl/worksheets/_rels/sheet1.xml.rels':
+          '<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/></Relationships>',
+      },
+    }),
+  )
+  workbook.sheets[0]?.insertRows(1)
+  const cells = [...(readWorkbook(workbook.toBytes()).sheets[0]?.cells() ?? [])]
+  assert.deepEqual(cells.find((cell) => cell.reference === 'A2')?.value, {
+    kind: 'number',
+    value: 1,
+  })
 })
