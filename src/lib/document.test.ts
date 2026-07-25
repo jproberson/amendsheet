@@ -2128,23 +2128,80 @@ test('insertRows refuses a sheet that carries a table', () => {
     build('<row r="1"><c r="A1"><v>1</v></c></row>', {
       extra: {
         'xl/worksheets/_rels/sheet1.xml.rels':
-          '<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/></Relationships>',
+          '<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/></Relationships>',
         'xl/tables/table1.xml': '<table ref="A1:B2"/>',
       },
     }),
   )
   assert.throws(
     () => workbook.sheets[0]?.insertRows(1),
-    (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+    (error: unknown) =>
+      error instanceof XlsxError &&
+      error.code === 'unwritable-value' &&
+      error.message.includes('a table'),
   )
 })
 
-test('insertRows allows a sheet whose relationships are not a table', () => {
+test('insertRows refuses a sheet that carries a drawing', () => {
   const workbook = readWorkbook(
     build('<row r="1"><c r="A1"><v>1</v></c></row>', {
       extra: {
         'xl/worksheets/_rels/sheet1.xml.rels':
           '<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/></Relationships>',
+      },
+    }),
+  )
+  assert.throws(
+    () => workbook.sheets[0]?.insertRows(1),
+    (error: unknown) =>
+      error instanceof XlsxError &&
+      error.code === 'unwritable-value' &&
+      error.message.includes('drawing'),
+  )
+})
+
+test('insertColumns refuses a sheet that carries a pivot table', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      extra: {
+        'xl/worksheets/_rels/sheet1.xml.rels':
+          '<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable" Target="../pivotTables/pivotTable1.xml"/></Relationships>',
+      },
+    }),
+  )
+  assert.throws(
+    () => workbook.sheets[0]?.insertColumns('A'),
+    (error: unknown) =>
+      error instanceof XlsxError &&
+      error.code === 'unwritable-value' &&
+      error.message.includes('pivot table'),
+  )
+})
+
+test('deleteColumns refuses a sheet that carries a comment', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      extra: {
+        'xl/worksheets/_rels/sheet1.xml.rels':
+          '<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="../comments1.xml"/></Relationships>',
+      },
+    }),
+  )
+  assert.throws(
+    () => workbook.sheets[0]?.deleteColumns('A'),
+    (error: unknown) =>
+      error instanceof XlsxError &&
+      error.code === 'unwritable-value' &&
+      error.message.includes('comment'),
+  )
+})
+
+test('insertRows allows a sheet whose relationships pin no cells', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      extra: {
+        'xl/worksheets/_rels/sheet1.xml.rels':
+          '<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/printerSettings" Target="../printerSettings/printerSettings1.bin"/></Relationships>',
       },
     }),
   )

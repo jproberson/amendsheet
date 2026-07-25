@@ -214,15 +214,16 @@ export interface Worksheet {
    * it down. References that point into the moved rows — formulas anywhere in the
    * workbook, merges, the dimension, filters, conditional formats and defined
    * names — move with them. Cell edits made in this session land first, so they
-   * ride along too. Refused when the sheet carries a table, whose stored range
-   * this does not yet adjust, or when the shift would push a row off the sheet.
+   * ride along too. Refused when the sheet carries a table, drawing, pivot table
+   * or comment, whose pinned positions this does not yet adjust, or when the
+   * shift would push a row off the sheet.
    */
   insertRows(before: number, count?: number): void
   /**
    * Inserts `count` blank columns before column `before` — a letter like `C` —
    * pushing the columns at and to the right of it over. References that point into
-   * the moved columns move with them, on the same terms as `insertRows`, tables
-   * and an off-the-sheet shift included.
+   * the moved columns move with them, on the same terms as `insertRows`, a pinned
+   * part and an off-the-sheet shift included.
    */
   insertColumns(before: string, count?: number): void
   /**
@@ -230,7 +231,8 @@ export interface Worksheet {
    * reference into a deleted row becomes #REF! where a formula named the cell, and
    * shrinks where a range only overlapped. Refused when a whole merged range,
    * filter, format or shared formula sat inside the deletion, none of which can
-   * survive as #REF!, or when the sheet carries a table.
+   * survive as #REF!, or when the sheet carries a table, drawing, pivot table or
+   * comment.
    */
   deleteRows(from: number, count?: number): void
   /**
@@ -455,15 +457,28 @@ function deletionDamage(bytes: Uint8Array, spec: ShiftSpec): string | undefined 
 const relationshipsPathFor = (partPath: string): string =>
   partPath.replace(/([^/]+)$/, '_rels/$1.rels')
 
-const TABLE_RELATIONSHIP = 'relationships/table'
+// Parts whose stored positions a line shift does not adjust, so an insert or
+// delete that would move the cells under them is refused rather than leave them
+// pointing at the wrong ones. A drawing pins charts, images and shapes by cell
+// anchor; a comment and a table each pin a range; a pivot pins its source and
+// where it lands. The capital T in pivotTable keeps it from matching table.
+const UNSHIFTABLE_PARTS: ReadonlyArray<readonly [string, string]> = [
+  ['relationships/table', 'a table'],
+  ['relationships/pivotTable', 'a pivot table'],
+  ['relationships/drawing', 'a drawing'],
+  ['relationships/vmlDrawing', 'a drawing'],
+  ['relationships/comments', 'a comment'],
+]
 
-/** Whether a sheet owns a table, whose stored range a row shift does not adjust. */
-function ownsTable(relationshipsXml: string): boolean {
+/** The kind of unshiftable part a sheet owns, named for the refusal, or undefined. */
+function unshiftablePart(relationshipsXml: string): string | undefined {
   for (const event of readXml(relationshipsXml)) {
     if (event.kind !== 'open' || event.localName !== 'Relationship') continue
-    if (event.attributes.get('Type')?.endsWith(TABLE_RELATIONSHIP) === true) return true
+    for (const [suffix, noun] of UNSHIFTABLE_PARTS) {
+      if (event.attributes.get('Type')?.endsWith(suffix) === true) return noun
+    }
   }
-  return false
+  return undefined
 }
 
 /** Removes one Override element, leaving every other byte of the part alone. */
@@ -839,17 +854,18 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         { ...at, reference: canonical },
       )
 
-    // A table's stored range is preserved untouched, so an insert or delete that
-    // would move the cells under it is refused until the range is adjusted too.
-    const refuseTable = (action: string, where?: string): void => {
+    // A part with pinned positions is preserved untouched, so an insert or delete
+    // that would move the cells under it is refused until it too can be adjusted.
+    const refuseUnshiftable = (action: string, where?: string): void => {
       const relationships = partText(container, relationshipsPathFor(reference.path))
-      if (relationships !== undefined && ownsTable(relationships)) {
-        throw new XlsxError(
-          'unwritable-value',
-          `Sheet ${reference.name} carries a table, so ${action}`,
-          { ...at, ...(where === undefined ? {} : { reference: where }) },
-        )
-      }
+      if (relationships === undefined) return
+      const owns = unshiftablePart(relationships)
+      if (owns === undefined) return
+      throw new XlsxError(
+        'unwritable-value',
+        `Sheet ${reference.name} carries ${owns}, so ${action}`,
+        { ...at, ...(where === undefined ? {} : { reference: where }) },
+      )
     }
 
     const lineSpec = (axis: 'row' | 'column', line: number, delta: number): ShiftSpec => ({
@@ -1118,7 +1134,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             { ...at },
           )
         }
-        refuseTable('its rows cannot be inserted into yet')
+        refuseUnshiftable('its rows cannot be inserted into yet')
         lineOps.push({ path: reference.path, spec: lineSpec('row', before, count) })
       },
       insertColumns(before: string, count = 1): void {
@@ -1144,7 +1160,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             { ...at, reference: before },
           )
         }
-        refuseTable('its columns cannot be inserted into yet', before)
+        refuseUnshiftable('its columns cannot be inserted into yet', before)
         lineOps.push({ path: reference.path, spec: lineSpec('column', atColumn, count) })
       },
       deleteRows(from: number, count = 1): void {
@@ -1161,7 +1177,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           })
         }
         checkCount(count, 'rows to delete')
-        refuseTable('its rows cannot be deleted yet')
+        refuseUnshiftable('its rows cannot be deleted yet')
         const spec = lineSpec('row', from, -count)
         const damage = deletionDamage(sheetBytes, spec)
         if (damage !== undefined) {
@@ -1189,7 +1205,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           })
         }
         checkCount(count, 'columns to delete', from)
-        refuseTable('its columns cannot be deleted yet', from)
+        refuseUnshiftable('its columns cannot be deleted yet', from)
         const spec = lineSpec('column', atColumn, -count)
         const damage = deletionDamage(sheetBytes, spec)
         if (damage !== undefined) {
