@@ -98,6 +98,33 @@ test('shiftSheet drops a self-closing deleted row', () => {
   assert.equal(out, '<sheetData><row r="2"><c r="A2"><v>1</v></c></row></sheetData>')
 })
 
+const deleteColumnAt = (at: number, count = 1): ShiftSpec => ({
+  axis: 'column',
+  at,
+  delta: -count,
+  editedSheet: 'Sheet1',
+  onCurrentSheet: true,
+})
+
+test('shiftSheet drops cells and cols entries in a deleted column, sliding the rest left', () => {
+  const sheet =
+    '<worksheet><cols><col min="2" max="2" width="9"/><col min="1" max="5" width="4"/><col width="3"/></cols>' +
+    '<sheetData><row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>2</v></c>' +
+    '<c r="C1"><f>A1+B1</f></c><c r="D1"/></row>' +
+    '<row r="2"><c r="B2"/></row></sheetData></worksheet>'
+  const out = shiftSheet(sheet, deleteColumnAt(2))
+  assert.doesNotMatch(out, /<v>2<\/v>/)
+  assert.match(
+    out,
+    /<row r="1"><c r="A1"><v>1<\/v><\/c><c r="B1"><f>A1\+#REF!<\/f><\/c><c r="C1"\/>/,
+  )
+  assert.match(out, /<row r="2"\/?><\/row>|<row r="2"><\/row>/)
+  assert.doesNotMatch(out, /r="B2"/)
+  assert.doesNotMatch(out, /min="2" max="2"/)
+  assert.match(out, /<col min="1" max="4" width="4"\/>/)
+  assert.match(out, /<col width="3"\/>/)
+})
+
 test('shiftSheet shifts columns, cols bounds and cell columns without renumbering rows', () => {
   const sheet =
     '<worksheet><cols><col min="2" max="2" width="9"/><col min="1" max="5" width="4"/></cols>' +
@@ -108,6 +135,14 @@ test('shiftSheet shifts columns, cols bounds and cell columns without renumberin
   assert.match(out, /<col min="1" max="6" width="4"\/>/)
   assert.match(out, /<row r="1"><c r="A1"><v>1<\/v><\/c><c r="D1"><f>A1\+C1<\/f>/)
   assert.match(out, /<mergeCell ref="C1:D1"\/>/)
+})
+
+test('shiftSheet leaves an implicit cell to follow the cell before it', () => {
+  const sheet = '<sheetData><row r="1"><c r="A1"><v>1</v></c><c><v>2</v></c></row></sheetData>'
+  assert.equal(
+    shiftSheet(sheet, insertColumnAt(1)),
+    '<sheetData><row r="1"><c r="B1"><v>1</v></c><c><v>2</v></c></row></sheetData>',
+  )
 })
 
 test('shiftSheet leaves a sheet with nothing at or past the point unchanged', () => {

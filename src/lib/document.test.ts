@@ -1761,6 +1761,14 @@ test('refuses a write to a sheet whose part is not in the package', () => {
     () => workbook.sheets[0]?.insertColumns('A'),
     (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
   )
+  assert.throws(
+    () => workbook.sheets[0]?.deleteRows(1),
+    (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
+  )
+  assert.throws(
+    () => workbook.sheets[0]?.deleteColumns('A'),
+    (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
+  )
 })
 
 test('a reference the sheet cannot hold does not break lookups around it', () => {
@@ -2260,4 +2268,41 @@ test('deleteRows keeps a merge it only clips and a master above the deletion', (
   const out = decode(readContainer(workbook.toBytes()).parts.get('xl/worksheets/sheet1.xml'))
   assert.match(out, /<mergeCell ref="A4:A5"\/>/)
   assert.match(out, /<row r="5"><c r="A5"><v>1<\/v>/)
+})
+
+test('deleteColumns pulls columns in, #REF!s a lost cell and shrinks an overlapping range', () => {
+  const workbook = createWorkbook('Data')
+  const sheet = workbook.sheets[0]
+  sheet?.set('A1', 1)
+  sheet?.set('B1', 2)
+  sheet?.set('D1', { formula: 'B1+SUM(A1:D1)' })
+  workbook.addSheet('Calc').set('A1', { formula: 'Data!B1+Data!D1' })
+  sheet?.deleteColumns('B')
+
+  const back = readWorkbook(workbook.toBytes())
+  const data = [...(back.sheet('Data')?.cells() ?? [])]
+  const at = (reference: string) => data.find((cell) => cell.reference === reference)
+  assert.deepEqual(at('A1')?.value, { kind: 'number', value: 1 })
+  assert.equal(at('B1'), undefined)
+  assert.equal(expressionOf(at('C1')), '#REF!+SUM(A1:C1)')
+  const calc = [...(back.sheet('Calc')?.cells() ?? [])]
+  assert.equal(expressionOf(calc.find((cell) => cell.reference === 'A1')), '#REF!+Data!C1')
+})
+
+test('deleteColumns refuses a bad column, a bad count and a collapsing master', () => {
+  const master = readWorkbook(
+    build('<row r="1"><c r="B1"><f t="shared" ref="B1:B9" si="0">A1</f></c></row>'),
+  )
+  assert.throws(
+    () => master.sheets[0]?.deleteColumns('XFE'),
+    (error: unknown) => error instanceof XlsxError && error.code === 'bad-reference',
+  )
+  assert.throws(
+    () => master.sheets[0]?.deleteColumns('A', 0),
+    (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+  )
+  assert.throws(
+    () => master.sheets[0]?.deleteColumns('B'),
+    (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+  )
 })

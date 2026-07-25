@@ -223,6 +223,11 @@ export interface Worksheet {
    * survive as #REF!, or when the sheet carries a table.
    */
   deleteRows(from: number, count?: number): void
+  /**
+   * Deletes `count` columns from column `from` — a letter like `C` — pulling the
+   * columns to their right in over them, on the same terms as `deleteRows`.
+   */
+  deleteColumns(from: string, count?: number): void
 }
 
 export interface SetOptions {
@@ -401,18 +406,24 @@ const COLLAPSIBLE = new Map([
 
 /** What a deletion would destroy that cannot survive as #REF!, or undefined. */
 function deletionDamage(bytes: Uint8Array, spec: ShiftSpec): string | undefined {
-  let line = 0
+  let row = 0
+  let column = 0
   for (const event of readXmlBytes(bytes)) {
     if (event.kind !== 'open') continue
-    if (event.localName === 'row' && spec.axis === 'row') {
+    if (event.localName === 'row') {
       const declared = event.attributes.get('r')
-      line = declared === undefined ? line + 1 : Number(declared)
+      row = declared === undefined ? row + 1 : Number(declared)
+      column = 0
       continue
     }
+    if (event.localName === 'c') {
+      const letters = event.attributes.get('r')?.match(/[A-Za-z]+/)?.[0]
+      column = letters === undefined ? column + 1 : columnToIndex(letters)
+    }
+    // A shared or array formula's home cell inside the band loses its definition.
     if (event.localName === 'f' && event.attributes.get('ref') !== undefined) {
-      if (spec.axis === 'row' && line >= spec.at && line < spec.at - spec.delta) {
-        return 'a shared or array formula'
-      }
+      const line = spec.axis === 'row' ? row : column
+      if (line >= spec.at && line < spec.at - spec.delta) return 'a shared or array formula'
     }
     const collapsible = COLLAPSIBLE.get(event.localName)
     if (collapsible !== undefined) {
@@ -1168,6 +1179,53 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             'unwritable-value',
             `Deleting rows from ${reference.name} would destroy ${damage}`,
             { ...at },
+          )
+        }
+        lineOps.push({ path: reference.path, spec })
+      },
+      deleteColumns(from: string, count = 1): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so no columns can be deleted`,
+            { ...at, reference: from },
+          )
+        }
+        const atColumn = columnToIndex(from)
+        if (atColumn > LAST_COLUMN) {
+          throw new XlsxError('bad-reference', `Column ${from} is outside the sheet`, {
+            ...at,
+            reference: from,
+          })
+        }
+        if (!Number.isInteger(count) || count < 1) {
+          throw new XlsxError('unwritable-value', `${count} is not a number of columns to delete`, {
+            ...at,
+            reference: from,
+          })
+        }
+        const relationshipsPath = reference.path.replace(/([^/]+)$/, '_rels/$1.rels')
+        const relationshipsXml = partText(container, relationshipsPath)
+        if (relationshipsXml !== undefined && ownsTable(relationshipsXml)) {
+          throw new XlsxError(
+            'unwritable-value',
+            `Sheet ${reference.name} carries a table, so its columns cannot be deleted yet`,
+            { ...at, reference: from },
+          )
+        }
+        const spec: ShiftSpec = {
+          axis: 'column',
+          at: atColumn,
+          delta: -count,
+          editedSheet: reference.name,
+          onCurrentSheet: true,
+        }
+        const damage = deletionDamage(sheetBytes, spec)
+        if (damage !== undefined) {
+          throw new XlsxError(
+            'unwritable-value',
+            `Deleting columns from ${reference.name} would destroy ${damage}`,
+            { ...at, reference: from },
           )
         }
         lineOps.push({ path: reference.path, spec })
