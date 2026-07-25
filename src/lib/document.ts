@@ -1,3 +1,11 @@
+import {
+  type AddedSheet,
+  EMPTY_SHEET_XML,
+  checkSheetName,
+  withSheetContentTypes,
+  withSheetRelationships,
+  withSheetsAdded,
+} from './add-sheet.js'
 import { blankWorkbookBytes } from './blank.js'
 import { type Container, decodeXmlPart } from './container.js'
 import { XlsxError } from './errors.js'
@@ -51,7 +59,7 @@ import {
 } from './styles-writer.js'
 import { type Styles, isDateFormat, numberFormatOf, readStyles } from './styles.js'
 import { readXml } from './xml.js'
-import { type SheetState, readWorkbookPart } from './workbook.js'
+import { type SheetRef, type SheetState, readWorkbookPart } from './workbook.js'
 
 export type CellValue =
   | { readonly kind: 'number'; readonly value: number }
@@ -192,6 +200,12 @@ export interface Workbook {
   readonly sheets: readonly Worksheet[]
   /** Undefined when no sheet has that name. Names are compared exactly. */
   sheet(name: string): Worksheet | undefined
+  /**
+   * Adds an empty worksheet and returns it, ready to fill. The name must be one
+   * Excel accepts — up to 31 characters, none of `: \ / ? * [ ]`, and not one a
+   * sheet already uses. Written into the workbook by `toBytes()`.
+   */
+  addSheet(name: string): Worksheet
   /** Which year serials count from. A 1904 workbook is 1462 days behind. */
   readonly epoch: 1900 | 1904
   /** Parts that were never interpreted are written exactly as they were read. */
@@ -416,8 +430,14 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     return parsedFormatting[styleIndex] ?? {}
   }
 
-  const sheets = part.sheets.map((reference): Worksheet => {
-    const sheetBytes = container.parts.get(reference.path)
+  // Sheets added since the read, path -> its empty worksheet bytes. They flow
+  // through the same edit machinery as a sheet the file already had; toBytes()
+  // writes the new part and wires it into the workbook, its rels and the types.
+  const addedSheets = new Map<string, Uint8Array>()
+  const addedRefs: AddedSheet[] = []
+
+  const makeWorksheet = (reference: SheetRef): Worksheet => {
+    const sheetBytes = container.parts.get(reference.path) ?? addedSheets.get(reference.path)
     const at: SheetLocation = { sheet: reference.name, part: reference.path }
 
     const patched = (): Uint8Array | undefined => {
@@ -780,7 +800,46 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         sheetColumnWidths.set(reference.path, widths)
       },
     }
-  })
+  }
+
+  const sheets: Worksheet[] = part.sheets.map(makeWorksheet)
+
+  const workbookDir = part.path.replace(/[^/]+$/, '')
+  const usedSheetPaths = new Set(container.parts.keys())
+  let maxSheetId = part.sheets.reduce((max, sheet) => Math.max(max, Number(sheet.sheetId) || 0), 0)
+  const workbookRelsXml = partText(container, part.relationshipsPath) ?? ''
+  let maxRelationshipId = 0
+  for (const match of workbookRelsXml.matchAll(/Id="rId(\d+)"/g)) {
+    maxRelationshipId = Math.max(maxRelationshipId, Number(match[1]))
+  }
+
+  const addWorksheet = (name: string): Worksheet => {
+    checkSheetName(
+      name,
+      sheets.map((sheet) => sheet.name),
+    )
+    let n = 1
+    while (usedSheetPaths.has(`${workbookDir}worksheets/sheet${n}.xml`)) n++
+    const path = `${workbookDir}worksheets/sheet${n}.xml`
+    usedSheetPaths.add(path)
+    const reference: SheetRef = {
+      name,
+      path,
+      sheetId: String(++maxSheetId),
+      state: 'visible',
+    }
+    addedSheets.set(path, new TextEncoder().encode(EMPTY_SHEET_XML))
+    addedRefs.push({
+      reference,
+      relationshipId: `rId${++maxRelationshipId}`,
+      // The sheet path is built from the workbook's own folder, so the target is
+      // just the tail past it, relative to where the workbook rels resolve from.
+      target: path.slice(workbookDir.length),
+    })
+    const sheet = makeWorksheet(reference)
+    sheets.push(sheet)
+    return sheet
+  }
 
   const toBytes = (): Uint8Array => {
     // A change carries new bytes for a part; null deletes it. Every part not
@@ -794,7 +853,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       sheetProtections.size === 0 &&
       sheetMerges.size === 0 &&
       sheetRowHeights.size === 0 &&
-      sheetColumnWidths.size === 0
+      sheetColumnWidths.size === 0 &&
+      addedRefs.length === 0
     ) {
       return container.write(changes)
     }
@@ -802,21 +862,10 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     const encoder = new TextEncoder()
 
     // Excel rebuilds the calculation chain, but a stale one makes it offer to
-    // repair the file, so the part and its content type go together.
-    if (container.parts.has(CALCULATION_CHAIN)) {
-      changes.set(CALCULATION_CHAIN, null)
-      const types = partText(container, CONTENT_TYPES)
-      if (types !== undefined) {
-        changes.set(CONTENT_TYPES, encoder.encode(withoutOverride(types, CALCULATION_CHAIN)))
-      }
-      const rels = partText(container, part.relationshipsPath)
-      if (rels !== undefined) {
-        changes.set(
-          part.relationshipsPath,
-          encoder.encode(withoutRelationship(rels, part.path, CALCULATION_CHAIN)),
-        )
-      }
-    }
+    // repair the file. Dropping it also touches the workbook rels and the content
+    // types, which the added-sheet wiring below writes in the same pass.
+    const hadCalcChain = container.parts.has(CALCULATION_CHAIN)
+    if (hadCalcChain) changes.set(CALCULATION_CHAIN, null)
 
     // set() already resolved every style; only the serialising is left.
     if (workingStyles !== undefined && workingStyles !== stylesXml) {
@@ -849,12 +898,15 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       ...sheetMerges.keys(),
       ...sheetRowHeights.keys(),
       ...sheetColumnWidths.keys(),
+      ...addedSheets.keys(),
     ])) {
-      const bytes = container.parts.get(path)
+      const bytes = container.parts.get(path) ?? addedSheets.get(path)
       if (bytes === undefined) continue
       const pending = edits.get(path) ?? EMPTY_EDITS
       const at: SheetLocation = {
-        sheet: part.sheets.find((s) => s.path === path)?.name,
+        sheet:
+          part.sheets.find((s) => s.path === path)?.name ??
+          addedRefs.find((added) => added.reference.path === path)?.reference.name,
         part: path,
       }
       changes.set(
@@ -877,9 +929,40 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         (value) => typeof value === 'object' && value !== null && !(value instanceof Date),
       ),
     )
-    if (wroteFormula) {
-      const book = partText(container, part.path)
-      if (book !== undefined) changes.set(part.path, encoder.encode(withRecalculation(book)))
+
+    // The workbook, its relationships and the content types each take up to two
+    // edits — a formula's recalculation flag or the added sheets on the workbook,
+    // the dropped calculation chain or the added sheets on the other two — so each
+    // is composed from its current text and written once.
+    const workbookXml = partText(container, part.path)
+    if (workbookXml !== undefined) {
+      const updated = withSheetsAdded(
+        wroteFormula ? withRecalculation(workbookXml) : workbookXml,
+        addedRefs,
+      )
+      if (updated !== workbookXml) changes.set(part.path, encoder.encode(updated))
+    }
+
+    const relationshipsXml = partText(container, part.relationshipsPath)
+    if (relationshipsXml !== undefined) {
+      const updated = withSheetRelationships(
+        hadCalcChain
+          ? withoutRelationship(relationshipsXml, part.path, CALCULATION_CHAIN)
+          : relationshipsXml,
+        addedRefs,
+      )
+      if (updated !== relationshipsXml) {
+        changes.set(part.relationshipsPath, encoder.encode(updated))
+      }
+    }
+
+    const contentTypesXml = partText(container, CONTENT_TYPES)
+    if (contentTypesXml !== undefined) {
+      const updated = withSheetContentTypes(
+        hadCalcChain ? withoutOverride(contentTypesXml, CALCULATION_CHAIN) : contentTypesXml,
+        addedRefs,
+      )
+      if (updated !== contentTypesXml) changes.set(CONTENT_TYPES, encoder.encode(updated))
     }
 
     return container.write(changes)
@@ -888,6 +971,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   return {
     sheets,
     sheet: (name: string) => sheets.find((candidate) => candidate.name === name),
+    addSheet: addWorksheet,
     epoch: date1904 ? 1904 : 1900,
     toBytes,
   }

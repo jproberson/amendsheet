@@ -54,6 +54,62 @@ test('createWorkbook makes an empty one-sheet workbook that fills and writes bac
   assert.deepEqual(cell('B2')?.value, { kind: 'number', value: 42 })
 })
 
+test('addSheet adds editable sheets a created workbook writes back', () => {
+  const workbook = createWorkbook()
+  workbook.sheets[0]?.set('A1', 'first')
+  const data = workbook.addSheet('Data')
+  data.set('A1', 'second')
+  data.set('B2', 99, { font: { bold: true } })
+
+  assert.deepEqual(
+    workbook.sheets.map((sheet) => sheet.name),
+    ['Sheet1', 'Data'],
+  )
+  assert.equal(workbook.sheet('Data'), data)
+
+  const back = readWorkbook(workbook.toBytes())
+  assert.deepEqual(
+    back.sheets.map((sheet) => sheet.name),
+    ['Sheet1', 'Data'],
+  )
+  const cell = (sheet: number, reference: string) =>
+    [...(back.sheets[sheet]?.cells() ?? [])].find((c) => c.reference === reference)
+  assert.deepEqual(cell(0, 'A1')?.value, { kind: 'text', value: 'first' })
+  assert.deepEqual(cell(1, 'A1')?.value, { kind: 'text', value: 'second' })
+  assert.deepEqual(cell(1, 'B2')?.value, { kind: 'number', value: 99 })
+})
+
+test('addSheet adds a sheet to a workbook that was read, leaving other parts alone', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.addSheet('Extra').set('A1', 'new')
+
+  const out = workbook.toBytes()
+  const parts = readContainer(out).parts
+  assert.equal(decode(parts.get('xl/charts/chart1.xml')), '<chart/>')
+
+  const back = readWorkbook(out)
+  assert.deepEqual(
+    back.sheets.map((sheet) => sheet.name),
+    ['Data', 'Extra'],
+  )
+  const extra = [...(back.sheets[1]?.cells() ?? [])].find((c) => c.reference === 'A1')
+  assert.deepEqual(extra?.value, { kind: 'text', value: 'new' })
+})
+
+test('addSheet refuses a name Excel will not take', () => {
+  const workbook = createWorkbook()
+  const refuses = (name: string) =>
+    assert.throws(
+      () => workbook.addSheet(name),
+      (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+    )
+  refuses('Sheet1') // a name a sheet already uses
+  refuses('sheet1') // the same name in another case
+  refuses('') // empty
+  refuses('a'.repeat(32)) // longer than 31 characters
+  refuses('bad/name') // a character Excel forbids
+})
+
 test('exposes sheets by name', () => {
   const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
 
