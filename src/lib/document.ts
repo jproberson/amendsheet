@@ -451,6 +451,10 @@ function deletionDamage(bytes: Uint8Array, spec: ShiftSpec): string | undefined 
   return undefined
 }
 
+/** A part's relationships live in a `_rels` folder beside it, named after it. */
+const relationshipsPathFor = (partPath: string): string =>
+  partPath.replace(/([^/]+)$/, '_rels/$1.rels')
+
 const TABLE_RELATIONSHIP = 'relationships/table'
 
 /** Whether a sheet owns a table, whose stored range a row shift does not adjust. */
@@ -835,6 +839,36 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         { ...at, reference: canonical },
       )
 
+    // A table's stored range is preserved untouched, so an insert or delete that
+    // would move the cells under it is refused until the range is adjusted too.
+    const refuseTable = (action: string, where?: string): void => {
+      const relationships = partText(container, relationshipsPathFor(reference.path))
+      if (relationships !== undefined && ownsTable(relationships)) {
+        throw new XlsxError(
+          'unwritable-value',
+          `Sheet ${reference.name} carries a table, so ${action}`,
+          { ...at, ...(where === undefined ? {} : { reference: where }) },
+        )
+      }
+    }
+
+    const lineSpec = (axis: 'row' | 'column', line: number, delta: number): ShiftSpec => ({
+      axis,
+      at: line,
+      delta,
+      editedSheet: reference.name,
+      onCurrentSheet: true,
+    })
+
+    const checkCount = (count: number, noun: string, where?: string): void => {
+      if (!Number.isInteger(count) || count < 1) {
+        throw new XlsxError('unwritable-value', `${count} is not a number of ${noun}`, {
+          ...at,
+          ...(where === undefined ? {} : { reference: where }),
+        })
+      }
+    }
+
     return {
       get name(): string {
         return renames.get(reference.path) ?? reference.name
@@ -1076,11 +1110,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             ...at,
           })
         }
-        if (!Number.isInteger(count) || count < 1) {
-          throw new XlsxError('unwritable-value', `${count} is not a number of rows to insert`, {
-            ...at,
-          })
-        }
+        checkCount(count, 'rows to insert')
         if (highestRow(sheetBytes) + count > LAST_ROW) {
           throw new XlsxError(
             'unwritable-value',
@@ -1088,25 +1118,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             { ...at },
           )
         }
-        const relationshipsPath = reference.path.replace(/([^/]+)$/, '_rels/$1.rels')
-        const relationshipsXml = partText(container, relationshipsPath)
-        if (relationshipsXml !== undefined && ownsTable(relationshipsXml)) {
-          throw new XlsxError(
-            'unwritable-value',
-            `Sheet ${reference.name} carries a table, so its rows cannot be inserted into yet`,
-            { ...at },
-          )
-        }
-        lineOps.push({
-          path: reference.path,
-          spec: {
-            axis: 'row',
-            at: before,
-            delta: count,
-            editedSheet: reference.name,
-            onCurrentSheet: true,
-          },
-        })
+        refuseTable('its rows cannot be inserted into yet')
+        lineOps.push({ path: reference.path, spec: lineSpec('row', before, count) })
       },
       insertColumns(before: string, count = 1): void {
         if (sheetBytes === undefined) {
@@ -1123,12 +1136,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             reference: before,
           })
         }
-        if (!Number.isInteger(count) || count < 1) {
-          throw new XlsxError('unwritable-value', `${count} is not a number of columns to insert`, {
-            ...at,
-            reference: before,
-          })
-        }
+        checkCount(count, 'columns to insert', before)
         if (highestColumn(sheetBytes) + count > LAST_COLUMN) {
           throw new XlsxError(
             'unwritable-value',
@@ -1136,25 +1144,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             { ...at, reference: before },
           )
         }
-        const relationshipsPath = reference.path.replace(/([^/]+)$/, '_rels/$1.rels')
-        const relationshipsXml = partText(container, relationshipsPath)
-        if (relationshipsXml !== undefined && ownsTable(relationshipsXml)) {
-          throw new XlsxError(
-            'unwritable-value',
-            `Sheet ${reference.name} carries a table, so its columns cannot be inserted into yet`,
-            { ...at, reference: before },
-          )
-        }
-        lineOps.push({
-          path: reference.path,
-          spec: {
-            axis: 'column',
-            at: atColumn,
-            delta: count,
-            editedSheet: reference.name,
-            onCurrentSheet: true,
-          },
-        })
+        refuseTable('its columns cannot be inserted into yet', before)
+        lineOps.push({ path: reference.path, spec: lineSpec('column', atColumn, count) })
       },
       deleteRows(from: number, count = 1): void {
         if (sheetBytes === undefined) {
@@ -1169,27 +1160,9 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             ...at,
           })
         }
-        if (!Number.isInteger(count) || count < 1) {
-          throw new XlsxError('unwritable-value', `${count} is not a number of rows to delete`, {
-            ...at,
-          })
-        }
-        const relationshipsPath = reference.path.replace(/([^/]+)$/, '_rels/$1.rels')
-        const relationshipsXml = partText(container, relationshipsPath)
-        if (relationshipsXml !== undefined && ownsTable(relationshipsXml)) {
-          throw new XlsxError(
-            'unwritable-value',
-            `Sheet ${reference.name} carries a table, so its rows cannot be deleted yet`,
-            { ...at },
-          )
-        }
-        const spec: ShiftSpec = {
-          axis: 'row',
-          at: from,
-          delta: -count,
-          editedSheet: reference.name,
-          onCurrentSheet: true,
-        }
+        checkCount(count, 'rows to delete')
+        refuseTable('its rows cannot be deleted yet')
+        const spec = lineSpec('row', from, -count)
         const damage = deletionDamage(sheetBytes, spec)
         if (damage !== undefined) {
           throw new XlsxError(
@@ -1215,28 +1188,9 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             reference: from,
           })
         }
-        if (!Number.isInteger(count) || count < 1) {
-          throw new XlsxError('unwritable-value', `${count} is not a number of columns to delete`, {
-            ...at,
-            reference: from,
-          })
-        }
-        const relationshipsPath = reference.path.replace(/([^/]+)$/, '_rels/$1.rels')
-        const relationshipsXml = partText(container, relationshipsPath)
-        if (relationshipsXml !== undefined && ownsTable(relationshipsXml)) {
-          throw new XlsxError(
-            'unwritable-value',
-            `Sheet ${reference.name} carries a table, so its columns cannot be deleted yet`,
-            { ...at, reference: from },
-          )
-        }
-        const spec: ShiftSpec = {
-          axis: 'column',
-          at: atColumn,
-          delta: -count,
-          editedSheet: reference.name,
-          onCurrentSheet: true,
-        }
+        checkCount(count, 'columns to delete', from)
+        refuseTable('its columns cannot be deleted yet', from)
+        const spec = lineSpec('column', atColumn, -count)
         const damage = deletionDamage(sheetBytes, spec)
         if (damage !== undefined) {
           throw new XlsxError(
@@ -1447,7 +1401,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       if (removed.has(path)) continue
       const sheetXml = sheetTextNow(path)
       if (sheetXml === undefined) continue
-      const relationshipsPath = path.replace(/([^/]+)$/, '_rels/$1.rels')
+      const relationshipsPath = relationshipsPathFor(path)
       const existingRels = partText(container, relationshipsPath)
       let nextId = 0
       for (const match of (existingRels ?? '').matchAll(/Id="rId(\d+)"/g)) {
