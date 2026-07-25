@@ -2,7 +2,7 @@
 
 Amend `.xlsx` files. Everything you didn't touch stays exactly as it was.
 
-Reads and edits spreadsheets in Node and the browser, checked in both. The
+Reads, edits and creates spreadsheets in Node and the browser, checked in both. The
 contents of any part the library doesn't interpret get written back byte for
 byte, so charts, pivot tables, drawings and macros all survive a read and a
 save. Changing one cell won't quietly throw away the rest of the workbook.
@@ -108,7 +108,9 @@ union: `{ type: 'solid', color }` for a plain background, or `{ type: 'pattern',
 pattern, color, background }` for one of the ECMA-376 pattern types such as
 `lightGrid`, where `color` is the pattern's foreground. A
 `border` sets sides by name, or `all` at once, merging onto the sides the cell
-already has. An `alignment` places the text — `horizontal`, `vertical`,
+already has; a `diagonal` side — `{ style, color?, up?, down? }` — draws a line
+across the cell, on the up diagonal, the down one, or both, defaulting to down.
+An `alignment` places the text — `horizontal`, `vertical`,
 `wrapText`, `textRotation` (0–180, or 255 to stack top to bottom) and `indent` —
 and merges the same way, so setting `wrapText` leaves a horizontal choice alone.
 A `protection` sets `locked` and `hidden`, which take effect once the worksheet
@@ -143,7 +145,55 @@ for a merge the file came with.
 `worksheet.setRowHeight(1, 30)` sizes a row in points, and
 `worksheet.setColumnWidth('A', 24)` sizes a column in Excel's width units,
 splitting a `cols` range that spans more than the one column so the rest keeps
-its own width.
+its own width. `worksheet.hideRow(3)` and `worksheet.hideColumn('C')` hide a
+line, keeping any height or width it also has.
+
+`worksheet.insertRows(before, count?)` inserts blank rows before a row number,
+and `insertColumns(before, count?)` inserts blank columns before a column letter;
+`deleteRows(from, count?)` and `deleteColumns(from, count?)` take them out.
+
+```ts
+const sheet = readWorkbook(bytes).sheets[0]
+
+sheet.insertRows(3, 2)    // two blank rows above row 3
+sheet.deleteColumns('B')  // remove column B, pulling C onward left
+```
+
+Every reference that points into the moved lines moves with them — a formula
+anywhere in the workbook, a shared formula's range, merges, the dimension,
+filters, conditional formats, validations, hyperlinks and defined names. A cell
+set earlier in the same session lands first, so it rides along. A deletion turns
+a reference to a removed cell into `#REF!` and shrinks a range that only
+overlapped it. An insert that would push a line off the sheet is refused, as is a
+deletion that would collapse a whole merge, filter, format or shared formula, and
+either on a sheet carrying a table, whose stored range is not adjusted yet.
+
+`worksheet.freeze('B2')` freezes the rows above and columns left of a cell, and
+`worksheet.autoFilter('A1:D100')` sets the filter over a range, replacing any the
+sheet already has.
+
+`workbook.defineName('TaxRate', 'Sheet1!$B$1')` defines a global named range, and
+`workbook.definedNames` reads them back; a name scoped to one sheet is left as it
+was. `worksheet.link('A1', { url: 'https://example.com' })` links a cell out to a
+URL, and `link('A1', { location: 'Sheet2!A1' })` links within the workbook to a
+cell or a defined name — both take an optional `tooltip`, replace any link the
+cell had, and move with an inserted or deleted line.
+
+A workbook does not have to come from a file. `createWorkbook()` starts a blank
+one with a single empty sheet named `Sheet1`, or the name you pass, ready for the
+same edit API. `workbook.addSheet('Data')` adds an empty sheet and returns it,
+`worksheet.rename('Report')` renames one, and `worksheet.remove()` drops it,
+refusing to remove the last. Creating goes through the same path a read workbook
+does, so a created sheet takes every edit above.
+
+```ts
+import { createWorkbook } from 'amendsheet'
+
+const workbook = createWorkbook('Budget')
+workbook.sheets[0].set('A1', 'Item')
+workbook.addSheet('Notes').set('A1', 'draft')
+const out = workbook.toBytes()
+```
 
 An edit the format cannot hold is refused by `set` itself, with an `XlsxError`
 naming the cell. `NaN`, an infinity, a character XML has no way to encode, a
@@ -237,9 +287,12 @@ What a minor release is allowed to do, so you know which branches are safe:
   than resolved to the hex it displays as, so reading the colour a theme names
   would need the theme part this library does not yet interpret.
 - A table grows to include a cell written directly below or to the right of it,
-  the way Excel would, adding a column when it grows sideways. Other ranges that
-  name cells are still copied, not adjusted: chart ranges, defined names and
-  conditional formatting keep the extent they had.
+  the way Excel would, adding a column when it grows sideways. Inserting or
+  deleting rows and columns moves the references that name cells — formulas,
+  merges, filters, conditional formats, hyperlinks and defined names — but a
+  chart's ranges and a pivot table's source are copied unchanged, and a table's
+  own stored range is not adjusted, so those edits are refused on a sheet with a
+  table rather than left inconsistent.
 - Chartsheets and dialogsheets aren't listed in `sheets`, since they hold no
   cells. They're still written back untouched.
 
