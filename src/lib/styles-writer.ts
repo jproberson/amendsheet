@@ -661,6 +661,17 @@ interface Sides {
   readonly diagonalDown?: boolean
 }
 
+// The same fields built up before they settle into a readonly Sides.
+type MutableSides = {
+  left?: Side
+  right?: Side
+  top?: Side
+  bottom?: Side
+  diagonal?: Side
+  diagonalUp?: boolean
+  diagonalDown?: boolean
+}
+
 const SIDE_NAMES = ['left', 'right', 'top', 'bottom'] as const
 
 const RESERVED_BORDER = '<border><left/><right/><top/><bottom/><diagonal/></border>'
@@ -676,19 +687,14 @@ function withReservedBorder(stylesXml: string): string {
   )
 }
 
-const SIDE_TAGS = new Set(['left', 'right', 'top', 'bottom', 'diagonal'])
+type SideName = 'left' | 'right' | 'top' | 'bottom' | 'diagonal'
+
+const isSideName = (name: string): name is SideName =>
+  name === 'left' || name === 'right' || name === 'top' || name === 'bottom' || name === 'diagonal'
 
 function parseBorder(element: string): Sides {
-  const sides: {
-    left?: Side
-    right?: Side
-    top?: Side
-    bottom?: Side
-    diagonal?: Side
-    diagonalUp?: boolean
-    diagonalDown?: boolean
-  } = {}
-  let inSide: 'left' | 'right' | 'top' | 'bottom' | 'diagonal' | undefined
+  const sides: MutableSides = {}
+  let inSide: SideName | undefined
   for (const event of readXml(element)) {
     if (event.kind === 'close') {
       if (inSide !== undefined && event.localName === inSide) inSide = undefined
@@ -700,25 +706,18 @@ function parseBorder(element: string): Sides {
       if (event.attributes.get('diagonalDown') === '1') sides.diagonalDown = true
       continue
     }
-    if (!SIDE_TAGS.has(event.localName)) {
-      if (event.localName === 'color' && inSide !== undefined) {
-        const color = parseColor(event.attributes)
-        const style = sides[inSide]?.style
-        if (color !== undefined && style !== undefined) sides[inSide] = { style, color }
-      }
+    if (isSideName(event.localName)) {
+      inSide = event.localName
+      const style = event.attributes.get('style')
+      if (style !== undefined) sides[inSide] = { style }
+      if (event.selfClosing) inSide = undefined
       continue
     }
-    if (
-      event.localName === 'left' ||
-      event.localName === 'right' ||
-      event.localName === 'top' ||
-      event.localName === 'bottom'
-    )
-      inSide = event.localName
-    else inSide = 'diagonal'
-    const style = event.attributes.get('style')
-    if (style !== undefined) sides[inSide] = { style }
-    if (event.selfClosing) inSide = undefined
+    if (event.localName === 'color' && inSide !== undefined) {
+      const color = parseColor(event.attributes)
+      const style = sides[inSide]?.style
+      if (color !== undefined && style !== undefined) sides[inSide] = { style, color }
+    }
   }
   return sides
 }
@@ -747,27 +746,17 @@ export function ensureBorderStyle(
 ): DateStyle {
   const seeded = withReservedBorder(stylesXml)
   const current = borderSidesAt(seeded, idOf(seeded, basedOn, 'borderId'))
-  const merged: {
-    left?: Side
-    right?: Side
-    top?: Side
-    bottom?: Side
-    diagonal?: Side
-    diagonalUp?: boolean
-    diagonalDown?: boolean
-  } = {}
+  const merged: MutableSides = {}
   for (const name of SIDE_NAMES) {
     const side = border[name] ?? border.all ?? current[name]
     if (side !== undefined) merged[name] = side
   }
   if (border.diagonal !== undefined) {
+    const { up, down } = border.diagonal
     merged.diagonal = { style: border.diagonal.style, color: border.diagonal.color }
+    merged.diagonalUp = up === true
     // With neither direction named, the down diagonal is the one drawn.
-    merged.diagonalUp = border.diagonal.up === true || undefined
-    merged.diagonalDown =
-      border.diagonal.down === true ||
-      (border.diagonal.up === undefined && border.diagonal.down === undefined) ||
-      undefined
+    merged.diagonalDown = down === true || (up === undefined && down === undefined)
   } else {
     merged.diagonal = current.diagonal
     merged.diagonalUp = current.diagonalUp
