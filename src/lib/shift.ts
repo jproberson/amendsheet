@@ -200,6 +200,33 @@ const shiftReference = (
   return { text: wholeText(low, high, spec), end: high.end }
 }
 
+/**
+ * Shifts every defined name's formula for a run of line ops, returning only the
+ * names that changed or were newly defined this session. A name the file already
+ * had that no op moved is left out, so an untouched workbook's names are not
+ * rewritten. Names are workbook-global, so each op targets them as a foreign sheet.
+ */
+export function shiftDefinedNames(
+  fileNames: ReadonlyMap<string, string>,
+  pendingNames: ReadonlyMap<string, string>,
+  specs: readonly ShiftSpec[],
+): ReadonlyMap<string, string> {
+  let names = new Map([...fileNames, ...pendingNames])
+  for (const spec of specs) {
+    names = new Map(
+      [...names].map(([name, refersTo]) => [
+        name,
+        shiftFormula(refersTo, { ...spec, onCurrentSheet: false }),
+      ]),
+    )
+  }
+  const written = new Map(pendingNames)
+  for (const [name, refersTo] of names) {
+    if (pendingNames.has(name) || refersTo !== fileNames.get(name)) written.set(name, refersTo)
+  }
+  return written
+}
+
 /** Rewrites every reference in a formula for an inserted or deleted row or column. */
 export function shiftFormula(formula: string, spec: ShiftSpec): string {
   const edited = normalizeSheet(spec.editedSheet)

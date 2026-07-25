@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { type ShiftSpec, shiftFormula } from './shift.js'
+import { type ShiftSpec, shiftDefinedNames, shiftFormula } from './shift.js'
 
 const insertRows = (at: number, onCurrentSheet = true, editedSheet = 'Sheet1'): ShiftSpec => ({
   axis: 'row',
@@ -130,4 +130,18 @@ test('shiftFormula copies through fragments that are not references', () => {
   assert.equal(shiftFormula('5:', insertRows(3)), '5:')
   assert.equal(shiftFormula("'unclosed", insertRows(3)), "'unclosed")
   assert.equal(shiftFormula('Sheet1!+A5', insertRows(3)), 'Sheet1!+A6')
+})
+
+test('shiftDefinedNames shifts a file name that moves and drops one that does not', () => {
+  const fileNames = new Map([
+    ['Below', 'Sheet1!$A$5'],
+    ['Above', 'Sheet1!$A$1'],
+  ])
+  const shifted = shiftDefinedNames(fileNames, new Map(), [insertRows(3)])
+  assert.deepEqual([...shifted], [['Below', 'Sheet1!$A$6']])
+})
+
+test('shiftDefinedNames always keeps a name defined this session', () => {
+  const shifted = shiftDefinedNames(new Map(), new Map([['New', 'Sheet1!$A$1']]), [insertRows(3)])
+  assert.deepEqual([...shifted], [['New', 'Sheet1!$A$1']])
 })

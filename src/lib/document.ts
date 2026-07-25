@@ -60,7 +60,7 @@ import {
   ensureProtectionStyle,
   readFormatting,
 } from './styles-writer.js'
-import { type ShiftSpec, shiftFormula } from './shift.js'
+import { type ShiftSpec, shiftDefinedNames } from './shift.js'
 import { shiftForeignFormulas, shiftSheet } from './shift-sheet.js'
 import { type Styles, isDateFormat, numberFormatOf, readStyles } from './styles.js'
 import {
@@ -1261,20 +1261,11 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         if (xml !== before) changes.set(path, encoder.encode(xml))
       }
 
-      let names = new Map([...fileNames, ...pendingNames])
-      for (const op of lineOps) {
-        names = new Map(
-          [...names].map(([name, refersTo]) => [
-            name,
-            shiftFormula(refersTo, { ...op.spec, onCurrentSheet: false }),
-          ]),
-        )
-      }
-      const written = new Map(pendingNames)
-      for (const [name, refersTo] of names) {
-        if (pendingNames.has(name) || refersTo !== fileNames.get(name)) written.set(name, refersTo)
-      }
-      namesToWrite = written
+      namesToWrite = shiftDefinedNames(
+        fileNames,
+        pendingNames,
+        lineOps.map((op) => op.spec),
+      )
     }
 
     // The workbook, its relationships and the content types each take a handful of
