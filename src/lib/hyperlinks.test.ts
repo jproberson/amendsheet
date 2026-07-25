@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { withHyperlinkRelationships, withHyperlinks } from './hyperlinks.js'
+import { withHyperlinkRelationships, withHyperlinks, writeSheetHyperlinks } from './hyperlinks.js'
 
 const worksheet = (body: string) =>
   `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${body}</worksheet>`
@@ -106,4 +106,27 @@ test('withHyperlinkRelationships creates the part and appends to it', () => {
     appended,
     /Id="rId2" Type="[^"]*hyperlink" Target="https:\/\/b.example\/y\?q=1&amp;z=2"/,
   )
+})
+
+test('writeSheetHyperlinks gives an external link a fresh id past the sheet rels', () => {
+  const written = writeSheetHyperlinks(
+    worksheet('<sheetData/>'),
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId3" Type="x" Target="y"/></Relationships>',
+    new Map([['A1', { url: 'https://example.com' }]]),
+  )
+  assert.match(written.sheetXml, /<hyperlink ref="A1" r:id="rId4"\/>/)
+  assert.match(
+    written.relsXml ?? '',
+    /Id="rId4"[^>]*Target="https:\/\/example.com"[^>]*TargetMode="External"/,
+  )
+})
+
+test('writeSheetHyperlinks writes an internal location inline and needs no rels', () => {
+  const written = writeSheetHyperlinks(
+    worksheet('<sheetData/>'),
+    undefined,
+    new Map([['B2', { location: 'Sheet2!C3', tooltip: 'see C3' }]]),
+  )
+  assert.match(written.sheetXml, /<hyperlink ref="B2" location="Sheet2!C3" tooltip="see C3"\/>/)
+  assert.equal(written.relsXml, undefined)
 })

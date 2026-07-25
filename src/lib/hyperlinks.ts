@@ -138,3 +138,48 @@ export function withHyperlinkRelationships(
   }
   return relsXml.replace(/<\/(\w+:)?Relationships>/, `${elements}$&`)
 }
+
+/**
+ * Where a cell links to: a URL out of the package, or a `location` within the
+ * workbook — a cell reference like `Sheet2!A1` or a defined name. `tooltip` is the
+ * hover text.
+ */
+export type Hyperlink =
+  | { readonly url: string; readonly tooltip?: string }
+  | { readonly location: string; readonly tooltip?: string }
+
+export interface SheetHyperlinkWrite {
+  readonly sheetXml: string
+  /** Present only when a link needs an external relationship in the sheet's rels. */
+  readonly relsXml?: string
+}
+
+/**
+ * Writes a sheet's pending hyperlinks into its XML. An external URL takes a fresh
+ * relationship id past the highest the rels part already uses; an internal
+ * location is written inline and needs none.
+ */
+export function writeSheetHyperlinks(
+  sheetXml: string,
+  existingRels: string | undefined,
+  links: ReadonlyMap<string, Hyperlink>,
+): SheetHyperlinkWrite {
+  let nextId = 0
+  for (const match of (existingRels ?? '').matchAll(/Id="rId(\d+)"/g)) {
+    nextId = Math.max(nextId, Number(match[1]))
+  }
+  const entries: HyperlinkEntry[] = []
+  const externalRels: { id: string; url: string }[] = []
+  for (const [reference, target] of links) {
+    if ('url' in target) {
+      const id = `rId${++nextId}`
+      entries.push({ reference, relationshipId: id, tooltip: target.tooltip })
+      externalRels.push({ id, url: target.url })
+    } else {
+      entries.push({ reference, location: target.location, tooltip: target.tooltip })
+    }
+  }
+  const written = withHyperlinks(sheetXml, entries)
+  if (externalRels.length === 0) return { sheetXml: written }
+  return { sheetXml: written, relsXml: withHyperlinkRelationships(existingRels, externalRels) }
+}
