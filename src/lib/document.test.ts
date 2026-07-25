@@ -211,6 +211,18 @@ test('autoFilter writes the sheet filter, canonicalising the range', () => {
   readWorkbook(out) // the result stays a readable workbook
 })
 
+test('freeze writes a frozen pane, canonicalising the cell', () => {
+  const workbook = createWorkbook()
+  workbook.sheets[0]?.freeze('b2')
+
+  const out = workbook.toBytes()
+  assert.match(
+    decode(readContainer(out).parts.get('xl/worksheets/sheet1.xml')),
+    /<pane xSplit="1" ySplit="1" topLeftCell="B2" activePane="bottomRight" state="frozen"\/>/,
+  )
+  readWorkbook(out)
+})
+
 test('exposes sheets by name', () => {
   const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
 
@@ -1690,6 +1702,14 @@ test('refuses a write to a sheet whose part is not in the package', () => {
   )
   assert.throws(
     () => workbook.sheets[0]?.setColumnWidth('A', 20),
+    (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
+  )
+  assert.throws(
+    () => workbook.sheets[0]?.autoFilter('A1:B2'),
+    (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
+  )
+  assert.throws(
+    () => workbook.sheets[0]?.freeze('B2'),
     (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
   )
 })

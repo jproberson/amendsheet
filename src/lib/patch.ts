@@ -431,6 +431,10 @@ interface SheetShape {
   readonly protection: { start: number; end: number } | undefined
   /** An existing autoFilter element, replaced in place rather than doubled. */
   readonly autoFilter: { start: number; end: number } | undefined
+  /** The first sheetView, where a freeze pane is placed or replaces its own. */
+  readonly sheetView: { start: number; end: number; selfClosing: boolean } | undefined
+  /** An existing pane inside that sheetView, replaced rather than doubled. */
+  readonly pane: { start: number; end: number } | undefined
   /** An existing mergeCells element, so a new merge joins it rather than a second. */
   readonly mergeContainer:
     | { openStart: number; openEnd: number; insertAt: number; selfClosing: boolean; count: number }
@@ -454,6 +458,8 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
   let protection: { start: number; end: number } | undefined
   let autoFilter: { start: number; end: number } | undefined
   let openAutoFilter = -1
+  let sheetView: { start: number; end: number; selfClosing: boolean } | undefined
+  let pane: { start: number; end: number } | undefined
   let mergeOpenStart = -1
   let mergeOpenEnd = -1
   let mergeInsertAt = -1
@@ -584,6 +590,14 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
         else openAutoFilter = event.start
         continue
       }
+      if (event.localName === 'sheetView' && sheetView === undefined) {
+        sheetView = { start: event.start, end: event.end, selfClosing: event.selfClosing }
+        continue
+      }
+      if (event.localName === 'pane' && pane === undefined) {
+        pane = { start: event.start, end: event.end }
+        continue
+      }
       // Only the cell carrying ref owns the range. A shared dependent names the
       // si alone, and any of them may be written self closing.
       if (event.localName === 'f') {
@@ -657,6 +671,8 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
     dataEnd,
     protection,
     autoFilter,
+    sheetView,
+    pane,
     mergeContainer:
       mergeOpenStart === -1
         ? undefined
@@ -699,6 +715,8 @@ export interface SheetEdits {
   readonly columnWidths?: ReadonlyMap<number, number>
   /** Canonical range (`A1:B2`) for the sheet's autoFilter, replacing any it has. */
   readonly autoFilter?: string
+  /** Canonical cell (`B2`) to freeze the panes above and left of, replacing any. */
+  readonly freeze?: string
 }
 
 export function patchSheet(
@@ -710,7 +728,7 @@ export function patchSheet(
   at: SheetLocation = {},
   sheet: SheetEdits = {},
 ): Uint8Array {
-  const { protection, merges, autoFilter } = sheet
+  const { protection, merges, autoFilter, freeze } = sheet
   // A style override with no value edit is a restyle: the cell keeps its value
   // and formula and only its `s` changes, so unlike a write it needs no shared
   // formula or merge refusal — formatting is always safe.
@@ -726,7 +744,8 @@ export function patchSheet(
     newMerges.length === 0 &&
     rowHeights.size === 0 &&
     columnWidths.size === 0 &&
-    autoFilter === undefined
+    autoFilter === undefined &&
+    freeze === undefined
   ) {
     return bytes
   }
@@ -973,6 +992,51 @@ export function patchSheet(
       text: `<${shape.prefix}autoFilter ref="${autoFilter}"/>`,
       order: -0.5,
     })
+  }
+
+  // A freeze pane lives inside the first sheetView, which sits before cols and
+  // sheetData. It replaces the pane the sheet has, opens a self-closing sheetView,
+  // slots in as the first child of an open one, or brings a fresh sheetViews.
+  if (freeze !== undefined) {
+    const { column, row } = parseReference(freeze)
+    const xSplit = column - 1
+    const ySplit = row - 1
+    const activePane =
+      xSplit > 0 && ySplit > 0 ? 'bottomRight' : xSplit > 0 ? 'topRight' : 'bottomLeft'
+    const paneXml =
+      `<${shape.prefix}pane` +
+      (xSplit > 0 ? ` xSplit="${xSplit}"` : '') +
+      (ySplit > 0 ? ` ySplit="${ySplit}"` : '') +
+      ` topLeftCell="${freeze}" activePane="${activePane}" state="frozen"/>`
+
+    if (shape.pane !== undefined) {
+      splices.push({ start: shape.pane.start, end: shape.pane.end, text: paneXml, order: 0 })
+    } else if (shape.sheetView !== undefined) {
+      if (shape.sheetView.selfClosing) {
+        const openTag = decoder.decode(bytes.subarray(shape.sheetView.start, shape.sheetView.end))
+        splices.push({
+          start: shape.sheetView.start,
+          end: shape.sheetView.end,
+          text: `${openTag.slice(0, -2)}>${paneXml}</${shape.prefix}sheetView>`,
+          order: 0,
+        })
+      } else {
+        splices.push({
+          start: shape.sheetView.end,
+          end: shape.sheetView.end,
+          text: paneXml,
+          order: -1,
+        })
+      }
+    } else {
+      const anchor = shape.colContainer?.openStart ?? shape.dataStart
+      splices.push({
+        start: anchor,
+        end: anchor,
+        text: `<${shape.prefix}sheetViews><${shape.prefix}sheetView workbookViewId="0">${paneXml}</${shape.prefix}sheetView></${shape.prefix}sheetViews>`,
+        order: -3,
+      })
+    }
   }
 
   // mergeCells is the sibling after sheetProtection. New ranges join the sheet's

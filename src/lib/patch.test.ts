@@ -138,6 +138,59 @@ test('replaces an autoFilter the sheet already has, filters and all', () => {
   }
 })
 
+test('freeze adds a pane before cols and preserves the sheetView', () => {
+  const fresh = patchSheet(
+    '<worksheet xmlns="http://x"><cols><col min="1" max="1" width="5"/></cols><sheetData/></worksheet>',
+    new Map(),
+    false,
+    undefined,
+    undefined,
+    { freeze: 'B2' },
+  )
+  assert.match(
+    fresh,
+    /<sheetViews><sheetView workbookViewId="0"><pane xSplit="1" ySplit="1" topLeftCell="B2" activePane="bottomRight" state="frozen"\/><\/sheetView><\/sheetViews><cols>/,
+  )
+
+  const kept = patchSheet(
+    '<worksheet xmlns="http://x"><sheetViews><sheetView workbookViewId="0"><selection activeCell="A1"/></sheetView></sheetViews><sheetData/></worksheet>',
+    new Map(),
+    false,
+    undefined,
+    undefined,
+    { freeze: 'B2' },
+  )
+  assert.match(kept, /<sheetView workbookViewId="0"><pane[^>]*\/><selection/)
+
+  const replaced = patchSheet(
+    '<worksheet xmlns="http://x"><sheetViews><sheetView workbookViewId="0"><pane xSplit="5" state="frozen"/></sheetView></sheetViews><sheetData/></worksheet>',
+    new Map(),
+    false,
+    undefined,
+    undefined,
+    { freeze: 'B2' },
+  )
+  assert.equal((replaced.match(/<pane/g) ?? []).length, 1)
+  assert.match(replaced, /topLeftCell="B2"/)
+})
+
+test('freeze takes the split from the cell, rows or columns only', () => {
+  const at = (cell: string) =>
+    patchSheet(
+      '<worksheet xmlns="http://x"><sheetData/></worksheet>',
+      new Map(),
+      false,
+      undefined,
+      undefined,
+      {
+        freeze: cell,
+      },
+    )
+  assert.match(at('A2'), /<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft"/)
+  assert.match(at('B1'), /<pane xSplit="1" topLeftCell="B1" activePane="topRight"/)
+  assert.match(at('B2'), /<pane xSplit="1" ySplit="1" topLeftCell="B2" activePane="bottomRight"/)
+})
+
 test('a merge the sheet already declares is not added twice', () => {
   const patched = patchSheet(sheet(ROWS), new Map(), false, undefined, undefined, {
     merges: ['A1:B1'],

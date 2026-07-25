@@ -175,6 +175,11 @@ export interface Worksheet {
   /** Sets the sheet's auto-filter over a range, replacing any it already has. */
   autoFilter(range: string): void
   /**
+   * Freezes the rows above and the columns left of `cell`, so they stay in view
+   * when the sheet is scrolled. `freeze('B2')` freezes row 1 and column A.
+   */
+  freeze(cell: string): void
+  /**
    * Sets a row's height in points, marking it a custom height so a reader keeps
    * it. Refuses a row number below 1 or a height that is not a finite number at
    * least zero.
@@ -416,6 +421,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   const sheetRowHeights = new Map<string, Map<number, number>>()
   const sheetColumnWidths = new Map<string, Map<number, number>>()
   const sheetAutoFilters = new Map<string, string>()
+  const sheetFreezes = new Map<string, string>()
   let workingStyles = stylesXml
   let parsedStyles = styles
   let parsedFrom = stylesXml
@@ -806,6 +812,16 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         }
         sheetAutoFilters.set(reference.path, mergeRangeReference(range, at))
       },
+      freeze(cell: string): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so it cannot be frozen`,
+            { ...at, reference: cell },
+          )
+        }
+        sheetFreezes.set(reference.path, formatReference(parseWritableReference(cell)))
+      },
       setRowHeight(row: number, height: number): void {
         if (sheetBytes === undefined) {
           throw new XlsxError(
@@ -910,6 +926,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       sheetRowHeights.size === 0 &&
       sheetColumnWidths.size === 0 &&
       sheetAutoFilters.size === 0 &&
+      sheetFreezes.size === 0 &&
       addedRefs.length === 0 &&
       renames.size === 0 &&
       removed.size === 0
@@ -957,6 +974,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       ...sheetRowHeights.keys(),
       ...sheetColumnWidths.keys(),
       ...sheetAutoFilters.keys(),
+      ...sheetFreezes.keys(),
       ...addedSheets.keys(),
     ])) {
       if (removed.has(path)) continue
@@ -977,6 +995,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           rowHeights: sheetRowHeights.get(path),
           columnWidths: sheetColumnWidths.get(path),
           autoFilter: sheetAutoFilters.get(path),
+          freeze: sheetFreezes.get(path),
         }),
       )
       // A cell written just past a table grows it, the way Excel would.
