@@ -862,7 +862,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       const owns = unshiftablePart(relationships)
       if (owns === undefined) return
       throw new XlsxError(
-        'unwritable-value',
+        'unsupported-edit',
         `Sheet ${reference.name} carries ${owns}, so ${action}`,
         { ...at, ...(where === undefined ? {} : { reference: where }) },
       )

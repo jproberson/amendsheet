@@ -4,8 +4,10 @@
  *
  * Two codes mean the caller passed something the library cannot use, and are
  * the ones worth answering with a different value: `bad-reference` and
- * `unwritable-value`. Every other code is about the file, or the runtime
- * reading it, not a value you passed.
+ * `unwritable-value`. `unsupported-edit` is a third caller-facing code: the
+ * request is well formed, but the library will not perform it yet, so the
+ * answer is a different edit rather than a different value. Every other code is
+ * about the file, or the runtime reading it, not anything you passed.
  *
  * The union is open. An existing code will not change without a major version,
  * but new ones arrive in minor releases, because there is no knowing today
@@ -22,6 +24,8 @@ export type XlsxErrorCode =
   | 'part-too-large'
   | 'bad-reference'
   | 'unwritable-value'
+  /** A well-formed edit the library does not perform yet, so nothing is written. */
+  | 'unsupported-edit'
   | (string & {})
 
 /**

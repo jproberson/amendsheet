@@ -256,8 +256,9 @@ What a minor release is allowed to do, so you know which branches are safe:
   is no knowing today every way an xlsx can be malformed. Switch with a default.
   An existing code will not change meaning without a major version.
   `bad-reference` and `unwritable-value` mean the caller passed something the
-  library cannot use; every other code is about the file, or the runtime reading
-  it, not a value you passed.
+  library cannot use, and `unsupported-edit` means an edit is well formed but not
+  one the library performs yet; every other code is about the file, or the
+  runtime reading it, not anything you passed.
 - **`kind: 'date'` is not a frozen classification.** See above.
 - **A `Date` written and read back is the same date.** A serial another
   application wrote can carry finer resolution than a millisecond, which is all
@@ -290,9 +291,10 @@ What a minor release is allowed to do, so you know which branches are safe:
   the way Excel would, adding a column when it grows sideways. Inserting or
   deleting rows and columns moves the references that name cells — formulas,
   merges, filters, conditional formats, hyperlinks and defined names — but a
-  chart's ranges and a pivot table's source are copied unchanged, and a table's
-  own stored range is not adjusted, so those edits are refused on a sheet with a
-  table rather than left inconsistent.
+  drawing's anchors, a chart's ranges, a pivot table's source and a table's own
+  stored range are not adjusted, so those edits are refused with
+  `unsupported-edit` on a sheet that carries a table, drawing, pivot table or
+  comment rather than left inconsistent.
 - Chartsheets and dialogsheets aren't listed in `sheets`, since they hold no
   cells. They're still written back untouched.
 

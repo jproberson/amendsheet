@@ -2137,7 +2137,7 @@ test('insertRows refuses a sheet that carries a table', () => {
     () => workbook.sheets[0]?.insertRows(1),
     (error: unknown) =>
       error instanceof XlsxError &&
-      error.code === 'unwritable-value' &&
+      error.code === 'unsupported-edit' &&
       error.message.includes('a table'),
   )
 })
@@ -2155,7 +2155,7 @@ test('insertRows refuses a sheet that carries a drawing', () => {
     () => workbook.sheets[0]?.insertRows(1),
     (error: unknown) =>
       error instanceof XlsxError &&
-      error.code === 'unwritable-value' &&
+      error.code === 'unsupported-edit' &&
       error.message.includes('drawing'),
   )
 })
@@ -2173,7 +2173,7 @@ test('insertColumns refuses a sheet that carries a pivot table', () => {
     () => workbook.sheets[0]?.insertColumns('A'),
     (error: unknown) =>
       error instanceof XlsxError &&
-      error.code === 'unwritable-value' &&
+      error.code === 'unsupported-edit' &&
       error.message.includes('pivot table'),
   )
 })
@@ -2191,7 +2191,7 @@ test('deleteColumns refuses a sheet that carries a comment', () => {
     () => workbook.sheets[0]?.deleteColumns('A'),
     (error: unknown) =>
       error instanceof XlsxError &&
-      error.code === 'unwritable-value' &&
+      error.code === 'unsupported-edit' &&
       error.message.includes('comment'),
   )
 })
@@ -2273,7 +2273,7 @@ test('insertColumns refuses a bad count, an off-sheet column and a table', () =>
   )
   assert.throws(
     () => tabled.sheets[0]?.insertColumns('A'),
-    (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+    (error: unknown) => error instanceof XlsxError && error.code === 'unsupported-edit',
   )
 })
 
@@ -2336,7 +2336,7 @@ test('deleteRows refuses destroying a shared formula master and a sheet with a t
   )
   assert.throws(
     () => tabled.sheets[0]?.deleteRows(1),
-    (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+    (error: unknown) => error instanceof XlsxError && error.code === 'unsupported-edit',
   )
 })
 
