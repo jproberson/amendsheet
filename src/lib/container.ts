@@ -114,7 +114,9 @@ export function readContainer(bytes: Uint8Array): ReadableContainer {
 /**
  * Rebuilds the package: a part named in `changes` is deflated fresh (or dropped
  * when its change is null), and every other part is written with the compressed
- * bytes it was read with. Only a part the caller changed is ever recompressed.
+ * bytes it was read with. Only a part the caller changed is ever recompressed. A
+ * change for a part the package did not have adds it, which is how a new sheet
+ * and its wiring reach the output.
  */
 function writeChanges(
   entries: ReadonlyMap<string, ZipEntry>,
@@ -125,6 +127,9 @@ function writeChanges(
     const change = changes.get(name)
     if (change === undefined) out.push(entry)
     else if (change !== null) out.push(deflate(name, change))
+  }
+  for (const [name, change] of changes) {
+    if (change !== null && !entries.has(name)) out.push(deflate(name, change))
   }
   return writeZip(out)
 }

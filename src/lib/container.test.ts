@@ -45,6 +45,18 @@ test('writes the same bytes every time for the same parts', () => {
   assert.deepEqual([...header], [0, 0, 33, 0])
 })
 
+test('write adds a part the package did not have, keeping the rest', () => {
+  const source = readContainer(
+    writeContainer({ parts: new Map([['a.xml', new TextEncoder().encode('<a/>')]]) }),
+  )
+
+  const out = source.write(new Map([['new.xml', new TextEncoder().encode('<new/>')]]))
+
+  const parts = readContainer(out).parts
+  assert.equal(new TextDecoder().decode(parts.get('a.xml')), '<a/>')
+  assert.equal(new TextDecoder().decode(parts.get('new.xml')), '<new/>')
+})
+
 test('names encryption when handed an OLE2 compound file', () => {
   // A password-protected .xlsx and a legacy .xls are both OLE2, whose magic is
   // these eight bytes. The plain "not a zip" message sent users the wrong way.
