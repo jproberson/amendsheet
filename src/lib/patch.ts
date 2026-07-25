@@ -717,6 +717,10 @@ export interface SheetEdits {
   readonly autoFilter?: string
   /** Canonical cell (`B2`) to freeze the panes above and left of, replacing any. */
   readonly freeze?: string
+  /** One-based rows to hide, composed with any height the row also has. */
+  readonly hiddenRows?: ReadonlySet<number>
+  /** One-based columns to hide, composed with any width the column also has. */
+  readonly hiddenColumns?: ReadonlySet<number>
 }
 
 export function patchSheet(
@@ -737,6 +741,8 @@ export function patchSheet(
   const newMerges = merges ?? []
   const rowHeights = sheet.rowHeights ?? new Map<number, number>()
   const columnWidths = sheet.columnWidths ?? new Map<number, number>()
+  const hiddenRows = sheet.hiddenRows ?? new Set<number>()
+  const hiddenColumns = sheet.hiddenColumns ?? new Set<number>()
   if (
     edits.size === 0 &&
     restyleRefs.length === 0 &&
@@ -745,14 +751,25 @@ export function patchSheet(
     rowHeights.size === 0 &&
     columnWidths.size === 0 &&
     autoFilter === undefined &&
-    freeze === undefined
+    freeze === undefined &&
+    hiddenRows.size === 0 &&
+    hiddenColumns.size === 0
   ) {
     return bytes
   }
 
-  const heightAttributes = (row: number): string => {
+  const rowAttributes = (row: number): string => {
     const height = rowHeights.get(row)
-    return height === undefined ? '' : ` ht="${height}" customHeight="1"`
+    const heightPart = height === undefined ? '' : ` ht="${height}" customHeight="1"`
+    return heightPart + (hiddenRows.has(row) ? ' hidden="1"' : '')
+  }
+  const rowAttributed = (openTag: string, row: number): string => {
+    const height = rowHeights.get(row)
+    const withHeight =
+      height === undefined
+        ? openTag
+        : withAttribute(withAttribute(openTag, 'ht', height), 'customHeight', 1)
+    return hiddenRows.has(row) ? withAttribute(withHeight, 'hidden', 1) : withHeight
   }
 
   const operations: ReadonlyArray<{ given: string; value: CellInput; restyle: boolean }> = [
@@ -879,12 +896,8 @@ export function patchSheet(
       .sort((left, right) => left.column - right.column)
       .map((entry) => entry.cell)
       .join('')
-    const height = rowHeights.get(row.row)
     const openTag = decoder.decode(bytes.subarray(row.start, row.end))
-    const opened =
-      height === undefined
-        ? openTag
-        : withAttribute(withAttribute(openTag, 'ht', height), 'customHeight', 1)
+    const opened = rowAttributed(openTag, row.row)
     splices.push({
       start: row.start,
       end: row.end,
@@ -893,22 +906,24 @@ export function patchSheet(
     })
   }
 
-  // A height on a row that neither exists nor has a value edit is a new empty row.
-  for (const row of rowHeights.keys()) {
+  const editedRows = new Set([...rowHeights.keys(), ...hiddenRows])
+
+  // A height or a hide on a row that neither exists nor has a value edit is a new
+  // empty row.
+  for (const row of editedRows) {
     if (!rowsByNumber.has(row) && !newRows.has(row)) newRows.set(row, [])
   }
 
-  // A height on a row that stays as it is, its open tag rewritten, unless a cell
-  // was added to a self closing one, where filledRows already redid the whole row.
-  for (const row of rowHeights.keys()) {
+  // A row that stays as it is has its open tag rewritten, unless a cell was added
+  // to a self closing one, where filledRows already redid the whole row.
+  for (const row of editedRows) {
     const span = rowsByNumber.get(row)
-    const height = rowHeights.get(row)
-    if (span === undefined || height === undefined || filledRows.has(span)) continue
+    if (span === undefined || filledRows.has(span)) continue
     const openTag = decoder.decode(bytes.subarray(span.start, span.openEnd))
     splices.push({
       start: span.start,
       end: span.openEnd,
-      text: withAttribute(withAttribute(openTag, 'ht', height), 'customHeight', 1),
+      text: rowAttributed(openTag, row),
       order: span.row,
     })
   }
@@ -919,7 +934,7 @@ export function patchSheet(
       .sort((a, b) => a.column - b.column)
       .map((entry) => entry.text)
       .join('')
-    return `<${shape.prefix}row r="${row}"${heightAttributes(row)}>${ordered}</${shape.prefix}row>`
+    return `<${shape.prefix}row r="${row}"${rowAttributes(row)}>${ordered}</${shape.prefix}row>`
   }
 
   if (shape.selfClosing && newRows.size > 0) {
@@ -1088,50 +1103,59 @@ export function patchSheet(
     }
   }
 
-  // cols is the sibling before sheetData. A width lands in the col whose range
-  // covers its column, splitting that range when it spans more than the column,
-  // or opening a new col when none covers it.
-  if (columnWidths.size > 0) {
-    const colElement = (min: number, max: number, width: number): string =>
-      `<${shape.prefix}col min="${min}" max="${max}" width="${width}" customWidth="1"/>`
-    const colWith = (element: string, min: number, max: number, width?: number): string => {
+  // cols is the sibling before sheetData. A width or a hide lands in the col whose
+  // range covers its column, splitting that range when it spans more than the
+  // column, or opening a new col when none covers it.
+  if (columnWidths.size > 0 || hiddenColumns.size > 0) {
+    const colAttributes = (column: number): string => {
+      const width = columnWidths.get(column)
+      const widthPart = width === undefined ? '' : ` width="${width}" customWidth="1"`
+      return widthPart + (hiddenColumns.has(column) ? ' hidden="1"' : '')
+    }
+    const colElement = (column: number): string =>
+      `<${shape.prefix}col min="${column}" max="${column}"${colAttributes(column)}/>`
+    const colWith = (element: string, min: number, max: number, edited?: number): string => {
       const ranged = withAttribute(withAttribute(element, 'min', min), 'max', max)
-      return width === undefined
-        ? ranged
-        : withAttribute(withAttribute(ranged, 'width', width), 'customWidth', 1)
+      if (edited === undefined) return ranged
+      const width = columnWidths.get(edited)
+      const withWidth =
+        width === undefined
+          ? ranged
+          : withAttribute(withAttribute(ranged, 'width', width), 'customWidth', 1)
+      return hiddenColumns.has(edited) ? withAttribute(withWidth, 'hidden', 1) : withWidth
     }
 
     const covering = (column: number) => shape.cols.find((c) => c.min <= column && column <= c.max)
-    const bySpan = new Map<(typeof shape.cols)[number], Map<number, number>>()
-    const appends = new Map<number, number>()
-    for (const [column, width] of columnWidths) {
+    const bySpan = new Map<(typeof shape.cols)[number], number[]>()
+    const appends: number[] = []
+    for (const column of new Set([...columnWidths.keys(), ...hiddenColumns])) {
       const span = covering(column)
       if (span === undefined) {
-        appends.set(column, width)
+        appends.push(column)
         continue
       }
-      const grouped = bySpan.get(span) ?? new Map<number, number>()
-      grouped.set(column, width)
+      const grouped = bySpan.get(span) ?? []
+      grouped.push(column)
       bySpan.set(span, grouped)
     }
 
-    for (const [span, widths] of bySpan) {
+    for (const [span, columns] of bySpan) {
       const element = decoder.decode(bytes.subarray(span.start, span.end))
       const segments: string[] = []
       let cursor = span.min
-      for (const [column, width] of [...widths].sort(([a], [b]) => a - b)) {
+      for (const column of [...columns].sort((a, b) => a - b)) {
         if (column > cursor) segments.push(colWith(element, cursor, column - 1))
-        segments.push(colWith(element, column, column, width))
+        segments.push(colWith(element, column, column, column))
         cursor = column + 1
       }
       if (cursor <= span.max) segments.push(colWith(element, cursor, span.max))
       splices.push({ start: span.start, end: span.end, text: segments.join(''), order: span.min })
     }
 
-    if (appends.size > 0) {
+    if (appends.length > 0) {
       const added = [...appends]
-        .sort(([a], [b]) => a - b)
-        .map(([column, width]) => colElement(column, column, width))
+        .sort((a, b) => a - b)
+        .map((column) => colElement(column))
         .join('')
       const container = shape.colContainer
       if (container === undefined) {

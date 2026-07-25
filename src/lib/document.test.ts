@@ -223,6 +223,27 @@ test('freeze writes a frozen pane, canonicalising the cell', () => {
   readWorkbook(out)
 })
 
+test('hideRow and hideColumn write the hidden flag, refusing a bad reference', () => {
+  const workbook = createWorkbook()
+  workbook.sheets[0]?.hideRow(2)
+  workbook.sheets[0]?.hideColumn('B')
+
+  const out = workbook.toBytes()
+  const xml = decode(readContainer(out).parts.get('xl/worksheets/sheet1.xml'))
+  assert.match(xml, /<row r="2" hidden="1">/)
+  assert.match(xml, /<col min="2" max="2" hidden="1"\/>/)
+  readWorkbook(out)
+
+  assert.throws(
+    () => workbook.sheets[0]?.hideRow(0),
+    (error: unknown) => error instanceof XlsxError && error.code === 'bad-reference',
+  )
+  assert.throws(
+    () => workbook.sheets[0]?.hideColumn('not a column'),
+    (error: unknown) => error instanceof XlsxError && error.code === 'bad-reference',
+  )
+})
+
 test('exposes sheets by name', () => {
   const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
 
@@ -1710,6 +1731,14 @@ test('refuses a write to a sheet whose part is not in the package', () => {
   )
   assert.throws(
     () => workbook.sheets[0]?.freeze('B2'),
+    (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
+  )
+  assert.throws(
+    () => workbook.sheets[0]?.hideRow(1),
+    (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
+  )
+  assert.throws(
+    () => workbook.sheets[0]?.hideColumn('A'),
     (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
   )
 })

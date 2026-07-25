@@ -192,6 +192,10 @@ export interface Worksheet {
    * zero.
    */
   setColumnWidth(column: string, width: number): void
+  /** Hides a row, keeping any height it also has. The row is one-based. */
+  hideRow(row: number): void
+  /** Hides a column, keeping any width it also has. The column is a letter. */
+  hideColumn(column: string): void
 }
 
 export interface SetOptions {
@@ -422,6 +426,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   const sheetColumnWidths = new Map<string, Map<number, number>>()
   const sheetAutoFilters = new Map<string, string>()
   const sheetFreezes = new Map<string, string>()
+  const sheetHiddenRows = new Map<string, Set<number>>()
+  const sheetHiddenColumns = new Map<string, Set<number>>()
   let workingStyles = stylesXml
   let parsedStyles = styles
   let parsedFrom = stylesXml
@@ -870,6 +876,42 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         widths.set(index, width)
         sheetColumnWidths.set(reference.path, widths)
       },
+      hideRow(row: number): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so row ${row} cannot be hidden`,
+            at,
+          )
+        }
+        if (!Number.isInteger(row) || row < 1 || row > LAST_ROW) {
+          throw new XlsxError('bad-reference', `Row ${row} is not a row this sheet can hold`, {
+            ...at,
+          })
+        }
+        const hidden = sheetHiddenRows.get(reference.path) ?? new Set<number>()
+        hidden.add(row)
+        sheetHiddenRows.set(reference.path, hidden)
+      },
+      hideColumn(column: string): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so column ${column} cannot be hidden`,
+            { ...at, reference: column },
+          )
+        }
+        const index = columnToIndex(column)
+        if (index > LAST_COLUMN) {
+          throw new XlsxError('bad-reference', `Column ${column} is outside the sheet`, {
+            ...at,
+            reference: column,
+          })
+        }
+        const hidden = sheetHiddenColumns.get(reference.path) ?? new Set<number>()
+        hidden.add(index)
+        sheetHiddenColumns.set(reference.path, hidden)
+      },
     }
   }
 
@@ -927,6 +969,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       sheetColumnWidths.size === 0 &&
       sheetAutoFilters.size === 0 &&
       sheetFreezes.size === 0 &&
+      sheetHiddenRows.size === 0 &&
+      sheetHiddenColumns.size === 0 &&
       addedRefs.length === 0 &&
       renames.size === 0 &&
       removed.size === 0
@@ -975,6 +1019,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       ...sheetColumnWidths.keys(),
       ...sheetAutoFilters.keys(),
       ...sheetFreezes.keys(),
+      ...sheetHiddenRows.keys(),
+      ...sheetHiddenColumns.keys(),
       ...addedSheets.keys(),
     ])) {
       if (removed.has(path)) continue
@@ -996,6 +1042,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           columnWidths: sheetColumnWidths.get(path),
           autoFilter: sheetAutoFilters.get(path),
           freeze: sheetFreezes.get(path),
+          hiddenRows: sheetHiddenRows.get(path),
+          hiddenColumns: sheetHiddenColumns.get(path),
         }),
       )
       // A cell written just past a table grows it, the way Excel would.

@@ -191,6 +191,42 @@ test('freeze takes the split from the cell, rows or columns only', () => {
   assert.match(at('B2'), /<pane xSplit="1" ySplit="1" topLeftCell="B2" activePane="bottomRight"/)
 })
 
+test('hides rows and columns, composing with any width or height', () => {
+  const rows = patchSheet(
+    '<worksheet xmlns="http://x"><sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData></worksheet>',
+    new Map(),
+    false,
+    undefined,
+    undefined,
+    { hiddenRows: new Set([1, 2]), rowHeights: new Map([[1, 15]]) },
+  )
+  assert.match(rows, /<row hidden="1" customHeight="1" ht="15" r="1">/)
+  assert.match(rows, /<row r="2" hidden="1"><\/row>/)
+
+  const cols = patchSheet(
+    '<worksheet xmlns="http://x"><cols><col min="1" max="5" width="20"/></cols><sheetData/></worksheet>',
+    new Map(),
+    false,
+    undefined,
+    undefined,
+    { hiddenColumns: new Set([3]) },
+  )
+  assert.match(
+    cols,
+    /<col min="1" max="2" width="20"\/><col hidden="1" min="3" max="3" width="20"\/><col min="4" max="5" width="20"\/>/,
+  )
+
+  const both = patchSheet(
+    '<worksheet xmlns="http://x"><sheetData/></worksheet>',
+    new Map(),
+    false,
+    undefined,
+    undefined,
+    { columnWidths: new Map([[5, 20]]), hiddenColumns: new Set([5]) },
+  )
+  assert.match(both, /<col min="5" max="5" width="20" customWidth="1" hidden="1"\/>/)
+})
+
 test('a merge the sheet already declares is not added twice', () => {
   const patched = patchSheet(sheet(ROWS), new Map(), false, undefined, undefined, {
     merges: ['A1:B1'],
