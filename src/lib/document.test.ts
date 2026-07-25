@@ -1753,6 +1753,14 @@ test('refuses a write to a sheet whose part is not in the package', () => {
     () => workbook.sheets[0]?.hideColumn('A'),
     (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
   )
+  assert.throws(
+    () => workbook.sheets[0]?.insertRows(1),
+    (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
+  )
+  assert.throws(
+    () => workbook.sheets[0]?.insertColumns('A'),
+    (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
+  )
 })
 
 test('a reference the sheet cannot hold does not break lookups around it', () => {
@@ -2111,4 +2119,68 @@ test('insertRows allows a sheet whose relationships are not a table', () => {
     kind: 'number',
     value: 1,
   })
+})
+
+test('insertColumns pushes columns over and moves formulas with them', () => {
+  const workbook = createWorkbook('Data')
+  workbook.sheets[0]?.set('A1', 1)
+  workbook.sheets[0]?.set('C1', { formula: 'A1+B1' })
+  workbook.addSheet('Calc').set('A1', { formula: 'Data!C1*2' })
+  workbook.defineName('Target', 'Data!$C$1')
+  workbook.sheets[0]?.insertColumns('B')
+
+  const back = readWorkbook(workbook.toBytes())
+  const data = [...(back.sheet('Data')?.cells() ?? [])]
+  const at = (reference: string) => data.find((cell) => cell.reference === reference)
+  assert.deepEqual(at('A1')?.value, { kind: 'number', value: 1 })
+  assert.equal(at('C1'), undefined)
+  assert.equal(expressionOf(at('D1')), 'A1+C1')
+  const calc = [...(back.sheet('Calc')?.cells() ?? [])]
+  assert.equal(expressionOf(calc.find((cell) => cell.reference === 'A1')), 'Data!D1*2')
+  assert.equal(back.definedNames.get('Target'), 'Data!$D$1')
+})
+
+test('insertColumns takes a cols width entry and an implicit cell in its stride', () => {
+  const workbook = readWorkbook(
+    build(
+      '<cols><col min="1" max="1" width="8"/></cols>' +
+        '<row r="1"><c r="A1"><v>1</v></c><c><v>2</v></c></row>',
+    ),
+  )
+  workbook.sheets[0]?.insertColumns('A')
+  const cells = [...(readWorkbook(workbook.toBytes()).sheets[0]?.cells() ?? [])]
+  assert.deepEqual(cells.find((cell) => cell.reference === 'B1')?.value, {
+    kind: 'number',
+    value: 1,
+  })
+})
+
+test('insertColumns refuses a bad count, an off-sheet column and a table', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="XFD1"><v>1</v></c></row>'))
+  const sheet = workbook.sheets[0]
+  assert.throws(
+    () => sheet?.insertColumns('A', 0),
+    (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+  )
+  assert.throws(
+    () => sheet?.insertColumns('A'),
+    (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+  )
+  assert.throws(
+    () => sheet?.insertColumns('XFE'),
+    (error: unknown) => error instanceof XlsxError && error.code === 'bad-reference',
+  )
+  const tabled = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      extra: {
+        'xl/worksheets/_rels/sheet1.xml.rels':
+          '<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/></Relationships>',
+        'xl/tables/table1.xml': '<table ref="A1:B2"/>',
+      },
+    }),
+  )
+  assert.throws(
+    () => tabled.sheets[0]?.insertColumns('A'),
+    (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+  )
 })

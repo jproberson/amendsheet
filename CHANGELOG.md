@@ -4,6 +4,31 @@ Follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and semantic
 versioning. The API is pre-1.0, so it is still free to change between minor
 versions.
 
+## Unreleased
+
+### Added
+
+- `createWorkbook(sheetName?)` starts a blank workbook — one empty sheet, named
+  `Sheet1` unless a name is given — to fill with `set()` and the rest of the edit
+  API and write with `toBytes()`. Creating is amending an empty file, so it goes
+  through the same path a read one does.
+- `worksheet.rename(name)` renames a sheet, on a workbook that was read as well as
+  a created one, following the same name rules as `addSheet`.
+- `worksheet.remove()` drops a sheet from the workbook — unwiring it from the
+  workbook, its relationships and the content types, and dropping its part — and
+  refuses to remove the last one, since a workbook must keep at least one sheet.
+- `worksheet.autoFilter(range)` sets the sheet's auto-filter over a range,
+  replacing any the sheet already has.
+- `worksheet.freeze(cell)` freezes the rows above and the columns left of a cell,
+  keeping any other view settings the sheet's `sheetView` carries.
+- `worksheet.hideRow(row)` and `worksheet.hideColumn(column)` hide a line, keeping
+  any width or height it also carries.
+- `workbook.addSheet(name)` adds an empty worksheet and returns it, ready to fill.
+  The name must be one Excel accepts — up to 31 characters, none of `: \ / ? * [ ]`,
+  and not one a sheet already uses. `toBytes()` writes the new part and wires it
+  into the workbook, its relationships and the content types. Works on a workbook
+  that was read as well as a created one.
+
 ## 0.1.1 — 2026-07-24
 
 ### Performance

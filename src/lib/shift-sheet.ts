@@ -39,13 +39,18 @@ const REFERENCE_ATTRIBUTE = new Map([
   ['hyperlink', 'ref'],
 ])
 
+// An inserted line is a monotonic shift, so its new position never lands before
+// where it started; a column's `<col>` bounds and a row's number move the same way.
+const shiftedIndex = (value: number, spec: ShiftSpec): number =>
+  value < spec.at ? value : value + spec.delta
+
 /**
- * Renumbers the rows and cells of the edited sheet and shifts the references it
- * carries — formula text, a shared formula's `ref`, merges, the dimension, filters
- * and the conditional-format, validation and hyperlink ranges. Inserting a row is
- * a monotonic shift, so no reference is destroyed.
+ * Renumbers the edited sheet's cells and the rows or columns that carry them, and
+ * shifts the references it holds — formula text, a shared formula's `ref`, merges,
+ * the dimension, filters and the conditional-format, validation and hyperlink
+ * ranges. Inserting is a monotonic shift, so no reference is destroyed.
  */
-export function shiftSheetRows(xml: string, spec: ShiftSpec): string {
+export function shiftSheet(xml: string, spec: ShiftSpec): string {
   const splices: Splice[] = []
   let rowNumber = 0
   let inFormula = false
@@ -73,16 +78,25 @@ export function shiftSheetRows(xml: string, spec: ShiftSpec): string {
       continue
     }
 
-    if (event.localName === 'row') {
+    if (event.localName === 'row' && spec.axis === 'row') {
       const declared = event.attributes.get('r')
       rowNumber = declared === undefined ? rowNumber + 1 : Number(declared)
       // A row past the point moves; withAttribute makes its number explicit even
       // when the row left it implicit, so an inserted gap cannot renumber it wrong.
-      const moved = rowNumber < spec.at ? rowNumber : rowNumber + spec.delta
+      const moved = shiftedIndex(rowNumber, spec)
       if (moved !== rowNumber) {
         const tag = xml.slice(event.start, event.end)
         splices.push({ start: event.start, end: event.end, text: withAttribute(tag, 'r', moved) })
       }
+      continue
+    }
+    // A cols entry bounds a span of columns; both ends move, and a span the point
+    // falls inside grows to cover the inserted column, keeping its left neighbour.
+    if (event.localName === 'col' && spec.axis === 'column') {
+      const tag = xml.slice(event.start, event.end)
+      const bound = (value: string) => String(shiftedIndex(Number(value), spec))
+      const rewritten = mapAttribute(mapAttribute(tag, 'min', bound), 'max', bound)
+      if (rewritten !== tag) splices.push({ start: event.start, end: event.end, text: rewritten })
       continue
     }
     if (event.localName === 'c') {

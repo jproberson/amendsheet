@@ -61,7 +61,7 @@ import {
   readFormatting,
 } from './styles-writer.js'
 import { type ShiftSpec, shiftFormula } from './shift.js'
-import { shiftForeignFormulas, shiftSheetRows } from './shift-sheet.js'
+import { shiftForeignFormulas, shiftSheet } from './shift-sheet.js'
 import { type Styles, isDateFormat, numberFormatOf, readStyles } from './styles.js'
 import { readXml, readXmlBytes } from './xml.js'
 import { type SheetRef, type SheetState, readWorkbookPart } from './workbook.js'
@@ -208,6 +208,13 @@ export interface Worksheet {
    * this does not yet adjust, or when the shift would push a row off the sheet.
    */
   insertRows(before: number, count?: number): void
+  /**
+   * Inserts `count` blank columns before column `before` — a letter like `C` —
+   * pushing the columns at and to the right of it over. References that point into
+   * the moved columns move with them, on the same terms as `insertRows`, tables
+   * and an off-the-sheet shift included.
+   */
+  insertColumns(before: string, count?: number): void
 }
 
 export interface SetOptions {
@@ -350,6 +357,23 @@ function highestRow(bytes: Uint8Array): number {
       const declared = event.attributes.get('r')
       current = declared === undefined ? current + 1 : Number(declared)
       highest = Math.max(highest, current)
+    }
+  }
+  return highest
+}
+
+/** The highest column a sheet stores, so a shift that would push one off is refused. */
+function highestColumn(bytes: Uint8Array): number {
+  let highest = 0
+  for (const event of readXmlBytes(bytes)) {
+    if (event.kind !== 'open') continue
+    if (event.localName === 'c') {
+      const reference = event.attributes.get('r')
+      const letters = reference?.match(/[A-Za-z]+/)?.[0]
+      if (letters !== undefined) highest = Math.max(highest, columnToIndex(letters))
+    } else if (event.localName === 'col') {
+      const max = event.attributes.get('max')
+      if (max !== undefined) highest = Math.max(highest, Number(max))
     }
   }
   return highest
@@ -1011,6 +1035,54 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           },
         })
       },
+      insertColumns(before: string, count = 1): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so no columns can be inserted`,
+            { ...at, reference: before },
+          )
+        }
+        const atColumn = columnToIndex(before)
+        if (atColumn > LAST_COLUMN) {
+          throw new XlsxError('bad-reference', `Column ${before} is outside the sheet`, {
+            ...at,
+            reference: before,
+          })
+        }
+        if (!Number.isInteger(count) || count < 1) {
+          throw new XlsxError('unwritable-value', `${count} is not a number of columns to insert`, {
+            ...at,
+            reference: before,
+          })
+        }
+        if (highestColumn(sheetBytes) + count > LAST_COLUMN) {
+          throw new XlsxError(
+            'unwritable-value',
+            `Inserting ${count} column(s) would push a column off ${reference.name}`,
+            { ...at, reference: before },
+          )
+        }
+        const relationshipsPath = reference.path.replace(/([^/]+)$/, '_rels/$1.rels')
+        const relationshipsXml = partText(container, relationshipsPath)
+        if (relationshipsXml !== undefined && ownsTable(relationshipsXml)) {
+          throw new XlsxError(
+            'unwritable-value',
+            `Sheet ${reference.name} carries a table, so its columns cannot be inserted into yet`,
+            { ...at, reference: before },
+          )
+        }
+        lineOps.push({
+          path: reference.path,
+          spec: {
+            axis: 'column',
+            at: atColumn,
+            delta: count,
+            editedSheet: reference.name,
+            onCurrentSheet: true,
+          },
+        })
+      },
     }
   }
 
@@ -1191,7 +1263,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         for (const op of lineOps) {
           xml =
             op.path === path
-              ? shiftSheetRows(xml, op.spec)
+              ? shiftSheet(xml, op.spec)
               : shiftForeignFormulas(xml, { ...op.spec, onCurrentSheet: false })
         }
         if (xml !== before) changes.set(path, encoder.encode(xml))
