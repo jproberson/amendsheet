@@ -1,11 +1,6 @@
 import { type ShiftSpec, shiftFormula } from './shift.js'
+import { type Splice, applySplices } from './splices.js'
 import { readXml, withAttribute } from './xml.js'
-
-interface Splice {
-  readonly start: number
-  readonly end: number
-  readonly text: string
-}
 
 // Rewrites one attribute's value in place, keeping the tag's other bytes exact.
 const mapAttribute = (tag: string, name: string, map: (value: string) => string): string =>
@@ -17,16 +12,6 @@ const mapAttribute = (tag: string, name: string, map: (value: string) => string)
 
 const encodeText = (text: string): string =>
   text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
-
-const applySplices = (xml: string, splices: readonly Splice[]): string => {
-  let out = ''
-  let position = 0
-  for (const splice of [...splices].sort((a, b) => a.start - b.start)) {
-    out += xml.slice(position, splice.start) + splice.text
-    position = splice.end
-  }
-  return out + xml.slice(position)
-}
 
 // Attributes whose value is a reference or a space-separated list of them, each
 // local to this sheet, so an inserted or deleted line shifts them like a formula.

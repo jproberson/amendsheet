@@ -1,4 +1,5 @@
 import { escapeSheetName } from './add-sheet.js'
+import { type Splice, applySplices } from './splices.js'
 import { readXml } from './xml.js'
 
 const RELATIONSHIPS_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
@@ -37,22 +38,6 @@ export interface HyperlinkEntry {
   /** Set for a link within the workbook — a cell or a defined name. */
   readonly location?: string
   readonly tooltip?: string
-}
-
-interface Splice {
-  readonly start: number
-  readonly end: number
-  readonly text: string
-}
-
-const applySplices = (xml: string, splices: readonly Splice[]): string => {
-  let out = ''
-  let position = 0
-  for (const splice of [...splices].sort((a, b) => a.start - b.start)) {
-    out += xml.slice(position, splice.start) + splice.text
-    position = splice.end
-  }
-  return out + xml.slice(position)
 }
 
 /** Writes the hyperlinks into a sheet, merging with any it has and replacing one on the same cell. */
@@ -119,6 +104,7 @@ export function withHyperlinks(sheetXml: string, entries: readonly HyperlinkEntr
     }
   }
 
+  const wrapped = `<${prefix}hyperlinks>${children}</${prefix}hyperlinks>`
   if (container === undefined) {
     const anchor =
       afterStart !== -1
@@ -126,17 +112,9 @@ export function withHyperlinks(sheetXml: string, entries: readonly HyperlinkEntr
         : worksheetCloseStart !== -1
           ? worksheetCloseStart
           : sheetXml.length
-    splices.push({
-      start: anchor,
-      end: anchor,
-      text: `<${prefix}hyperlinks>${children}</${prefix}hyperlinks>`,
-    })
+    splices.push({ start: anchor, end: anchor, text: wrapped })
   } else if (container.selfClosing) {
-    splices.push({
-      start: container.start,
-      end: container.end,
-      text: `<${prefix}hyperlinks>${children}</${prefix}hyperlinks>`,
-    })
+    splices.push({ start: container.start, end: container.end, text: wrapped })
   } else {
     splices.push({ start: hyperlinksCloseStart, end: hyperlinksCloseStart, text: children })
   }
