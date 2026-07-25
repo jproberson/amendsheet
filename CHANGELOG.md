@@ -28,6 +28,21 @@ versions.
   and not one a sheet already uses. `toBytes()` writes the new part and wires it
   into the workbook, its relationships and the content types. Works on a workbook
   that was read as well as a created one.
+- `workbook.defineName(name, refersTo)` defines a global named range, and
+  `workbook.definedNames` reads them back. A name scoped to one sheet is left as it
+  was. The name follows Excel's rules — a letter, underscore or backslash then
+  letters, digits, periods or underscores, no spaces.
+- `worksheet.insertRows(before, count?)` and `worksheet.insertColumns(before, count?)`
+  insert blank rows or columns, and `worksheet.deleteRows(from, count?)` and
+  `worksheet.deleteColumns(from, count?)` remove them. Every reference that points
+  into the moved lines moves with them — formulas anywhere in the workbook, a
+  shared formula's range, merges, the dimension, filters, conditional formats,
+  validations, hyperlinks and defined names. A cell edited earlier in the session
+  lands first, so it rides along too. A deletion turns a reference to a removed
+  cell into `#REF!` and shrinks a range that only overlapped. An insert that would
+  push a line off the sheet is refused, as is a deletion that would collapse a
+  whole merged range, filter, format or shared formula, and either on a sheet that
+  carries a table, whose stored range is not adjusted yet.
 
 ## 0.1.1 — 2026-07-24
 

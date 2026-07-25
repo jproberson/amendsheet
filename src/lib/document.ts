@@ -10,6 +10,7 @@ import {
 } from './add-sheet.js'
 import { blankWorkbookBytes } from './blank.js'
 import { checkDefinedName, readDefinedNames, withDefinedNames } from './defined-names.js'
+import { type HyperlinkEntry, withHyperlinkRelationships, withHyperlinks } from './hyperlinks.js'
 import { type Container, decodeXmlPart } from './container.js'
 import { XlsxError } from './errors.js'
 import { LAST_SERIAL, dateToSerial, parseIsoDate, serialToDate } from './date.js'
@@ -113,6 +114,15 @@ export interface Cell {
   /** Absent unless the cell sets a `locked` or `hidden` protection of its own. */
   readonly protection?: CellProtection
 }
+
+/**
+ * Where a cell links to: a URL out of the package, or a `location` within the
+ * workbook — a cell reference like `Sheet2!A1` or a defined name. `tooltip` is the
+ * hover text.
+ */
+export type Hyperlink =
+  | { readonly url: string; readonly tooltip?: string }
+  | { readonly location: string; readonly tooltip?: string }
 
 export interface Worksheet {
   readonly name: string
@@ -228,6 +238,12 @@ export interface Worksheet {
    * columns to their right in over them, on the same terms as `deleteRows`.
    */
   deleteColumns(from: string, count?: number): void
+  /**
+   * Links a cell to a URL or a place in the workbook, replacing any link the cell
+   * already has. An external URL is written through a worksheet relationship; a
+   * `location` is written inline. Visible in the file after `toBytes()`.
+   */
+  link(reference: string, target: Hyperlink): void
 }
 
 export interface SetOptions {
@@ -558,6 +574,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   const sheetHiddenColumns = new Map<string, Set<number>>()
   const fileNames = readDefinedNames(partText(container, part.path) ?? '')
   const pendingNames = new Map<string, string>()
+  const sheetHyperlinks = new Map<string, Map<string, Hyperlink>>()
   // Row and column inserts and deletes, in call order. Each names the sheet it
   // was called on; toBytes applies them after the per-sheet patch so an edit made
   // this session lands in the old grid and then moves with the shift.
@@ -1230,6 +1247,32 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         }
         lineOps.push({ path: reference.path, spec })
       },
+      link(cell: string, target: Hyperlink): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so ${cell} cannot be linked`,
+            { ...at, reference: cell },
+          )
+        }
+        const canonical = formatReference(parseWritableReference(cell))
+        const place = 'url' in target ? target.url : target.location
+        if (typeof place !== 'string' || place.length === 0) {
+          throw new XlsxError('unwritable-value', `A hyperlink needs a non-empty url or location`, {
+            ...at,
+            reference: canonical,
+          })
+        }
+        if (target.tooltip !== undefined && typeof target.tooltip !== 'string') {
+          throw new XlsxError('unwritable-value', `A hyperlink tooltip must be a string`, {
+            ...at,
+            reference: canonical,
+          })
+        }
+        const links = sheetHyperlinks.get(reference.path) ?? new Map<string, Hyperlink>()
+        links.set(canonical, target)
+        sheetHyperlinks.set(reference.path, links)
+      },
     }
   }
 
@@ -1293,7 +1336,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       renames.size === 0 &&
       removed.size === 0 &&
       pendingNames.size === 0 &&
-      lineOps.length === 0
+      lineOps.length === 0 &&
+      sheetHyperlinks.size === 0
     ) {
       return container.write(changes)
     }
@@ -1388,6 +1432,47 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     for (const path of removedExisting) changes.set(path, null)
     const originalName = (path: string) => part.sheets.find((sheet) => sheet.path === path)?.name
 
+    const decodePart = new TextDecoder()
+    const sheetTextNow = (path: string): string | undefined => {
+      const changed = changes.get(path)
+      if (changed !== undefined && changed !== null) return decodePart.decode(changed)
+      return partText(container, path)
+    }
+
+    // Hyperlinks are written before the line-ops below, so an inserted or deleted
+    // line shifts their `ref` along with every other reference. An external link
+    // takes a fresh relationship id in the sheet's rels part; an internal one is
+    // written inline and needs none.
+    for (const [path, links] of sheetHyperlinks) {
+      if (removed.has(path)) continue
+      const sheetXml = sheetTextNow(path)
+      if (sheetXml === undefined) continue
+      const relationshipsPath = path.replace(/([^/]+)$/, '_rels/$1.rels')
+      const existingRels = partText(container, relationshipsPath)
+      let nextId = 0
+      for (const match of (existingRels ?? '').matchAll(/Id="rId(\d+)"/g)) {
+        nextId = Math.max(nextId, Number(match[1]))
+      }
+      const entries: HyperlinkEntry[] = []
+      const externalRels: { id: string; url: string }[] = []
+      for (const [reference, target] of links) {
+        if ('url' in target) {
+          const id = `rId${++nextId}`
+          entries.push({ reference, relationshipId: id, tooltip: target.tooltip })
+          externalRels.push({ id, url: target.url })
+        } else {
+          entries.push({ reference, location: target.location, tooltip: target.tooltip })
+        }
+      }
+      changes.set(path, encoder.encode(withHyperlinks(sheetXml, entries)))
+      if (externalRels.length > 0) {
+        changes.set(
+          relationshipsPath,
+          encoder.encode(withHyperlinkRelationships(existingRels, externalRels)),
+        )
+      }
+    }
+
     // Inserting or deleting a line moves references across the whole workbook. The
     // per-sheet patch above has already landed this session's edits in the old
     // grid, so each sheet's current text is shifted here: the edited sheet's own
@@ -1395,16 +1480,10 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     // names, global to the workbook, shift into the set written below.
     let namesToWrite: ReadonlyMap<string, string> = pendingNames
     if (lineOps.length > 0) {
-      const decoder = new TextDecoder()
-      const sheetText = (path: string): string | undefined => {
-        const changed = changes.get(path)
-        if (changed !== undefined && changed !== null) return decoder.decode(changed)
-        return partText(container, path)
-      }
       const sheetPaths = [...part.sheets.map((sheet) => sheet.path), ...addedSheets.keys()]
       for (const path of sheetPaths) {
         if (removed.has(path)) continue
-        let xml = sheetText(path)
+        let xml = sheetTextNow(path)
         if (xml === undefined) continue
         const before = xml
         for (const op of lineOps) {

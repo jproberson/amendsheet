@@ -21,6 +21,7 @@ export type {
   Cell,
   CellFormula,
   CellValue,
+  Hyperlink,
   SetOptions,
   Workbook,
   Worksheet,

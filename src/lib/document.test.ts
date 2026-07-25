@@ -2306,3 +2306,65 @@ test('deleteColumns refuses a bad column, a bad count and a collapsing master', 
     (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
   )
 })
+
+test('link writes an internal link inline and an external link through a relationship', () => {
+  const workbook = createWorkbook('Data')
+  workbook.sheets[0]?.set('A1', 'home')
+  workbook.sheets[0]?.set('A2', 'site')
+  workbook.addSheet('Other')
+  workbook.sheets[0]?.link('A1', { location: 'Other!B2', tooltip: 'jump' })
+  workbook.sheets[0]?.link('A2', { url: 'https://example.com/a?x=1&y=2' })
+
+  const parts = readContainer(workbook.toBytes()).parts
+  const sheet = decode(parts.get('xl/worksheets/sheet1.xml'))
+  assert.match(sheet, /<hyperlink ref="A1" location="Other!B2" tooltip="jump"\/>/)
+  assert.match(sheet, /<hyperlink ref="A2" r:id="rId1"\/>/)
+  assert.match(sheet, /<worksheet [^>]*xmlns:r=/)
+  const rels = decode(parts.get('xl/worksheets/_rels/sheet1.xml.rels'))
+  assert.match(
+    rels,
+    /Id="rId1" Type="[^"]*hyperlink" Target="https:\/\/example.com\/a\?x=1&amp;y=2" TargetMode="External"/,
+  )
+})
+
+test('link replaces a link on the same cell and moves with an inserted row', () => {
+  const workbook = readWorkbook(build('<row r="3"><c r="A3"><v>1</v></c></row>'))
+  const sheet = workbook.sheets[0]
+  sheet?.link('A3', { location: 'old' })
+  sheet?.link('A3', { location: 'new' })
+  sheet?.insertRows(1)
+
+  const out = decode(readContainer(workbook.toBytes()).parts.get('xl/worksheets/sheet1.xml'))
+  assert.doesNotMatch(out, /location="old"/)
+  assert.match(out, /<hyperlink ref="A4" location="new"\/>/)
+})
+
+test('link refuses a bad reference, an empty target and a missing sheet part', () => {
+  const workbook = createWorkbook()
+  const sheet = workbook.sheets[0]
+  assert.throws(
+    () => sheet?.link('nope', { url: 'https://example.com' }),
+    (error: unknown) => error instanceof XlsxError && error.code === 'bad-reference',
+  )
+  assert.throws(
+    () => sheet?.link('A1', { url: '' }),
+    (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+  )
+})
+
+test('link appends its relationship after ones the sheet already has', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      extra: {
+        'xl/worksheets/_rels/sheet1.xml.rels':
+          '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/></Relationships>',
+      },
+    }),
+  )
+  workbook.sheets[0]?.link('A1', { url: 'https://example.com' })
+  const parts = readContainer(workbook.toBytes()).parts
+  const rels = decode(parts.get('xl/worksheets/_rels/sheet1.xml.rels'))
+  assert.match(rels, /Id="rId1" Type="[^"]*drawing"/)
+  assert.match(rels, /Id="rId2" Type="[^"]*hyperlink" Target="https:\/\/example.com"/)
+  assert.match(decode(parts.get('xl/worksheets/sheet1.xml')), /<hyperlink ref="A1" r:id="rId2"\/>/)
+})
