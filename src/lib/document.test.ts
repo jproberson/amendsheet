@@ -199,6 +199,18 @@ test('remove drops a sheet the file was read with, and its part', () => {
   )
 })
 
+test('autoFilter writes the sheet filter, canonicalising the range', () => {
+  const workbook = createWorkbook()
+  workbook.sheets[0]?.autoFilter('a1:c1')
+
+  const out = workbook.toBytes()
+  assert.match(
+    decode(readContainer(out).parts.get('xl/worksheets/sheet1.xml')),
+    /<autoFilter ref="A1:C1"\/>/,
+  )
+  readWorkbook(out) // the result stays a readable workbook
+})
+
 test('exposes sheets by name', () => {
   const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
 

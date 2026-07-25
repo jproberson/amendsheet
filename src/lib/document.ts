@@ -172,6 +172,8 @@ export interface Worksheet {
    * is not two references either side of a colon.
    */
   merge(range: string): void
+  /** Sets the sheet's auto-filter over a range, replacing any it already has. */
+  autoFilter(range: string): void
   /**
    * Sets a row's height in points, marking it a custom height so a reader keeps
    * it. Refuses a row number below 1 or a height that is not a finite number at
@@ -413,6 +415,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   const sheetMerges = new Map<string, string[]>()
   const sheetRowHeights = new Map<string, Map<number, number>>()
   const sheetColumnWidths = new Map<string, Map<number, number>>()
+  const sheetAutoFilters = new Map<string, string>()
   let workingStyles = stylesXml
   let parsedStyles = styles
   let parsedFrom = stylesXml
@@ -793,6 +796,16 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         pending.push(canonical)
         sheetMerges.set(reference.path, pending)
       },
+      autoFilter(range: string): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so ${range} cannot be filtered`,
+            { ...at, reference: range },
+          )
+        }
+        sheetAutoFilters.set(reference.path, mergeRangeReference(range, at))
+      },
       setRowHeight(row: number, height: number): void {
         if (sheetBytes === undefined) {
           throw new XlsxError(
@@ -896,6 +909,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       sheetMerges.size === 0 &&
       sheetRowHeights.size === 0 &&
       sheetColumnWidths.size === 0 &&
+      sheetAutoFilters.size === 0 &&
       addedRefs.length === 0 &&
       renames.size === 0 &&
       removed.size === 0
@@ -942,6 +956,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       ...sheetMerges.keys(),
       ...sheetRowHeights.keys(),
       ...sheetColumnWidths.keys(),
+      ...sheetAutoFilters.keys(),
       ...addedSheets.keys(),
     ])) {
       if (removed.has(path)) continue
@@ -961,6 +976,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           merges: sheetMerges.get(path),
           rowHeights: sheetRowHeights.get(path),
           columnWidths: sheetColumnWidths.get(path),
+          autoFilter: sheetAutoFilters.get(path),
         }),
       )
       // A cell written just past a table grows it, the way Excel would.

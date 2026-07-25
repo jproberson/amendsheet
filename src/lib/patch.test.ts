@@ -114,6 +114,30 @@ test('opens a mergeCells element when the sheet has none', () => {
   )
 })
 
+test('adds an autoFilter after sheetData and before mergeCells', () => {
+  const patched = patchSheet(sheet(ROWS), new Map(), false, undefined, undefined, {
+    autoFilter: 'A1:B1',
+  })
+
+  assert.match(patched, /<\/sheetData><autoFilter ref="A1:B1"\/><mergeCells/)
+})
+
+test('replaces an autoFilter the sheet already has, filters and all', () => {
+  const selfClosing =
+    '<worksheet xmlns="http://x"><sheetData/><autoFilter ref="A1:C1"/></worksheet>'
+  const withFilters =
+    '<worksheet xmlns="http://x"><sheetData/><autoFilter ref="A1:C1"><filterColumn colId="0"/></autoFilter></worksheet>'
+
+  for (const source of [selfClosing, withFilters]) {
+    const patched = patchSheet(source, new Map(), false, undefined, undefined, {
+      autoFilter: 'A1:D1',
+    })
+    assert.match(patched, /<autoFilter ref="A1:D1"\/>/)
+    assert.equal((patched.match(/<autoFilter/g) ?? []).length, 1)
+    assert.doesNotMatch(patched, /filterColumn/)
+  }
+})
+
 test('a merge the sheet already declares is not added twice', () => {
   const patched = patchSheet(sheet(ROWS), new Map(), false, undefined, undefined, {
     merges: ['A1:B1'],

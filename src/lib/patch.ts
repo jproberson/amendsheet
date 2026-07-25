@@ -429,6 +429,8 @@ interface SheetShape {
   readonly dataEnd: number
   /** An existing sheetProtection element, replaced in place rather than doubled. */
   readonly protection: { start: number; end: number } | undefined
+  /** An existing autoFilter element, replaced in place rather than doubled. */
+  readonly autoFilter: { start: number; end: number } | undefined
   /** An existing mergeCells element, so a new merge joins it rather than a second. */
   readonly mergeContainer:
     | { openStart: number; openEnd: number; insertAt: number; selfClosing: boolean; count: number }
@@ -450,6 +452,8 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
   let dataEnd = -1
   let selfClosing = false
   let protection: { start: number; end: number } | undefined
+  let autoFilter: { start: number; end: number } | undefined
+  let openAutoFilter = -1
   let mergeOpenStart = -1
   let mergeOpenEnd = -1
   let mergeInsertAt = -1
@@ -574,6 +578,12 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
         protection = { start: event.start, end: event.end }
         continue
       }
+      if (event.localName === 'autoFilter') {
+        // A filtered autoFilter carries children, so its close tag ends the span.
+        if (event.selfClosing) autoFilter = { start: event.start, end: event.end }
+        else openAutoFilter = event.start
+        continue
+      }
       // Only the cell carrying ref owns the range. A shared dependent names the
       // si alone, and any of them may be written self closing.
       if (event.localName === 'f') {
@@ -625,6 +635,10 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
       contentEnd = event.start
       dataEnd = event.end
     }
+    if (event.localName === 'autoFilter' && openAutoFilter !== -1) {
+      autoFilter = { start: openAutoFilter, end: event.end }
+      openAutoFilter = -1
+    }
     if (event.localName === 'mergeCells') mergeInsertAt = event.start
     if (event.localName === 'cols') colInsertAt = event.start
   }
@@ -642,6 +656,7 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
     dataStart,
     dataEnd,
     protection,
+    autoFilter,
     mergeContainer:
       mergeOpenStart === -1
         ? undefined
@@ -682,6 +697,8 @@ export interface SheetEdits {
   readonly rowHeights?: ReadonlyMap<number, number>
   /** One-based column index to width, landing in the cols element before sheetData. */
   readonly columnWidths?: ReadonlyMap<number, number>
+  /** Canonical range (`A1:B2`) for the sheet's autoFilter, replacing any it has. */
+  readonly autoFilter?: string
 }
 
 export function patchSheet(
@@ -693,7 +710,7 @@ export function patchSheet(
   at: SheetLocation = {},
   sheet: SheetEdits = {},
 ): Uint8Array {
-  const { protection, merges } = sheet
+  const { protection, merges, autoFilter } = sheet
   // A style override with no value edit is a restyle: the cell keeps its value
   // and formula and only its `s` changes, so unlike a write it needs no shared
   // formula or merge refusal — formatting is always safe.
@@ -708,7 +725,8 @@ export function patchSheet(
     protection === undefined &&
     newMerges.length === 0 &&
     rowHeights.size === 0 &&
-    columnWidths.size === 0
+    columnWidths.size === 0 &&
+    autoFilter === undefined
   ) {
     return bytes
   }
@@ -940,6 +958,20 @@ export function patchSheet(
       end: span.end,
       text: sheetProtectionElement(protection, shape.prefix),
       order: -1,
+    })
+  }
+
+  // autoFilter sits between sheetProtection and mergeCells. It replaces the one
+  // the sheet has, or lands just after sheetData/sheetProtection, ordered before
+  // mergeCells at a shared offset.
+  if (autoFilter !== undefined) {
+    const anchor = shape.protection?.end ?? shape.dataEnd
+    const span = shape.autoFilter ?? { start: anchor, end: anchor }
+    splices.push({
+      start: span.start,
+      end: span.end,
+      text: `<${shape.prefix}autoFilter ref="${autoFilter}"/>`,
+      order: -0.5,
     })
   }
 
