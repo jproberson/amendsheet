@@ -25,15 +25,19 @@ export function checkDefinedName(name: unknown, refersTo: unknown): void {
  * scoped to one sheet (it carries a `localSheetId`) is left out, since two sheets
  * can hold the same one.
  */
+// A name scoped to one sheet carries a localSheetId; only a global one is ours.
+const globalName = (attributes: ReadonlyMap<string, string>): string | undefined => {
+  const name = attributes.get('name')
+  return name !== undefined && attributes.get('localSheetId') === undefined ? name : undefined
+}
+
 export function readDefinedNames(workbookXml: string): Map<string, string> {
   const names = new Map<string, string>()
   let current: string | undefined
   let refersTo = ''
   for (const event of readXml(workbookXml)) {
     if (event.kind === 'open' && event.localName === 'definedName') {
-      const name = event.attributes.get('name')
-      const global = name !== undefined && event.attributes.get('localSheetId') === undefined
-      current = global ? name : undefined
+      current = globalName(event.attributes)
       refersTo = ''
       continue
     }
@@ -58,9 +62,8 @@ export function withDefinedNames(workbookXml: string, names: ReadonlyMap<string,
   let redefined: number | undefined
   for (const event of readXml(workbookXml)) {
     if (event.kind === 'open' && event.localName === 'definedName') {
-      const name = event.attributes.get('name')
-      const global = name !== undefined && event.attributes.get('localSheetId') === undefined
-      redefined = global && names.has(name) ? event.start : undefined
+      const name = globalName(event.attributes)
+      redefined = name !== undefined && names.has(name) ? event.start : undefined
       continue
     }
     if (event.kind === 'close' && event.localName === 'definedName' && redefined !== undefined) {
