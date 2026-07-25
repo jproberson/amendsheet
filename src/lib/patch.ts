@@ -696,7 +696,7 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
   }
 }
 
-interface Splice {
+interface ByteSplice {
   readonly start: number
   readonly end: number
   readonly text: string
@@ -782,7 +782,7 @@ export function patchSheet(
   ]
 
   const shape = readShape(bytes, at)
-  const splices: Splice[] = []
+  const splices: ByteSplice[] = []
   const newRows = new Map<number, string[]>()
   const filledRows = new Map<RowSpan, Array<{ column: number; cell: string }>>()
 
@@ -1179,7 +1179,7 @@ export function patchSheet(
     }
   }
 
-  return applySplices(bytes, splices)
+  return applyByteSplices(bytes, splices)
 }
 
 /**
@@ -1239,7 +1239,7 @@ function cellReferenceOf(element: string): string {
 const decoder = new TextDecoder()
 const encoder = new TextEncoder()
 
-function applySplices(bytes: Uint8Array, splices: Splice[]): Uint8Array {
+function applyByteSplices(bytes: Uint8Array, splices: ByteSplice[]): Uint8Array {
   const ordered = [...splices].sort((a, b) => a.start - b.start || a.order - b.order)
 
   const pieces: Uint8Array[] = []
