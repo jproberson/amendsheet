@@ -441,6 +441,8 @@ interface SheetShape {
   readonly sheetPr: { start: number; end: number; selfClosing: boolean } | undefined
   /** An existing tabColor inside sheetPr, replaced in place. */
   readonly tabColor: { start: number; end: number } | undefined
+  /** An existing sheetFormatPr, whose outline-level hints a grouping updates. */
+  readonly sheetFormatPr: { start: number; end: number } | undefined
   /** An existing mergeCells element, so a new merge joins it rather than a second. */
   readonly mergeContainer:
     | { openStart: number; openEnd: number; insertAt: number; selfClosing: boolean; count: number }
@@ -469,6 +471,7 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
   let worksheetStart = -1
   let sheetPr: { start: number; end: number; selfClosing: boolean } | undefined
   let tabColor: { start: number; end: number } | undefined
+  let sheetFormatPr: { start: number; end: number } | undefined
   let mergeOpenStart = -1
   let mergeOpenEnd = -1
   let mergeInsertAt = -1
@@ -619,6 +622,10 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
         tabColor = { start: event.start, end: event.end }
         continue
       }
+      if (event.localName === 'sheetFormatPr' && sheetFormatPr === undefined) {
+        sheetFormatPr = { start: event.start, end: event.end }
+        continue
+      }
       // Only the cell carrying ref owns the range. A shared dependent names the
       // si alone, and any of them may be written self closing.
       if (event.localName === 'f') {
@@ -697,6 +704,7 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
     worksheetStart,
     sheetPr,
     tabColor,
+    sheetFormatPr,
     mergeContainer:
       mergeOpenStart === -1
         ? undefined
@@ -753,6 +761,10 @@ export interface SheetEdits {
   readonly showRowColHeaders?: boolean
   /** Zoom as a whole percentage, as `zoomScale` on the first sheetView. */
   readonly zoomScale?: number
+  /** One-based row to its outline level, written as `outlineLevel` on the row. */
+  readonly rowOutlineLevels?: ReadonlyMap<number, number>
+  /** One-based column to its outline level, written as `outlineLevel` on the col. */
+  readonly colOutlineLevels?: ReadonlyMap<number, number>
 }
 
 export function patchSheet(
@@ -775,6 +787,8 @@ export function patchSheet(
   const columnWidths = sheet.columnWidths ?? new Map<number, number>()
   const hiddenRows = sheet.hiddenRows ?? new Set<number>()
   const hiddenColumns = sheet.hiddenColumns ?? new Set<number>()
+  const rowOutlineLevels = sheet.rowOutlineLevels ?? new Map<number, number>()
+  const colOutlineLevels = sheet.colOutlineLevels ?? new Map<number, number>()
   if (
     edits.size === 0 &&
     restyleRefs.length === 0 &&
@@ -789,7 +803,9 @@ export function patchSheet(
     sheet.showRowColHeaders === undefined &&
     sheet.zoomScale === undefined &&
     hiddenRows.size === 0 &&
-    hiddenColumns.size === 0
+    hiddenColumns.size === 0 &&
+    rowOutlineLevels.size === 0 &&
+    colOutlineLevels.size === 0
   ) {
     return bytes
   }
@@ -797,7 +813,9 @@ export function patchSheet(
   const rowAttributes = (row: number): string => {
     const height = rowHeights.get(row)
     const heightPart = height === undefined ? '' : ` ht="${height}" customHeight="1"`
-    return heightPart + (hiddenRows.has(row) ? ' hidden="1"' : '')
+    const level = rowOutlineLevels.get(row)
+    const levelPart = level === undefined ? '' : ` outlineLevel="${level}"`
+    return heightPart + (hiddenRows.has(row) ? ' hidden="1"' : '') + levelPart
   }
   const rowAttributed = (openTag: string, row: number): string => {
     const height = rowHeights.get(row)
@@ -805,7 +823,9 @@ export function patchSheet(
       height === undefined
         ? openTag
         : withAttribute(withAttribute(openTag, 'ht', height), 'customHeight', 1)
-    return hiddenRows.has(row) ? withAttribute(withHeight, 'hidden', 1) : withHeight
+    const withHidden = hiddenRows.has(row) ? withAttribute(withHeight, 'hidden', 1) : withHeight
+    const level = rowOutlineLevels.get(row)
+    return level === undefined ? withHidden : withAttribute(withHidden, 'outlineLevel', level)
   }
 
   const operations: ReadonlyArray<{ given: string; value: CellInput; restyle: boolean }> = [
@@ -942,7 +962,7 @@ export function patchSheet(
     })
   }
 
-  const editedRows = new Set([...rowHeights.keys(), ...hiddenRows])
+  const editedRows = new Set([...rowHeights.keys(), ...hiddenRows, ...rowOutlineLevels.keys()])
 
   // A height or a hide on a row that neither exists nor has a value edit is a new
   // empty row.
@@ -1201,11 +1221,13 @@ export function patchSheet(
   // cols is the sibling before sheetData. A width or a hide lands in the col whose
   // range covers its column, splitting that range when it spans more than the
   // column, or opening a new col when none covers it.
-  if (columnWidths.size > 0 || hiddenColumns.size > 0) {
+  if (columnWidths.size > 0 || hiddenColumns.size > 0 || colOutlineLevels.size > 0) {
     const colAttributes = (column: number): string => {
       const width = columnWidths.get(column)
       const widthPart = width === undefined ? '' : ` width="${width}" customWidth="1"`
-      return widthPart + (hiddenColumns.has(column) ? ' hidden="1"' : '')
+      const level = colOutlineLevels.get(column)
+      const levelPart = level === undefined ? '' : ` outlineLevel="${level}"`
+      return widthPart + (hiddenColumns.has(column) ? ' hidden="1"' : '') + levelPart
     }
     const colElement = (column: number): string =>
       `<${shape.prefix}col min="${column}" max="${column}"${colAttributes(column)}/>`
@@ -1217,13 +1239,21 @@ export function patchSheet(
         width === undefined
           ? ranged
           : withAttribute(withAttribute(ranged, 'width', width), 'customWidth', 1)
-      return hiddenColumns.has(edited) ? withAttribute(withWidth, 'hidden', 1) : withWidth
+      const withHidden = hiddenColumns.has(edited)
+        ? withAttribute(withWidth, 'hidden', 1)
+        : withWidth
+      const level = colOutlineLevels.get(edited)
+      return level === undefined ? withHidden : withAttribute(withHidden, 'outlineLevel', level)
     }
 
     const covering = (column: number) => shape.cols.find((c) => c.min <= column && column <= c.max)
     const bySpan = new Map<(typeof shape.cols)[number], number[]>()
     const appends: number[] = []
-    for (const column of new Set([...columnWidths.keys(), ...hiddenColumns])) {
+    for (const column of new Set([
+      ...columnWidths.keys(),
+      ...hiddenColumns,
+      ...colOutlineLevels.keys(),
+    ])) {
       const span = covering(column)
       if (span === undefined) {
         appends.push(column)
@@ -1272,6 +1302,34 @@ export function patchSheet(
         splices.push({ start: container.insertAt, end: container.insertAt, text: added, order: 1 })
       }
     }
+  }
+
+  // sheetFormatPr's outlineLevelRow/Col hint the deepest group. It is updated when
+  // the sheet has a sheetFormatPr, taking the max of what it declared and what was
+  // grouped; a sheet without one still groups by the outlineLevel on its rows and
+  // cols, so no sheetFormatPr is invented (it would need a defaultRowHeight).
+  if (
+    (rowOutlineLevels.size > 0 || colOutlineLevels.size > 0) &&
+    shape.sheetFormatPr !== undefined
+  ) {
+    const format = decoder.decode(
+      bytes.subarray(shape.sheetFormatPr.start, shape.sheetFormatPr.end),
+    )
+    const declared = (attribute: string): number => {
+      const match = format.match(new RegExp(`\\b${attribute}="(\\d+)"`))
+      return match === null ? 0 : Number(match[1])
+    }
+    const maxRow = Math.max(declared('outlineLevelRow'), ...rowOutlineLevels.values())
+    const maxCol = Math.max(declared('outlineLevelCol'), ...colOutlineLevels.values())
+    let tag = format
+    if (maxRow > 0) tag = withAttribute(tag, 'outlineLevelRow', maxRow)
+    if (maxCol > 0) tag = withAttribute(tag, 'outlineLevelCol', maxCol)
+    splices.push({
+      start: shape.sheetFormatPr.start,
+      end: shape.sheetFormatPr.end,
+      text: tag,
+      order: 0,
+    })
   }
 
   return applyByteSplices(bytes, splices)

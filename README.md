@@ -190,7 +190,9 @@ sheet already has. `worksheet.tabColor('FF0000')` colours the sheet tab, taking 
 `worksheet.showGridlines(false)` and `worksheet.showHeadings(false)` toggle the
 gridlines and the row/column headings, and `worksheet.zoom(85)` sets the zoom as a
 whole percentage. All three land on the sheet's view, alongside a freeze rather
-than replacing it.
+than replacing it. `worksheet.groupRows(2, 5)` and `worksheet.groupColumns('B', 'D')`
+set an outline level over a range so a reader shows a collapsible band; a third
+argument nests a deeper level (1 to 7) inside a shallower one.
 
 `workbook.defineName('TaxRate', 'Sheet1!$B$1')` defines a global named range, and
 `workbook.definedNames` reads them back; a name scoped to one sheet is left as it

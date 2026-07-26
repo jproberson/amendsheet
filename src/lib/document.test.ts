@@ -733,6 +733,80 @@ test('zoom refuses a value outside the allowed range, naming the sheet', () => {
   )
 })
 
+test('groupRows sets an outline level on each row in the range, creating absent ones', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.groupRows(2, 4)
+
+  const xml = sheetXml(workbook)
+  assert.match(xml, /<row r="2"[^>]*outlineLevel="1"/)
+  assert.match(xml, /<row r="3"[^>]*outlineLevel="1"/)
+  assert.match(xml, /<row r="4"[^>]*outlineLevel="1"/)
+})
+
+test('groupRows adds the level to a row the sheet already has', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row><row r="2"><c r="A2"><v>2</v></c></row>'),
+  )
+  workbook.sheets[0]?.groupRows(2, 2)
+
+  const xml = sheetXml(workbook)
+  assert.match(xml, /<row [^>]*outlineLevel="1"[^>]*><c r="A2"><v>2<\/v><\/c><\/row>/)
+})
+
+test('groupColumns sets an outline level on the columns in the range', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.groupColumns('B', 'D')
+
+  const xml = sheetXml(workbook)
+  assert.match(xml, /<col min="2" max="2"[^>]*outlineLevel="1"\/>/)
+  assert.match(xml, /<col min="4" max="4"[^>]*outlineLevel="1"\/>/)
+})
+
+test('a nested level updates an existing sheetFormatPr outline hint', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      views: '<sheetFormatPr defaultRowHeight="15"/>',
+    }),
+  )
+  workbook.sheets[0]?.groupRows(2, 3, 2)
+
+  const xml = sheetXml(workbook)
+  assert.match(xml, /<sheetFormatPr[^>]*outlineLevelRow="2"[^>]*\/>/)
+  assert.match(xml, /<row r="2"[^>]*outlineLevel="2"/)
+})
+
+test('groupRows refuses a backwards range and a level out of bounds, naming the sheet', () => {
+  const sheet = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>')).sheet('Data')
+  const refused = (error: unknown) =>
+    error instanceof XlsxError && error.code === 'unwritable-value' && error.sheet === 'Data'
+  assert.throws(() => sheet?.groupRows(4, 2), refused)
+  assert.throws(() => sheet?.groupRows(2, 4, 9), refused)
+})
+
+test('groupColumns refuses a backwards range, a fractional and a too-low level', () => {
+  const sheet = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>')).sheet('Data')
+  const refused = (error: unknown) =>
+    error instanceof XlsxError && error.code === 'unwritable-value' && error.sheet === 'Data'
+  assert.throws(() => sheet?.groupColumns('D', 'B'), refused)
+  assert.throws(() => sheet?.groupColumns('B', 'D', 1.5), refused)
+  assert.throws(() => sheet?.groupColumns('B', 'D', 0), refused)
+})
+
+test('the outline hint keeps a deeper level the sheet declared and gains a column level', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      views: '<sheetFormatPr defaultRowHeight="15" outlineLevelRow="3"/>',
+    }),
+  )
+  workbook.sheets[0]?.groupRows(2, 2, 1)
+  workbook.sheets[0]?.groupColumns('B', 'C', 2)
+
+  const xml = sheetXml(workbook)
+  // The row level the file declared (3) outranks the one grouped now (1).
+  assert.match(xml, /outlineLevelRow="3"/)
+  assert.match(xml, /outlineLevelCol="2"/)
+})
+
 test('set applies an alignment, adding it to the cell format', () => {
   const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
   workbook.sheets[0]?.set('A1', 'x', { alignment: { horizontal: 'center', wrapText: true } })
@@ -2009,6 +2083,13 @@ test('refuses a write to a sheet whose part is not in the package', () => {
     () => workbook.sheets[0]?.deleteColumns('A'),
     (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
   )
+  const gone = (error: unknown) => error instanceof XlsxError && error.code === 'missing-part'
+  assert.throws(() => workbook.sheets[0]?.tabColor('FF0000'), gone)
+  assert.throws(() => workbook.sheets[0]?.showGridlines(false), gone)
+  assert.throws(() => workbook.sheets[0]?.showHeadings(false), gone)
+  assert.throws(() => workbook.sheets[0]?.zoom(80), gone)
+  assert.throws(() => workbook.sheets[0]?.groupRows(1, 2), gone)
+  assert.throws(() => workbook.sheets[0]?.groupColumns('A', 'B'), gone)
 })
 
 test('a reference the sheet cannot hold does not break lookups around it', () => {

@@ -204,6 +204,17 @@ export interface Worksheet {
   /** Sets the sheet's zoom as a whole percentage. Refuses one outside 10 to 400. */
   zoom(percent: number): void
   /**
+   * Groups rows `from` to `to` at an outline level (1 to 7, default 1), so a
+   * reader shows a collapsible band. Deeper levels nest inside shallower ones.
+   * Refuses a backwards range or a level out of bounds.
+   */
+  groupRows(from: number, to: number, level?: number): void
+  /**
+   * Groups columns `from` to `to` — letters like `B` and `D` — at an outline
+   * level, on the same terms as `groupRows`.
+   */
+  groupColumns(from: string, to: string, level?: number): void
+  /**
    * Freezes the rows above and the columns left of `cell`, so they stay in view
    * when the sheet is scrolled. `freeze('B2')` freezes row 1 and column A.
    */
@@ -327,6 +338,14 @@ function partText(container: Container, path: string): string | undefined {
   return decodeXmlPart(bytes, path)
 }
 
+function checkOutlineLevel(level: number, at: SheetLocation): void {
+  if (!Number.isInteger(level) || level < 1 || level > 7) {
+    throw new XlsxError('unwritable-value', `Outline level ${level} is not between 1 and 7`, {
+      ...at,
+    })
+  }
+}
+
 function toCellValue(raw: RawCell, styles: Styles, date1904: boolean): CellValue {
   const value = raw.value
 
@@ -428,6 +447,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   const sheetGridlines = new Map<string, boolean>()
   const sheetHeadings = new Map<string, boolean>()
   const sheetZoom = new Map<string, number>()
+  const sheetRowGroups = new Map<string, Map<number, number>>()
+  const sheetColGroups = new Map<string, Map<number, number>>()
   // The per-sheet maps patchSheet applies in one rewrite. Both the "anything
   // pending?" check and the set of sheets to rewrite read this list, so a new
   // kind of sheet edit is registered in one place rather than two enumerations
@@ -447,6 +468,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     sheetGridlines,
     sheetHeadings,
     sheetZoom,
+    sheetRowGroups,
+    sheetColGroups,
   ]
   const fileNames = readDefinedNames(partText(container, part.path) ?? '')
   const pendingNames = new Map<string, string>()
@@ -936,6 +959,50 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         }
         sheetZoom.set(reference.path, percent)
       },
+      groupRows(from: number, to: number, level = 1): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so rows cannot be grouped`,
+            { ...at },
+          )
+        }
+        if (!Number.isInteger(from) || from < 1 || !Number.isInteger(to) || to < from) {
+          throw new XlsxError(
+            'unwritable-value',
+            `Rows ${from} to ${to} are not a forward range of row numbers`,
+            { ...at },
+          )
+        }
+        checkOutlineLevel(level, at)
+        const levels = sheetRowGroups.get(reference.path) ?? new Map<number, number>()
+        for (let row = from; row <= to; row++)
+          levels.set(row, Math.max(levels.get(row) ?? 0, level))
+        sheetRowGroups.set(reference.path, levels)
+      },
+      groupColumns(from: string, to: string, level = 1): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so columns cannot be grouped`,
+            { ...at },
+          )
+        }
+        const start = columnToIndex(from)
+        const end = columnToIndex(to)
+        if (end < start) {
+          throw new XlsxError(
+            'unwritable-value',
+            `Columns ${from} to ${to} are not a forward range of columns`,
+            { ...at },
+          )
+        }
+        checkOutlineLevel(level, at)
+        const levels = sheetColGroups.get(reference.path) ?? new Map<number, number>()
+        for (let col = start; col <= end; col++)
+          levels.set(col, Math.max(levels.get(col) ?? 0, level))
+        sheetColGroups.set(reference.path, levels)
+      },
       setRowHeight(row: number, height: number): void {
         if (sheetBytes === undefined) {
           throw new XlsxError(
@@ -1271,6 +1338,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           showGridLines: sheetGridlines.get(path),
           showRowColHeaders: sheetHeadings.get(path),
           zoomScale: sheetZoom.get(path),
+          rowOutlineLevels: sheetRowGroups.get(path),
+          colOutlineLevels: sheetColGroups.get(path),
         }),
       )
       // A cell written just past a table grows it, the way Excel would.
