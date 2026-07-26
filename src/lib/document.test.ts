@@ -17,7 +17,12 @@ const STYLES = `<styleSheet><numFmts><numFmt numFmtId="164" formatCode="yyyy-mm-
 
 function build(
   sheetBody: string,
-  options: { date1904?: boolean; extra?: Record<string, string>; sheetPr?: string } = {},
+  options: {
+    date1904?: boolean
+    extra?: Record<string, string>
+    sheetPr?: string
+    views?: string
+  } = {},
 ) {
   const parts: Record<string, Uint8Array> = {
     '_rels/.rels': encode(ROOT_RELS),
@@ -27,7 +32,7 @@ function build(
     'xl/_rels/workbook.xml.rels': encode(WORKBOOK_RELS),
     'xl/styles.xml': encode(STYLES),
     'xl/worksheets/sheet1.xml': encode(
-      `<worksheet>${options.sheetPr ?? ''}<sheetData>${sheetBody}</sheetData></worksheet>`,
+      `<worksheet>${options.sheetPr ?? ''}${options.views ?? ''}<sheetData>${sheetBody}</sheetData></worksheet>`,
     ),
     'xl/charts/chart1.xml': encode('<chart/>'),
   }
@@ -611,6 +616,118 @@ test('tabColor refuses a colour that is not hex, naming the sheet', () => {
   const sheet = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>')).sheet('Data')
   assert.throws(
     () => sheet?.tabColor('reddish'),
+    (error: unknown) =>
+      error instanceof XlsxError && error.code === 'unwritable-value' && error.sheet === 'Data',
+  )
+})
+
+test('showGridlines, showHeadings and zoom open a fresh sheetView with the flags', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  const sheet = workbook.sheets[0]
+  sheet?.showGridlines(false)
+  sheet?.showHeadings(false)
+  sheet?.zoom(85)
+
+  const xml = sheetXml(workbook)
+  assert.match(
+    xml,
+    /<sheetViews><sheetView workbookViewId="0" showGridLines="0" showRowColHeaders="0" zoomScale="85"\/><\/sheetViews>/,
+  )
+})
+
+test('a view flag and a freeze fold into one sheetView', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.showGridlines(false)
+  workbook.sheets[0]?.freeze('B2')
+
+  const xml = sheetXml(workbook)
+  assert.match(xml, /<sheetView workbookViewId="0" showGridLines="0">/)
+  assert.match(
+    xml,
+    /<pane xSplit="1" ySplit="1" topLeftCell="B2" activePane="bottomRight" state="frozen"\/>/,
+  )
+})
+
+test('zoom adds an attribute to a self-closing sheetView the sheet already has', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      views: '<sheetViews><sheetView tabSelected="1" workbookViewId="0"/></sheetViews>',
+    }),
+  )
+  workbook.sheets[0]?.zoom(120)
+
+  const xml = sheetXml(workbook)
+  assert.match(xml, /<sheetView[^>]*zoomScale="120"[^>]*\/>/)
+  assert.match(xml, /tabSelected="1"/)
+})
+
+test('a view flag keeps the other children of an existing open sheetView', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      views:
+        '<sheetViews><sheetView workbookViewId="0"><selection activeCell="C3" sqref="C3"/></sheetView></sheetViews>',
+    }),
+  )
+  workbook.sheets[0]?.showHeadings(false)
+
+  const xml = sheetXml(workbook)
+  assert.match(xml, /<sheetView[^>]*showRowColHeaders="0"[^>]*>/)
+  assert.match(xml, /<selection activeCell="C3" sqref="C3"\/>/)
+})
+
+test('zoom on a sheetView that already holds a freeze pane keeps the pane', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      views:
+        '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" state="frozen"/></sheetView></sheetViews>',
+    }),
+  )
+  workbook.sheets[0]?.zoom(75)
+
+  const xml = sheetXml(workbook)
+  assert.match(xml, /<sheetView[^>]*zoomScale="75"[^>]*>/)
+  assert.match(xml, /<pane ySplit="1" topLeftCell="A2" state="frozen"\/>/)
+})
+
+test('a freeze and a zoom compose on an existing open sheetView, pane before its selection', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      views:
+        '<sheetViews><sheetView workbookViewId="0"><selection sqref="A1"/></sheetView></sheetViews>',
+    }),
+  )
+  workbook.sheets[0]?.zoom(90)
+  workbook.sheets[0]?.freeze('A2')
+
+  const xml = sheetXml(workbook)
+  assert.match(xml, /<sheetView[^>]*zoomScale="90"[^>]*>/)
+  // pane is the first child, ahead of the selection the sheet already had.
+  assert.match(
+    xml,
+    /<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"\/><selection sqref="A1"\/>/,
+  )
+})
+
+test('a freeze and a view flag open a self-closing sheetView together', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      views: '<sheetViews><sheetView workbookViewId="0"/></sheetViews>',
+    }),
+  )
+  workbook.sheets[0]?.showGridlines(false)
+  workbook.sheets[0]?.freeze('A2')
+
+  const xml = sheetXml(workbook)
+  assert.match(
+    xml,
+    /<sheetView[^>]*showGridLines="0"[^>]*><pane [^>]*state="frozen"\/><\/sheetView>/,
+  )
+})
+
+test('zoom refuses a value outside the allowed range, naming the sheet', () => {
+  const sheet = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>')).sheet('Data')
+  assert.throws(
+    () => sheet?.zoom(5),
     (error: unknown) =>
       error instanceof XlsxError && error.code === 'unwritable-value' && error.sheet === 'Data',
   )

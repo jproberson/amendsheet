@@ -747,6 +747,12 @@ export interface SheetEdits {
   readonly hiddenColumns?: ReadonlySet<number>
   /** 8-digit ARGB for the sheet tab colour, into sheetPr, replacing any it has. */
   readonly tabColor?: string
+  /** Whether the sheet shows gridlines, as `showGridLines` on the first sheetView. */
+  readonly showGridLines?: boolean
+  /** Whether the sheet shows row/column headings, as `showRowColHeaders`. */
+  readonly showRowColHeaders?: boolean
+  /** Zoom as a whole percentage, as `zoomScale` on the first sheetView. */
+  readonly zoomScale?: number
 }
 
 export function patchSheet(
@@ -779,6 +785,9 @@ export function patchSheet(
     autoFilter === undefined &&
     freeze === undefined &&
     tabColor === undefined &&
+    sheet.showGridLines === undefined &&
+    sheet.showRowColHeaders === undefined &&
+    sheet.zoomScale === undefined &&
     hiddenRows.size === 0 &&
     hiddenColumns.size === 0
   ) {
@@ -1036,48 +1045,78 @@ export function patchSheet(
     })
   }
 
-  // A freeze pane lives inside the first sheetView, which sits before cols and
-  // sheetData. It replaces the pane the sheet has, opens a self-closing sheetView,
-  // slots in as the first child of an open one, or brings a fresh sheetViews.
-  if (freeze !== undefined) {
-    const { column, row } = parseReference(freeze)
-    const xSplit = column - 1
-    const ySplit = row - 1
-    const activePane =
-      xSplit > 0 && ySplit > 0 ? 'bottomRight' : xSplit > 0 ? 'topRight' : 'bottomLeft'
-    const paneXml =
-      `<${shape.prefix}pane` +
-      (xSplit > 0 ? ` xSplit="${xSplit}"` : '') +
-      (ySplit > 0 ? ` ySplit="${ySplit}"` : '') +
-      ` topLeftCell="${freeze}" activePane="${activePane}" state="frozen"/>`
+  // The first sheetView, before cols and sheetData, carries a freeze pane and the
+  // view flags (gridlines, headings, zoom). They share one element, so both are
+  // handled together: attributes rewrite its open tag, a pane goes in as its first
+  // child. Modifying an existing sheetView leaves any other children it has alone.
+  const viewAttributes: Array<[string, number]> = []
+  if (sheet.showGridLines !== undefined)
+    viewAttributes.push(['showGridLines', sheet.showGridLines ? 1 : 0])
+  if (sheet.showRowColHeaders !== undefined)
+    viewAttributes.push(['showRowColHeaders', sheet.showRowColHeaders ? 1 : 0])
+  if (sheet.zoomScale !== undefined) viewAttributes.push(['zoomScale', sheet.zoomScale])
 
-    if (shape.pane !== undefined) {
-      splices.push({ start: shape.pane.start, end: shape.pane.end, text: paneXml, order: 0 })
-    } else if (shape.sheetView !== undefined) {
-      if (shape.sheetView.selfClosing) {
-        const openTag = decoder.decode(bytes.subarray(shape.sheetView.start, shape.sheetView.end))
-        splices.push({
-          start: shape.sheetView.start,
-          end: shape.sheetView.end,
-          text: `${openTag.slice(0, -2)}>${paneXml}</${shape.prefix}sheetView>`,
-          order: 0,
-        })
-      } else {
-        splices.push({
-          start: shape.sheetView.end,
-          end: shape.sheetView.end,
-          text: paneXml,
-          order: -1,
-        })
-      }
-    } else {
+  if (freeze !== undefined || viewAttributes.length > 0) {
+    let paneXml: string | undefined
+    if (freeze !== undefined) {
+      const { column, row } = parseReference(freeze)
+      const xSplit = column - 1
+      const ySplit = row - 1
+      const activePane =
+        xSplit > 0 && ySplit > 0 ? 'bottomRight' : xSplit > 0 ? 'topRight' : 'bottomLeft'
+      paneXml =
+        `<${shape.prefix}pane` +
+        (xSplit > 0 ? ` xSplit="${xSplit}"` : '') +
+        (ySplit > 0 ? ` ySplit="${ySplit}"` : '') +
+        ` topLeftCell="${freeze}" activePane="${activePane}" state="frozen"/>`
+    }
+
+    const withViewAttributes = (openTag: string): string =>
+      viewAttributes.reduce((tag, [name, value]) => withAttribute(tag, name, value), openTag)
+
+    const view = shape.sheetView
+    if (view === undefined) {
+      const attrs = viewAttributes.map(([name, value]) => ` ${name}="${value}"`).join('')
+      const open = `<${shape.prefix}sheetView workbookViewId="0"${attrs}/>`
+      const element =
+        paneXml === undefined ? open : `${open.slice(0, -2)}>${paneXml}</${shape.prefix}sheetView>`
       const anchor = shape.colContainer?.openStart ?? shape.dataStart
       splices.push({
         start: anchor,
         end: anchor,
-        text: `<${shape.prefix}sheetViews><${shape.prefix}sheetView workbookViewId="0">${paneXml}</${shape.prefix}sheetView></${shape.prefix}sheetViews>`,
+        text: `<${shape.prefix}sheetViews>${element}</${shape.prefix}sheetViews>`,
         order: -3,
       })
+    } else {
+      const openTag = decoder.decode(bytes.subarray(view.start, view.end))
+      if (shape.pane !== undefined) {
+        if (paneXml !== undefined)
+          splices.push({ start: shape.pane.start, end: shape.pane.end, text: paneXml, order: 0 })
+        if (viewAttributes.length > 0)
+          splices.push({
+            start: view.start,
+            end: view.end,
+            text: withViewAttributes(openTag),
+            order: -1,
+          })
+      } else if (view.selfClosing) {
+        const open = withViewAttributes(openTag)
+        const text =
+          paneXml === undefined
+            ? open
+            : `${open.slice(0, -2)}>${paneXml}</${shape.prefix}sheetView>`
+        splices.push({ start: view.start, end: view.end, text, order: 0 })
+      } else {
+        if (viewAttributes.length > 0)
+          splices.push({
+            start: view.start,
+            end: view.end,
+            text: withViewAttributes(openTag),
+            order: -1,
+          })
+        if (paneXml !== undefined)
+          splices.push({ start: view.end, end: view.end, text: paneXml, order: -1 })
+      }
     }
   }
 

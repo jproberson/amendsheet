@@ -187,6 +187,10 @@ either on a sheet carrying a table, whose stored range is not adjusted yet.
 `worksheet.autoFilter('A1:D100')` sets the filter over a range, replacing any the
 sheet already has. `worksheet.tabColor('FF0000')` colours the sheet tab, taking a
 6- or 8-digit hex and replacing any colour the tab already had.
+`worksheet.showGridlines(false)` and `worksheet.showHeadings(false)` toggle the
+gridlines and the row/column headings, and `worksheet.zoom(85)` sets the zoom as a
+whole percentage. All three land on the sheet's view, alongside a freeze rather
+than replacing it.
 
 `workbook.defineName('TaxRate', 'Sheet1!$B$1')` defines a global named range, and
 `workbook.definedNames` reads them back; a name scoped to one sheet is left as it

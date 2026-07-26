@@ -197,6 +197,12 @@ export interface Worksheet {
    * alpha. Refuses anything else. Written by `toBytes()`.
    */
   tabColor(color: string): void
+  /** Shows or hides the sheet's gridlines, as `showGridLines` on its view. */
+  showGridlines(visible: boolean): void
+  /** Shows or hides the sheet's row and column headings, as `showRowColHeaders`. */
+  showHeadings(visible: boolean): void
+  /** Sets the sheet's zoom as a whole percentage. Refuses one outside 10 to 400. */
+  zoom(percent: number): void
   /**
    * Freezes the rows above and the columns left of `cell`, so they stay in view
    * when the sheet is scrolled. `freeze('B2')` freezes row 1 and column A.
@@ -419,6 +425,9 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   const sheetHiddenRows = new Map<string, Set<number>>()
   const sheetHiddenColumns = new Map<string, Set<number>>()
   const sheetTabColors = new Map<string, string>()
+  const sheetGridlines = new Map<string, boolean>()
+  const sheetHeadings = new Map<string, boolean>()
+  const sheetZoom = new Map<string, number>()
   // The per-sheet maps patchSheet applies in one rewrite. Both the "anything
   // pending?" check and the set of sheets to rewrite read this list, so a new
   // kind of sheet edit is registered in one place rather than two enumerations
@@ -435,6 +444,9 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     sheetHiddenRows,
     sheetHiddenColumns,
     sheetTabColors,
+    sheetGridlines,
+    sheetHeadings,
+    sheetZoom,
   ]
   const fileNames = readDefinedNames(partText(container, part.path) ?? '')
   const pendingNames = new Map<string, string>()
@@ -887,6 +899,43 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         }
         sheetTabColors.set(reference.path, normalizeColor(color, at))
       },
+      showGridlines(visible: boolean): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so its gridlines cannot be set`,
+            { ...at },
+          )
+        }
+        sheetGridlines.set(reference.path, visible)
+      },
+      showHeadings(visible: boolean): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so its headings cannot be set`,
+            { ...at },
+          )
+        }
+        sheetHeadings.set(reference.path, visible)
+      },
+      zoom(percent: number): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so it cannot be zoomed`,
+            { ...at },
+          )
+        }
+        if (!Number.isInteger(percent) || percent < 10 || percent > 400) {
+          throw new XlsxError(
+            'unwritable-value',
+            `Zoom ${percent} is not a whole percentage between 10 and 400`,
+            { ...at },
+          )
+        }
+        sheetZoom.set(reference.path, percent)
+      },
       setRowHeight(row: number, height: number): void {
         if (sheetBytes === undefined) {
           throw new XlsxError(
@@ -1219,6 +1268,9 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           hiddenRows: sheetHiddenRows.get(path),
           hiddenColumns: sheetHiddenColumns.get(path),
           tabColor: sheetTabColors.get(path),
+          showGridLines: sheetGridlines.get(path),
+          showRowColHeaders: sheetHeadings.get(path),
+          zoomScale: sheetZoom.get(path),
         }),
       )
       // A cell written just past a table grows it, the way Excel would.
