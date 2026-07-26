@@ -121,6 +121,21 @@ theme or indexed colour is read back and written as the reference it is, not
 resolved to the hex it displays as, so editing a cell keeps the theme colour its
 font already carried rather than dropping it.
 
+When you do want the displayed hex, `workbook.resolveColor(color)` returns the
+8-digit `AARRGGBB` a reference resolves to, reading the workbook's theme and
+applying any tint:
+
+```ts
+const workbook = readWorkbook(bytes)
+const cell = workbook.sheets[0]?.cell('B2')
+const shown = cell?.font?.color ? workbook.resolveColor(cell.font.color) : undefined
+```
+
+It returns `undefined` for a colour with no fixed value — a system indexed
+colour, or a theme slot the workbook's theme does not define. A plain hex passes
+through; a tinted theme colour is resolved in the colour space Excel uses and
+matches its shown value to within one unit per channel.
+
 `worksheet.protect()` turns that worksheet protection on — it is what makes a
 cell's `locked` and `hidden` bite. With no argument it matches Excel's Protect
 Sheet default: every cell locked, formatting, inserting, deleting, sorting and
@@ -284,9 +299,8 @@ What a minor release is allowed to do, so you know which branches are safe:
 - Charts, pivot tables and drawings are preserved but never created.
 - `cell` exposes a cell's `font`, `fill`, `border` and `alignment`, but only the
   parts this library models. A gradient fill is preserved in the file but not
-  reported. A theme colour is reported as its `{ theme, tint }` reference rather
-  than resolved to the hex it displays as, so reading the colour a theme names
-  would need the theme part this library does not yet interpret.
+  reported. A theme or indexed colour is reported as the reference it is;
+  `workbook.resolveColor` turns one into the hex it displays as.
 - A table grows to include a cell written directly below or to the right of it,
   the way Excel would, adding a column when it grows sideways. Inserting or
   deleting rows and columns moves the references that name cells — formulas,

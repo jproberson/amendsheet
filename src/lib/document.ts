@@ -47,6 +47,7 @@ import {
   type BorderFormat,
   type CellFormatting,
   type CellProtection,
+  type Color,
   type DateStyle,
   type FillFormat,
   type FontFormat,
@@ -61,6 +62,7 @@ import {
   readFormatting,
 } from './styles-writer.js'
 import { type ShiftSpec, shiftDefinedNames } from './shift.js'
+import { paletteByIndex, readThemeColors, resolveColor } from './theme.js'
 import { shiftForeignFormulas, shiftSheet } from './shift-sheet.js'
 import { type Styles, isDateFormat, numberFormatOf, readStyles } from './styles.js'
 import {
@@ -287,6 +289,15 @@ export interface Workbook {
   defineName(name: string, refersTo: string): void
   /** Which year serials count from. A 1904 workbook is 1462 days behind. */
   readonly epoch: 1900 | 1904
+  /**
+   * Resolves a stored colour reference — the `{ theme, tint }` or `{ indexed }` a
+   * cell's font, fill or border can carry — to the 8-digit ARGB hex it displays
+   * as. A plain hex passes through. Returns undefined for a colour with no fixed
+   * value: a system indexed colour, or a theme slot this workbook's theme does
+   * not define. A tinted theme colour is resolved in the colour space Excel uses
+   * and matches its shown value to within one unit per channel.
+   */
+  resolveColor(color: Color): string | undefined
   /** Parts that were never interpreted are written exactly as they were read. */
   toBytes(): Uint8Array
 }
@@ -381,6 +392,9 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
 
   const stringsXml = partText(container, 'xl/sharedStrings.xml')
   const sharedStrings = stringsXml === undefined ? [] : readSharedStrings(stringsXml)
+
+  const themeXml = partText(container, 'xl/theme/theme1.xml')
+  const themePalette = themeXml === undefined ? [] : paletteByIndex(readThemeColors(themeXml))
 
   const edits = new Map<string, Map<string, CellInput>>()
 
@@ -1336,6 +1350,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       pendingNames.set(name, refersTo)
     },
     epoch: date1904 ? 1904 : 1900,
+    resolveColor: (color: Color) => resolveColor(color, themePalette),
     toBytes,
   }
 }

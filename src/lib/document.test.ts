@@ -534,6 +534,24 @@ test('a refused text rotation names the sheet and cell it was for', () => {
   )
 })
 
+const THEME1 = `<theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><themeElements><clrScheme name="Office"><a:dk1><a:sysClr val="windowText" lastClr="000000"/></a:dk1><a:lt1><a:sysClr val="window" lastClr="FFFFFF"/></a:lt1><a:dk2><a:srgbClr val="44546A"/></a:dk2><a:lt2><a:srgbClr val="E7E6E6"/></a:lt2><a:accent1><a:srgbClr val="4472C4"/></a:accent1><a:accent2><a:srgbClr val="ED7D31"/></a:accent2><a:accent3><a:srgbClr val="A5A5A5"/></a:accent3><a:accent4><a:srgbClr val="FFC000"/></a:accent4><a:accent5><a:srgbClr val="5B9BD5"/></a:accent5><a:accent6><a:srgbClr val="70AD47"/></a:accent6><a:hlink><a:srgbClr val="0563C1"/></a:hlink><a:folHlink><a:srgbClr val="954F72"/></a:folHlink></clrScheme></themeElements></theme>`
+
+test('resolveColor resolves a theme colour against the workbook theme part', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', { extra: { 'xl/theme/theme1.xml': THEME1 } }),
+  )
+  assert.equal(workbook.resolveColor({ theme: 4 }), 'FF4472C4')
+  assert.equal(workbook.resolveColor({ theme: 4, tint: -0.499985 }), 'FF203764')
+})
+
+test('resolveColor without a theme part still resolves hex and indexed colours', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  assert.equal(workbook.resolveColor('4472C4'), 'FF4472C4')
+  assert.equal(workbook.resolveColor({ indexed: 10 }), 'FFFF0000')
+  // No theme, so a theme reference has nothing to resolve against.
+  assert.equal(workbook.resolveColor({ theme: 4 }), undefined)
+})
+
 const lastXf = (styles: string) =>
   [...styles.matchAll(/<xf\b[^>]*?\/>|<xf\b[^>]*?>[\s\S]*?<\/xf>/g)]
     .map((match) => match[0])
