@@ -1,6 +1,6 @@
 {
   "name": "amendsheet",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "Amend .xlsx files. Everything you did not touch stays exactly as it was.",
   "repository": {
