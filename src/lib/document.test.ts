@@ -515,6 +515,25 @@ test('set refuses a font colour that is not hex, before recording anything', () 
   assert.deepEqual(sheet?.cell('A1')?.value, { kind: 'number', value: 1 })
 })
 
+const locates = (sheet: string, reference: string) => (error: unknown) =>
+  error instanceof XlsxError &&
+  error.code === 'unwritable-value' &&
+  error.sheet === sheet &&
+  error.reference === reference
+
+test('a refused font colour names the sheet and cell it was for', () => {
+  const sheet = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>')).sheet('Data')
+  assert.throws(() => sheet?.set('A1', 'x', { font: { color: 'nope' } }), locates('Data', 'A1'))
+})
+
+test('a refused text rotation names the sheet and cell it was for', () => {
+  const sheet = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>')).sheet('Data')
+  assert.throws(
+    () => sheet?.set('A1', 'x', { alignment: { textRotation: 999 } }),
+    locates('Data', 'A1'),
+  )
+})
+
 const lastXf = (styles: string) =>
   [...styles.matchAll(/<xf\b[^>]*?\/>|<xf\b[^>]*?>[\s\S]*?<\/xf>/g)]
     .map((match) => match[0])

@@ -186,6 +186,14 @@ test('checkStyleOptions refuses an out-of-union style value at the call', () => 
   refuses({ fill: { type: 'solid' } }) // no colour
 })
 
+test('checkStyleOptions carries the sheet through into its refusal', () => {
+  assert.throws(
+    () => checkStyleOptions({ alignment: { horizontal: 'sideways' } }, 'B7', { sheet: 'Q3' }),
+    (error: unknown) =>
+      error instanceof XlsxError && error.sheet === 'Q3' && error.reference === 'B7',
+  )
+})
+
 test('checkStyleOptions passes valid options and a missing one', () => {
   checkStyleOptions(undefined, 'A1')
   checkStyleOptions({ alignment: { horizontal: 'center', vertical: 'top' } }, 'A1')

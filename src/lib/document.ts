@@ -622,12 +622,13 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       options: SetOptions | undefined,
       canonical: string,
     ): DateStyle | undefined => {
+      const location = { ...at, reference: canonical }
       if (workingStyles === undefined) {
         if (Object.values(options ?? {}).some((asked) => asked !== undefined)) {
           throw new XlsxError(
             'missing-part',
             `Cannot format ${canonical}: the package has no style table`,
-            { part: 'xl/styles.xml', reference: canonical },
+            { ...location, part: 'xl/styles.xml' },
           )
         }
         return undefined
@@ -643,12 +644,14 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       // An asked-for format wins; a Date only gets one because without one it
       // displays as the serial number it is stored as.
       if (options?.numberFormat !== undefined)
-        step(ensureNumberFormat(xml, base, options.numberFormat))
+        step(ensureNumberFormat(xml, base, options.numberFormat, location))
       else if (value instanceof Date) step(ensureDateStyle(xml, base))
-      if (options?.font !== undefined) step(ensureFontStyle(xml, base, options.font))
-      if (options?.fill !== undefined) step(ensureFillStyle(xml, base, options.fill))
-      if (options?.border !== undefined) step(ensureBorderStyle(xml, base, options.border))
-      if (options?.alignment !== undefined) step(ensureAlignmentStyle(xml, base, options.alignment))
+      if (options?.font !== undefined) step(ensureFontStyle(xml, base, options.font, location))
+      if (options?.fill !== undefined) step(ensureFillStyle(xml, base, options.fill, location))
+      if (options?.border !== undefined)
+        step(ensureBorderStyle(xml, base, options.border, location))
+      if (options?.alignment !== undefined)
+        step(ensureAlignmentStyle(xml, base, options.alignment, location))
       if (options?.protection !== undefined)
         step(ensureProtectionStyle(xml, base, options.protection))
       return applied
@@ -762,7 +765,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         if (sheetBytes === undefined) throw absent(canonical, 'written')
 
         checkWritable(canonical, value, date1904, at)
-        checkStyleOptions(options, canonical)
+        checkStyleOptions(options, canonical, at)
         // sheetBytes is present, so indexed() is too; the guard is for the type.
         const index = indexed()
         if (index !== undefined) {
@@ -784,7 +787,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       format(cellReference: string, options: SetOptions): void {
         const canonical = formatReference(parseWritableReference(cellReference))
         if (sheetBytes === undefined) throw absent(canonical, 'formatted')
-        checkStyleOptions(options, canonical)
+        checkStyleOptions(options, canonical, at)
 
         const current = styleAt(canonical)
         // No value, so a Date never triggers a format; only what is asked for.

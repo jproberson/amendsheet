@@ -1,4 +1,4 @@
-import { XlsxError } from './errors.js'
+import { XlsxError, type XlsxErrorContext } from './errors.js'
 import { builtInFormatId, isDateFormat, numberFormatOf, readStyles } from './styles.js'
 import { findUnwritableCharacter, readXml, withAttribute } from './xml.js'
 
@@ -279,10 +279,13 @@ const toVertAlign = (value: string | undefined): FontVerticalAlign | undefined =
  * is the colour at full opacity. */
 const HEX_COLOR = /^[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/
 
-export function normalizeColor(color: string): string {
+export function normalizeColor(color: string, location: XlsxErrorContext = {}): string {
   const hex = color.startsWith('#') ? color.slice(1) : color
   if (!HEX_COLOR.test(hex)) {
-    throw new XlsxError('unwritable-value', `Colour "${color}" is not a 6 or 8 digit hex value`, {})
+    throw new XlsxError('unwritable-value', `Colour "${color}" is not a 6 or 8 digit hex value`, {
+      part: 'xl/styles.xml',
+      ...location,
+    })
   }
   return (hex.length === 6 ? `FF${hex}` : hex).toUpperCase()
 }
@@ -314,14 +317,14 @@ function parseColor(attributes: ReadonlyMap<string, string>): Color | undefined 
 /** Serialises a colour to the attributes of a colour element, validating a
  * caller's value: a hex string, or a non-negative integer theme or index, with a
  * tint between -1 and 1. Returns a leading space so a site can inline it. */
-function colorAttributes(color: Color): string {
-  if (typeof color === 'string') return ` rgb="${normalizeColor(color)}"`
+function colorAttributes(color: Color, location: XlsxErrorContext = {}): string {
+  if (typeof color === 'string') return ` rgb="${normalizeColor(color, location)}"`
   if ('theme' in color) {
     if (!Number.isInteger(color.theme) || color.theme < 0) {
       throw new XlsxError(
         'unwritable-value',
         `Colour theme "${color.theme}" is not a non-negative integer`,
-        {},
+        { part: 'xl/styles.xml', ...location },
       )
     }
     if (color.tint === undefined) return ` theme="${color.theme}"`
@@ -329,7 +332,7 @@ function colorAttributes(color: Color): string {
       throw new XlsxError(
         'unwritable-value',
         `Colour tint "${color.tint}" is not between -1 and 1`,
-        {},
+        { part: 'xl/styles.xml', ...location },
       )
     }
     return ` theme="${color.theme}" tint="${color.tint}"`
@@ -338,7 +341,7 @@ function colorAttributes(color: Color): string {
     throw new XlsxError(
       'unwritable-value',
       `Colour index "${color.indexed}" is not a non-negative integer`,
-      {},
+      { part: 'xl/styles.xml', ...location },
     )
   }
   return ` indexed="${color.indexed}"`
@@ -402,7 +405,7 @@ function parseFont(element: string): FontFormat {
   return font
 }
 
-function buildFontElement(font: FontFormat): string {
+function buildFontElement(font: FontFormat, location: XlsxErrorContext = {}): string {
   let inner = ''
   if (font.bold === true) inner += '<b/>'
   if (font.italic === true) inner += '<i/>'
@@ -414,11 +417,12 @@ function buildFontElement(font: FontFormat): string {
     if (!Number.isFinite(font.size) || font.size <= 0) {
       throw new XlsxError('unwritable-value', `Font size ${font.size} is not a positive number`, {
         part: 'xl/styles.xml',
+        ...location,
       })
     }
     inner += `<sz val="${font.size}"/>`
   }
-  if (font.color !== undefined) inner += `<color${colorAttributes(font.color)}/>`
+  if (font.color !== undefined) inner += `<color${colorAttributes(font.color, location)}/>`
   if (font.name !== undefined) inner += `<name val="${escapeXml(font.name)}"/>`
   return `<font>${inner}</font>`
 }
@@ -507,6 +511,7 @@ export function ensureFontStyle(
   stylesXml: string,
   basedOn: number | undefined,
   font: FontFormat,
+  location: XlsxErrorContext = {},
 ): DateStyle {
   const seeded = withReservedFont(stylesXml)
   const fonts = readTable(seeded, 'fonts', 'font')
@@ -522,7 +527,7 @@ export function ensureFontStyle(
     name: font.name ?? current.name,
   }
 
-  const element = withNamespacePrefix(buildFontElement(merged), tablePrefix(seeded))
+  const element = withNamespacePrefix(buildFontElement(merged, location), tablePrefix(seeded))
   const { xml, id } = ensureInTable(seeded, 'fonts', 'font', element)
   return applyCellFormat(xml, basedOn, { fontId: id })
 }
@@ -580,15 +585,15 @@ function withReservedFills(stylesXml: string): string {
   )
 }
 
-function buildFillElement(fill: FillFormat): string {
-  const fg = `<fgColor${colorAttributes(fill.color)}/>`
+function buildFillElement(fill: FillFormat, location: XlsxErrorContext = {}): string {
+  const fg = `<fgColor${colorAttributes(fill.color, location)}/>`
   if (fill.type === 'solid') {
     return `<fill><patternFill patternType="solid">${fg}<bgColor indexed="64"/></patternFill></fill>`
   }
   const bg =
     fill.background === undefined
       ? '<bgColor indexed="64"/>'
-      : `<bgColor${colorAttributes(fill.background)}/>`
+      : `<bgColor${colorAttributes(fill.background, location)}/>`
   return `<fill><patternFill patternType="${fill.pattern}">${fg}${bg}</patternFill></fill>`
 }
 
@@ -596,9 +601,10 @@ export function ensureFillStyle(
   stylesXml: string,
   basedOn: number | undefined,
   fill: FillFormat,
+  location: XlsxErrorContext = {},
 ): DateStyle {
   const seeded = withReservedFills(stylesXml)
-  const element = withNamespacePrefix(buildFillElement(fill), tablePrefix(seeded))
+  const element = withNamespacePrefix(buildFillElement(fill, location), tablePrefix(seeded))
   const { xml, id } = ensureInTable(seeded, 'fills', 'fill', element)
   return applyCellFormat(xml, basedOn, { fillId: id })
 }
@@ -727,22 +733,27 @@ const borderSidesAt = (stylesXml: string, id: number): Sides => {
   return element === undefined ? {} : parseBorder(element)
 }
 
-const buildSide = (name: string, side: Side | undefined): string => {
+const buildSide = (
+  name: string,
+  side: Side | undefined,
+  location: XlsxErrorContext = {},
+): string => {
   if (side === undefined) return `<${name}/>`
   if (side.color === undefined) return `<${name} style="${side.style}"/>`
-  return `<${name} style="${side.style}"><color${colorAttributes(side.color)}/></${name}>`
+  return `<${name} style="${side.style}"><color${colorAttributes(side.color, location)}/></${name}>`
 }
 
-const buildBorderElement = (sides: Sides): string => {
+const buildBorderElement = (sides: Sides, location: XlsxErrorContext = {}): string => {
   const flags =
     (sides.diagonalUp ? ' diagonalUp="1"' : '') + (sides.diagonalDown ? ' diagonalDown="1"' : '')
-  return `<border${flags}>${buildSide('left', sides.left)}${buildSide('right', sides.right)}${buildSide('top', sides.top)}${buildSide('bottom', sides.bottom)}${buildSide('diagonal', sides.diagonal)}</border>`
+  return `<border${flags}>${buildSide('left', sides.left, location)}${buildSide('right', sides.right, location)}${buildSide('top', sides.top, location)}${buildSide('bottom', sides.bottom, location)}${buildSide('diagonal', sides.diagonal, location)}</border>`
 }
 
 export function ensureBorderStyle(
   stylesXml: string,
   basedOn: number | undefined,
   border: BorderFormat,
+  location: XlsxErrorContext = {},
 ): DateStyle {
   const seeded = withReservedBorder(stylesXml)
   const current = borderSidesAt(seeded, idOf(seeded, basedOn, 'borderId'))
@@ -763,7 +774,7 @@ export function ensureBorderStyle(
     merged.diagonalDown = current.diagonalDown
   }
 
-  const element = withNamespacePrefix(buildBorderElement(merged), tablePrefix(seeded))
+  const element = withNamespacePrefix(buildBorderElement(merged, location), tablePrefix(seeded))
   const { xml, id } = ensureInTable(seeded, 'borders', 'border', element)
   return applyCellFormat(xml, basedOn, { borderId: id })
 }
@@ -860,7 +871,7 @@ function withAlignmentChild(xf: string, alignment: string, prefix: string): stri
   return `${openTag}${alignment}${body.replace(ALIGNMENT_CHILD, '')}</${prefix}xf>`
 }
 
-function validateAlignment(alignment: Alignment): void {
+function validateAlignment(alignment: Alignment, location: XlsxErrorContext = {}): void {
   const { textRotation, indent } = alignment
   if (
     textRotation !== undefined &&
@@ -870,11 +881,13 @@ function validateAlignment(alignment: Alignment): void {
   ) {
     throw new XlsxError('unwritable-value', `Text rotation ${textRotation} is not 0–180 or 255`, {
       part: 'xl/styles.xml',
+      ...location,
     })
   }
   if (indent !== undefined && (!Number.isInteger(indent) || indent < 0)) {
     throw new XlsxError('unwritable-value', `Indent ${indent} is not a whole number of steps`, {
       part: 'xl/styles.xml',
+      ...location,
     })
   }
 }
@@ -888,8 +901,9 @@ export function ensureAlignmentStyle(
   stylesXml: string,
   basedOn: number | undefined,
   alignment: Alignment,
+  location: XlsxErrorContext = {},
 ): DateStyle {
-  validateAlignment(alignment)
+  validateAlignment(alignment, location)
   const prefix = tablePrefix(stylesXml)
   const base =
     basedOn === undefined
@@ -1061,13 +1075,14 @@ export function ensureNumberFormat(
   stylesXml: string,
   basedOn: number | undefined,
   formatCode: string,
+  location: XlsxErrorContext = {},
 ): DateStyle {
   const unwritable = findUnwritableCharacter(formatCode)
   if (unwritable !== undefined) {
     throw new XlsxError(
       'unwritable-value',
       `Number format holds ${unwritable}, which cannot be written to xml`,
-      { part: 'xl/styles.xml' },
+      { part: 'xl/styles.xml', ...location },
     )
   }
 
@@ -1331,14 +1346,18 @@ const inUnion = <T>(known: ReadonlySet<T>, value: unknown): boolean => {
  * reaches here, and an out-of-union enum was otherwise interpolated raw into
  * styles.xml — a bad value that broke the whole workbook, not just the one edit.
  */
-export function checkStyleOptions(options: unknown, reference: string): void {
+export function checkStyleOptions(
+  options: unknown,
+  reference: string,
+  location: XlsxErrorContext = {},
+): void {
   if (typeof options !== 'object' || options === null) return
 
   const refuse = (what: string, value: unknown): never => {
     throw new XlsxError(
       'unwritable-value',
       `Cell ${reference} was given ${what} "${String(value)}", which is not one this library writes`,
-      { part: 'xl/styles.xml', reference },
+      { part: 'xl/styles.xml', ...location, reference },
     )
   }
 
