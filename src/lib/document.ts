@@ -59,6 +59,7 @@ import {
   ensureFontStyle,
   ensureNumberFormat,
   ensureProtectionStyle,
+  normalizeColor,
   readFormatting,
 } from './styles-writer.js'
 import { type ShiftSpec, shiftDefinedNames } from './shift.js'
@@ -190,6 +191,12 @@ export interface Worksheet {
   merge(range: string): void
   /** Sets the sheet's auto-filter over a range, replacing any it already has. */
   autoFilter(range: string): void
+  /**
+   * Sets the sheet tab's colour, into `sheetPr`, replacing any it already has.
+   * The colour is a 6- or 8-digit hex string; a 6-digit one gains an opaque
+   * alpha. Refuses anything else. Written by `toBytes()`.
+   */
+  tabColor(color: string): void
   /**
    * Freezes the rows above and the columns left of `cell`, so they stay in view
    * when the sheet is scrolled. `freeze('B2')` freezes row 1 and column A.
@@ -411,6 +418,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   const sheetFreezes = new Map<string, string>()
   const sheetHiddenRows = new Map<string, Set<number>>()
   const sheetHiddenColumns = new Map<string, Set<number>>()
+  const sheetTabColors = new Map<string, string>()
   // The per-sheet maps patchSheet applies in one rewrite. Both the "anything
   // pending?" check and the set of sheets to rewrite read this list, so a new
   // kind of sheet edit is registered in one place rather than two enumerations
@@ -426,6 +434,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     sheetFreezes,
     sheetHiddenRows,
     sheetHiddenColumns,
+    sheetTabColors,
   ]
   const fileNames = readDefinedNames(partText(container, part.path) ?? '')
   const pendingNames = new Map<string, string>()
@@ -868,6 +877,16 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         }
         sheetFreezes.set(reference.path, formatReference(parseWritableReference(cell)))
       },
+      tabColor(color: string): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so its tab cannot be coloured`,
+            { ...at, reference: color },
+          )
+        }
+        sheetTabColors.set(reference.path, normalizeColor(color, at))
+      },
       setRowHeight(row: number, height: number): void {
         if (sheetBytes === undefined) {
           throw new XlsxError(
@@ -1199,6 +1218,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           freeze: sheetFreezes.get(path),
           hiddenRows: sheetHiddenRows.get(path),
           hiddenColumns: sheetHiddenColumns.get(path),
+          tabColor: sheetTabColors.get(path),
         }),
       )
       // A cell written just past a table grows it, the way Excel would.

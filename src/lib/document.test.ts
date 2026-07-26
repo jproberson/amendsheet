@@ -17,7 +17,7 @@ const STYLES = `<styleSheet><numFmts><numFmt numFmtId="164" formatCode="yyyy-mm-
 
 function build(
   sheetBody: string,
-  options: { date1904?: boolean; extra?: Record<string, string> } = {},
+  options: { date1904?: boolean; extra?: Record<string, string>; sheetPr?: string } = {},
 ) {
   const parts: Record<string, Uint8Array> = {
     '_rels/.rels': encode(ROOT_RELS),
@@ -27,7 +27,7 @@ function build(
     'xl/_rels/workbook.xml.rels': encode(WORKBOOK_RELS),
     'xl/styles.xml': encode(STYLES),
     'xl/worksheets/sheet1.xml': encode(
-      `<worksheet><sheetData>${sheetBody}</sheetData></worksheet>`,
+      `<worksheet>${options.sheetPr ?? ''}<sheetData>${sheetBody}</sheetData></worksheet>`,
     ),
     'xl/charts/chart1.xml': encode('<chart/>'),
   }
@@ -556,6 +556,65 @@ const lastXf = (styles: string) =>
   [...styles.matchAll(/<xf\b[^>]*?\/>|<xf\b[^>]*?>[\s\S]*?<\/xf>/g)]
     .map((match) => match[0])
     .at(-1) ?? ''
+
+const sheetXml = (workbook: ReturnType<typeof readWorkbook>) =>
+  decode(readContainer(workbook.toBytes()).parts.get('xl/worksheets/sheet1.xml'))
+
+test('tabColor writes a tabColor into a fresh sheetPr, normalized to 8-digit ARGB', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.tabColor('FF0000')
+
+  const xml = sheetXml(workbook)
+  assert.match(xml, /<sheetPr><tabColor rgb="FFFF0000"\/><\/sheetPr>/)
+  // sheetPr must be the first child of the worksheet.
+  assert.match(xml, /<worksheet><sheetPr>/)
+})
+
+test('tabColor replaces a tabColor the sheet already has, keeping other sheetPr children', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      sheetPr: '<sheetPr codeName="S1"><tabColor rgb="FF00FF00"/></sheetPr>',
+    }),
+  )
+  workbook.sheets[0]?.tabColor('#0000FF')
+
+  const xml = sheetXml(workbook)
+  assert.match(xml, /<tabColor rgb="FF0000FF"\/>/)
+  assert.doesNotMatch(xml, /FF00FF00/)
+  assert.match(xml, /codeName="S1"/)
+})
+
+test('tabColor opens a self-closing sheetPr to hold the colour', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', { sheetPr: '<sheetPr codeName="S1"/>' }),
+  )
+  workbook.sheets[0]?.tabColor('FF0000')
+
+  const xml = sheetXml(workbook)
+  assert.match(xml, /<sheetPr codeName="S1"><tabColor rgb="FFFF0000"\/><\/sheetPr>/)
+})
+
+test('tabColor slots in as the first child of a sheetPr that has other children', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      sheetPr: '<sheetPr><outlinePr summaryBelow="0"/></sheetPr>',
+    }),
+  )
+  workbook.sheets[0]?.tabColor('FF0000')
+
+  const xml = sheetXml(workbook)
+  // tabColor must precede outlinePr per the sheetPr child order.
+  assert.match(xml, /<sheetPr><tabColor rgb="FFFF0000"\/><outlinePr summaryBelow="0"\/><\/sheetPr>/)
+})
+
+test('tabColor refuses a colour that is not hex, naming the sheet', () => {
+  const sheet = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>')).sheet('Data')
+  assert.throws(
+    () => sheet?.tabColor('reddish'),
+    (error: unknown) =>
+      error instanceof XlsxError && error.code === 'unwritable-value' && error.sheet === 'Data',
+  )
+})
 
 test('set applies an alignment, adding it to the cell format', () => {
   const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))

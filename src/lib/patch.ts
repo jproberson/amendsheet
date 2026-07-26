@@ -435,6 +435,12 @@ interface SheetShape {
   readonly sheetView: { start: number; end: number; selfClosing: boolean } | undefined
   /** An existing pane inside that sheetView, replaced rather than doubled. */
   readonly pane: { start: number; end: number } | undefined
+  /** End of the worksheet root's open tag, where a fresh sheetPr is anchored. */
+  readonly worksheetStart: number
+  /** An existing sheetPr, so a tab colour joins it rather than opening a second. */
+  readonly sheetPr: { start: number; end: number; selfClosing: boolean } | undefined
+  /** An existing tabColor inside sheetPr, replaced in place. */
+  readonly tabColor: { start: number; end: number } | undefined
   /** An existing mergeCells element, so a new merge joins it rather than a second. */
   readonly mergeContainer:
     | { openStart: number; openEnd: number; insertAt: number; selfClosing: boolean; count: number }
@@ -460,6 +466,9 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
   let openAutoFilter = -1
   let sheetView: { start: number; end: number; selfClosing: boolean } | undefined
   let pane: { start: number; end: number } | undefined
+  let worksheetStart = -1
+  let sheetPr: { start: number; end: number; selfClosing: boolean } | undefined
+  let tabColor: { start: number; end: number } | undefined
   let mergeOpenStart = -1
   let mergeOpenEnd = -1
   let mergeInsertAt = -1
@@ -598,6 +607,18 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
         pane = { start: event.start, end: event.end }
         continue
       }
+      if (event.localName === 'worksheet' && worksheetStart === -1) {
+        worksheetStart = event.end
+        continue
+      }
+      if (event.localName === 'sheetPr' && sheetPr === undefined) {
+        sheetPr = { start: event.start, end: event.end, selfClosing: event.selfClosing }
+        continue
+      }
+      if (event.localName === 'tabColor' && tabColor === undefined) {
+        tabColor = { start: event.start, end: event.end }
+        continue
+      }
       // Only the cell carrying ref owns the range. A shared dependent names the
       // si alone, and any of them may be written self closing.
       if (event.localName === 'f') {
@@ -673,6 +694,9 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
     autoFilter,
     sheetView,
     pane,
+    worksheetStart,
+    sheetPr,
+    tabColor,
     mergeContainer:
       mergeOpenStart === -1
         ? undefined
@@ -721,6 +745,8 @@ export interface SheetEdits {
   readonly hiddenRows?: ReadonlySet<number>
   /** One-based columns to hide, composed with any width the column also has. */
   readonly hiddenColumns?: ReadonlySet<number>
+  /** 8-digit ARGB for the sheet tab colour, into sheetPr, replacing any it has. */
+  readonly tabColor?: string
 }
 
 export function patchSheet(
@@ -732,7 +758,7 @@ export function patchSheet(
   at: SheetLocation = {},
   sheet: SheetEdits = {},
 ): Uint8Array {
-  const { protection, merges, autoFilter, freeze } = sheet
+  const { protection, merges, autoFilter, freeze, tabColor } = sheet
   // A style override with no value edit is a restyle: the cell keeps its value
   // and formula and only its `s` changes, so unlike a write it needs no shared
   // formula or merge refusal — formatting is always safe.
@@ -752,6 +778,7 @@ export function patchSheet(
     columnWidths.size === 0 &&
     autoFilter === undefined &&
     freeze === undefined &&
+    tabColor === undefined &&
     hiddenRows.size === 0 &&
     hiddenColumns.size === 0
   ) {
@@ -1050,6 +1077,35 @@ export function patchSheet(
         end: anchor,
         text: `<${shape.prefix}sheetViews><${shape.prefix}sheetView workbookViewId="0">${paneXml}</${shape.prefix}sheetView></${shape.prefix}sheetViews>`,
         order: -3,
+      })
+    }
+  }
+
+  // tabColor is the first child of sheetPr, itself the first child of worksheet.
+  // It replaces the tabColor the sheet has, becomes the first child of an existing
+  // sheetPr, or brings a fresh sheetPr at the very front.
+  if (tabColor !== undefined) {
+    const tabXml = `<${shape.prefix}tabColor rgb="${tabColor}"/>`
+    if (shape.tabColor !== undefined) {
+      splices.push({ start: shape.tabColor.start, end: shape.tabColor.end, text: tabXml, order: 0 })
+    } else if (shape.sheetPr !== undefined) {
+      if (shape.sheetPr.selfClosing) {
+        const openTag = decoder.decode(bytes.subarray(shape.sheetPr.start, shape.sheetPr.end))
+        splices.push({
+          start: shape.sheetPr.start,
+          end: shape.sheetPr.end,
+          text: `${openTag.slice(0, -2)}>${tabXml}</${shape.prefix}sheetPr>`,
+          order: 0,
+        })
+      } else {
+        splices.push({ start: shape.sheetPr.end, end: shape.sheetPr.end, text: tabXml, order: -1 })
+      }
+    } else {
+      splices.push({
+        start: shape.worksheetStart,
+        end: shape.worksheetStart,
+        text: `<${shape.prefix}sheetPr>${tabXml}</${shape.prefix}sheetPr>`,
+        order: -5,
       })
     }
   }
