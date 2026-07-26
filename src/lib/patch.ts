@@ -443,6 +443,14 @@ interface SheetShape {
   readonly tabColor: { start: number; end: number } | undefined
   /** An existing sheetFormatPr, whose outline-level hints a grouping updates. */
   readonly sheetFormatPr: { start: number; end: number } | undefined
+  /** An existing dataValidations, so a new rule joins it and bumps its count. */
+  readonly dataValidations:
+    | { openStart: number; openEnd: number; insertAt: number; selfClosing: boolean; count: number }
+    | undefined
+  /** Start of the first sibling that must follow dataValidations, or -1. */
+  readonly laterSiblingStart: number
+  /** Start of the worksheet's close tag, the fallback insertion point. */
+  readonly worksheetEnd: number
   /** An existing mergeCells element, so a new merge joins it rather than a second. */
   readonly mergeContainer:
     | { openStart: number; openEnd: number; insertAt: number; selfClosing: boolean; count: number }
@@ -472,6 +480,13 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
   let sheetPr: { start: number; end: number; selfClosing: boolean } | undefined
   let tabColor: { start: number; end: number } | undefined
   let sheetFormatPr: { start: number; end: number } | undefined
+  let dvOpenStart = -1
+  let dvOpenEnd = -1
+  let dvInsertAt = -1
+  let dvSelfClosing = false
+  let dvCount = 0
+  let laterSiblingStart = -1
+  let worksheetEnd = -1
   let mergeOpenStart = -1
   let mergeOpenEnd = -1
   let mergeInsertAt = -1
@@ -626,6 +641,21 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
         sheetFormatPr = { start: event.start, end: event.end }
         continue
       }
+      if (event.localName === 'dataValidations' && dvOpenStart === -1) {
+        dvOpenStart = event.start
+        dvOpenEnd = event.end
+        dvSelfClosing = event.selfClosing
+        if (event.selfClosing) dvInsertAt = event.end
+        continue
+      }
+      if (event.localName === 'dataValidation') {
+        dvCount += 1
+        continue
+      }
+      if (AFTER_DATA_VALIDATIONS.has(event.localName) && laterSiblingStart === -1) {
+        laterSiblingStart = event.start
+        continue
+      }
       // Only the cell carrying ref owns the range. A shared dependent names the
       // si alone, and any of them may be written self closing.
       if (event.localName === 'f') {
@@ -683,6 +713,8 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
     }
     if (event.localName === 'mergeCells') mergeInsertAt = event.start
     if (event.localName === 'cols') colInsertAt = event.start
+    if (event.localName === 'dataValidations') dvInsertAt = event.start
+    if (event.localName === 'worksheet') worksheetEnd = event.start
   }
 
   if (dataStart === -1)
@@ -705,6 +737,18 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
     sheetPr,
     tabColor,
     sheetFormatPr,
+    dataValidations:
+      dvOpenStart === -1
+        ? undefined
+        : {
+            openStart: dvOpenStart,
+            openEnd: dvOpenEnd,
+            insertAt: dvInsertAt,
+            selfClosing: dvSelfClosing,
+            count: dvCount,
+          },
+    laterSiblingStart,
+    worksheetEnd,
     mergeContainer:
       mergeOpenStart === -1
         ? undefined
@@ -736,6 +780,53 @@ interface ByteSplice {
   readonly order: number
 }
 
+// The CT_Worksheet children that follow dataValidations. A new dataValidations is
+// placed before the first of these the sheet has, so the schema order holds and
+// Excel does not offer to repair the file; with none, it goes before the close.
+const AFTER_DATA_VALIDATIONS = new Set([
+  'hyperlinks',
+  'printOptions',
+  'pageMargins',
+  'pageSetup',
+  'headerFooter',
+  'rowBreaks',
+  'colBreaks',
+  'customProperties',
+  'cellWatches',
+  'ignoredErrors',
+  'smartTags',
+  'drawing',
+  'drawingHF',
+  'picture',
+  'oleObjects',
+  'controls',
+  'webPublishItems',
+  'tableParts',
+  'extLst',
+  'legacyDrawing',
+  'legacyDrawingHF',
+])
+
+/** One data-validation rule, built into a `<dataValidation>` by `patchSheet`. */
+export interface DataValidationSpec {
+  readonly type: string
+  /** The range or cell the rule covers, canonical (`B2:B10`). */
+  readonly sqref: string
+  readonly allowBlank: boolean
+  /** Formula content, escaped when written. A list is a quoted, comma-joined set. */
+  readonly formula1: string
+}
+
+function dataValidationElement(spec: DataValidationSpec, prefix: string): string {
+  return (
+    `<${prefix}dataValidation type="${spec.type}"` +
+    ` allowBlank="${spec.allowBlank ? '1' : '0'}"` +
+    ` showInputMessage="1" showErrorMessage="1" sqref="${spec.sqref}">` +
+    `<${prefix}formula1>${escapeXml(spec.formula1)}</${prefix}formula1>` +
+    `</${prefix}dataValidation>`
+  )
+}
+
 /** Edits to a sheet that are not cell values: the elements around sheetData. */
 export interface SheetEdits {
   readonly protection?: SheetProtection | 'remove'
@@ -765,6 +856,8 @@ export interface SheetEdits {
   readonly rowOutlineLevels?: ReadonlyMap<number, number>
   /** One-based column to its outline level, written as `outlineLevel` on the col. */
   readonly colOutlineLevels?: ReadonlyMap<number, number>
+  /** Data-validation rules to add, joining any dataValidations the sheet has. */
+  readonly dataValidations?: readonly DataValidationSpec[]
 }
 
 export function patchSheet(
@@ -805,7 +898,8 @@ export function patchSheet(
     hiddenRows.size === 0 &&
     hiddenColumns.size === 0 &&
     rowOutlineLevels.size === 0 &&
-    colOutlineLevels.size === 0
+    colOutlineLevels.size === 0 &&
+    (sheet.dataValidations === undefined || sheet.dataValidations.length === 0)
   ) {
     return bytes
   }
@@ -1330,6 +1424,39 @@ export function patchSheet(
       text: tag,
       order: 0,
     })
+  }
+
+  // dataValidations sits after mergeCells and conditionalFormatting, before
+  // hyperlinks and the page-setup family. New rules join the sheet's own
+  // dataValidations when it has one, or open a fresh one at the schema-correct
+  // spot: before the first later sibling, or before the worksheet close.
+  const validations = sheet.dataValidations ?? []
+  if (validations.length > 0) {
+    const elements = validations.map((spec) => dataValidationElement(spec, shape.prefix)).join('')
+    const existing = shape.dataValidations
+    if (existing === undefined) {
+      const anchor = shape.laterSiblingStart === -1 ? shape.worksheetEnd : shape.laterSiblingStart
+      splices.push({
+        start: anchor,
+        end: anchor,
+        text: `<${shape.prefix}dataValidations count="${validations.length}">${elements}</${shape.prefix}dataValidations>`,
+        order: -0.5,
+      })
+    } else {
+      const openTag = decoder.decode(bytes.subarray(existing.openStart, existing.openEnd))
+      const counted = withAttribute(openTag, 'count', existing.count + validations.length)
+      if (existing.selfClosing) {
+        splices.push({
+          start: existing.openStart,
+          end: existing.openEnd,
+          text: `${counted.slice(0, -2)}>${elements}</${shape.prefix}dataValidations>`,
+          order: 0,
+        })
+      } else {
+        splices.push({ start: existing.openStart, end: existing.openEnd, text: counted, order: -1 })
+        splices.push({ start: existing.insertAt, end: existing.insertAt, text: elements, order: 0 })
+      }
+    }
   }
 
   return applyByteSplices(bytes, splices)

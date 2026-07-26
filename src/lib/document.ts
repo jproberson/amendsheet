@@ -16,6 +16,7 @@ import { XlsxError } from './errors.js'
 import { LAST_SERIAL, dateToSerial, parseIsoDate, serialToDate } from './date.js'
 import {
   type CellInput,
+  type DataValidationSpec,
   checkProtection,
   checkWritable,
   mergeAnchorFor,
@@ -192,6 +193,12 @@ export interface Worksheet {
   /** Sets the sheet's auto-filter over a range, replacing any it already has. */
   autoFilter(range: string): void
   /**
+   * Adds a data validation over a cell or range. `{ list }` offers its values as
+   * a dropdown; no value may hold a comma, which the inline list uses to separate
+   * them. Joins any validations the sheet already has. Written by `toBytes()`.
+   */
+  validate(range: string, rule: DataValidation): void
+  /**
    * Sets the sheet tab's colour, into `sheetPr`, replacing any it already has.
    * The colour is a 6- or 8-digit hex string; a 6-digit one gains an opaque
    * alpha. Refuses anything else. Written by `toBytes()`.
@@ -275,6 +282,18 @@ export interface Worksheet {
   link(reference: string, target: Hyperlink): void
 }
 
+/**
+ * A data-validation rule. Today a `list` dropdown; the shape is a discriminated
+ * object so a numeric or date rule can arrive as another key without a break.
+ */
+export interface DataValidation {
+  /** The values a cell may take, offered as a dropdown. At least one, none with a
+   * comma — the inline list separates values with commas. */
+  readonly list: readonly string[]
+  /** Whether a blank cell passes. Defaults to true. */
+  readonly allowBlank?: boolean
+}
+
 export interface SetOptions {
   /** A number format code, applied to the cell being written. */
   readonly numberFormat?: string
@@ -336,6 +355,11 @@ function partText(container: Container, path: string): string | undefined {
   const bytes = container.parts.get(path)
   if (bytes === undefined) return undefined
   return decodeXmlPart(bytes, path)
+}
+
+function validationSqref(range: string, at: SheetLocation): string {
+  if (range.includes(':')) return mergeRangeReference(range, at)
+  return formatReference(parseWritableReference(range))
 }
 
 function checkOutlineLevel(level: number, at: SheetLocation): void {
@@ -449,6 +473,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   const sheetZoom = new Map<string, number>()
   const sheetRowGroups = new Map<string, Map<number, number>>()
   const sheetColGroups = new Map<string, Map<number, number>>()
+  const sheetValidations = new Map<string, DataValidationSpec[]>()
   // The per-sheet maps patchSheet applies in one rewrite. Both the "anything
   // pending?" check and the set of sheets to rewrite read this list, so a new
   // kind of sheet edit is registered in one place rather than two enumerations
@@ -470,6 +495,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     sheetZoom,
     sheetRowGroups,
     sheetColGroups,
+    sheetValidations,
   ]
   const fileNames = readDefinedNames(partText(container, part.path) ?? '')
   const pendingNames = new Map<string, string>()
@@ -901,6 +927,40 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           )
         }
         sheetAutoFilters.set(reference.path, mergeRangeReference(range, at))
+      },
+      validate(range: string, rule: DataValidation): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so ${range} cannot be validated`,
+            { ...at, reference: range },
+          )
+        }
+        const sqref = validationSqref(range, at)
+        if (rule.list.length === 0) {
+          throw new XlsxError('unwritable-value', 'A list validation needs at least one value', {
+            ...at,
+            reference: sqref,
+          })
+        }
+        for (const value of rule.list) {
+          if (value.includes(',')) {
+            throw new XlsxError(
+              'unwritable-value',
+              `List value "${value}" holds a comma, which an inline list reads as the next value`,
+              { ...at, reference: sqref },
+            )
+          }
+        }
+        const spec: DataValidationSpec = {
+          type: 'list',
+          sqref,
+          allowBlank: rule.allowBlank ?? true,
+          formula1: `"${rule.list.join(',')}"`,
+        }
+        const specs = sheetValidations.get(reference.path) ?? []
+        specs.push(spec)
+        sheetValidations.set(reference.path, specs)
       },
       freeze(cell: string): void {
         if (sheetBytes === undefined) {
@@ -1340,6 +1400,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           zoomScale: sheetZoom.get(path),
           rowOutlineLevels: sheetRowGroups.get(path),
           colOutlineLevels: sheetColGroups.get(path),
+          dataValidations: sheetValidations.get(path),
         }),
       )
       // A cell written just past a table grows it, the way Excel would.

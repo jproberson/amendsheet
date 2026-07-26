@@ -22,6 +22,7 @@ function build(
     extra?: Record<string, string>
     sheetPr?: string
     views?: string
+    after?: string
   } = {},
 ) {
   const parts: Record<string, Uint8Array> = {
@@ -32,7 +33,7 @@ function build(
     'xl/_rels/workbook.xml.rels': encode(WORKBOOK_RELS),
     'xl/styles.xml': encode(STYLES),
     'xl/worksheets/sheet1.xml': encode(
-      `<worksheet>${options.sheetPr ?? ''}${options.views ?? ''}<sheetData>${sheetBody}</sheetData></worksheet>`,
+      `<worksheet>${options.sheetPr ?? ''}${options.views ?? ''}<sheetData>${sheetBody}</sheetData>${options.after ?? ''}</worksheet>`,
     ),
     'xl/charts/chart1.xml': encode('<chart/>'),
   }
@@ -805,6 +806,73 @@ test('the outline hint keeps a deeper level the sheet declared and gains a colum
   // The row level the file declared (3) outranks the one grouped now (1).
   assert.match(xml, /outlineLevelRow="3"/)
   assert.match(xml, /outlineLevelCol="2"/)
+})
+
+test('validate writes an inline list dropdown as a dataValidation before the worksheet close', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.validate('B2:B10', { list: ['Yes', 'No', 'Maybe'] })
+
+  const xml = sheetXml(workbook)
+  assert.match(
+    xml,
+    /<dataValidations count="1"><dataValidation type="list" allowBlank="1" showInputMessage="1" showErrorMessage="1" sqref="B2:B10"><formula1>"Yes,No,Maybe"<\/formula1><\/dataValidation><\/dataValidations><\/worksheet>/,
+  )
+})
+
+test('a dataValidation lands ahead of a later sibling like pageMargins', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', { after: '<pageMargins left="0.7"/>' }),
+  )
+  workbook.sheets[0]?.validate('A1', { list: ['x', 'y'] })
+
+  const xml = sheetXml(workbook)
+  assert.match(xml, /<\/dataValidations><pageMargins left="0.7"\/>/)
+})
+
+test('a second validate joins the dataValidations the sheet already has', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      after:
+        '<dataValidations count="1"><dataValidation type="list" sqref="A1"><formula1>"a,b"</formula1></dataValidation></dataValidations>',
+    }),
+  )
+  workbook.sheets[0]?.validate('B2:B5', { list: ['c', 'd'] })
+
+  const xml = sheetXml(workbook)
+  assert.match(xml, /<dataValidations count="2">/)
+  assert.match(xml, /sqref="A1"/)
+  assert.match(xml, /sqref="B2:B5"/)
+})
+
+test('validate opens a self-closing dataValidations the sheet had', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', { after: '<dataValidations count="0"/>' }),
+  )
+  workbook.sheets[0]?.validate('B2', { list: ['x'] })
+
+  const xml = sheetXml(workbook)
+  assert.match(xml, /<dataValidations count="1"><dataValidation [^>]*sqref="B2">/)
+})
+
+test('validate allowBlank false and escapes list values', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.validate('C1', { list: ['a<b', 'c&d'], allowBlank: false })
+
+  const xml = sheetXml(workbook)
+  assert.match(xml, /allowBlank="0"/)
+  assert.match(xml, /<formula1>"a&lt;b,c&amp;d"<\/formula1>/)
+})
+
+test('validate refuses an empty list, a value with a comma, and a bad range', () => {
+  const sheet = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>')).sheet('Data')
+  const refused = (error: unknown) =>
+    error instanceof XlsxError && error.code === 'unwritable-value' && error.sheet === 'Data'
+  assert.throws(() => sheet?.validate('A1', { list: [] }), refused)
+  assert.throws(() => sheet?.validate('A1', { list: ['a,b'] }), refused)
+  assert.throws(
+    () => sheet?.validate('not a range', { list: ['a'] }),
+    (error: unknown) => error instanceof XlsxError && error.code === 'bad-reference',
+  )
 })
 
 test('set applies an alignment, adding it to the cell format', () => {
@@ -2090,6 +2158,7 @@ test('refuses a write to a sheet whose part is not in the package', () => {
   assert.throws(() => workbook.sheets[0]?.zoom(80), gone)
   assert.throws(() => workbook.sheets[0]?.groupRows(1, 2), gone)
   assert.throws(() => workbook.sheets[0]?.groupColumns('A', 'B'), gone)
+  assert.throws(() => workbook.sheets[0]?.validate('A1', { list: ['x'] }), gone)
 })
 
 test('a reference the sheet cannot hold does not break lookups around it', () => {
