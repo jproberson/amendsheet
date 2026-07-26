@@ -194,17 +194,21 @@ than replacing it. `worksheet.groupRows(2, 5)` and `worksheet.groupColumns('B', 
 set an outline level over a range so a reader shows a collapsible band; a third
 argument nests a deeper level (1 to 7) inside a shallower one.
 
-`worksheet.validate(range, rule)` adds a data validation. Today the rule is a
-`list` — a dropdown of values, none of which may hold a comma, since an inline
-list separates them with one:
+`worksheet.validate(range, rule)` adds a data validation. The rule is a `list` — a
+dropdown whose values may not hold a comma, since an inline list separates them
+with one — or a `whole`/`decimal` numeric comparison:
 
 ```ts
 const workbook = readWorkbook(bytes)
 workbook.sheets[0]?.validate('B2:B10', { list: ['Yes', 'No', 'Maybe'] })
+workbook.sheets[0]?.validate('C2:C10', { whole: { between: [1, 100] } })
+workbook.sheets[0]?.validate('D2:D10', { decimal: { greaterThan: 0 } })
 ```
 
-It joins any validations the sheet already carries and lands in the schema's
-place, so a reader takes the file without offering to repair it.
+A comparison is one of `between`, `notBetween`, `equal`, `notEqual`,
+`greaterThan`, `lessThan`, `greaterThanOrEqual` or `lessThanOrEqual`, each bound a
+finite number. A validation joins any the sheet already carries and lands in the
+schema's place, so a reader takes the file without offering to repair it.
 
 `workbook.defineName('TaxRate', 'Sheet1!$B$1')` defines a global named range, and
 `workbook.definedNames` reads them back; a name scoped to one sheet is left as it

@@ -844,6 +844,61 @@ test('a second validate joins the dataValidations the sheet already has', () => 
   assert.match(xml, /sqref="B2:B5"/)
 })
 
+test('validate writes a whole-number between constraint with two formulas', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.validate('C2:C10', { whole: { between: [1, 100] } })
+
+  const xml = sheetXml(workbook)
+  assert.match(
+    xml,
+    /<dataValidation type="whole" operator="between" allowBlank="1" showInputMessage="1" showErrorMessage="1" sqref="C2:C10"><formula1>1<\/formula1><formula2>100<\/formula2><\/dataValidation>/,
+  )
+})
+
+test('validate writes a decimal greaterThan constraint with one formula', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.validate('D1', { decimal: { greaterThan: 3.5 } })
+
+  const xml = sheetXml(workbook)
+  assert.match(
+    xml,
+    /<dataValidation type="decimal" operator="greaterThan"[^>]*sqref="D1"><formula1>3.5<\/formula1><\/dataValidation>/,
+  )
+  assert.doesNotMatch(xml, /formula2/)
+})
+
+test('validate covers each numeric operator', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  const sheet = workbook.sheets[0]
+  sheet?.validate('A1', { whole: { notBetween: [1, 2] } })
+  sheet?.validate('A2', { whole: { equal: 5 } })
+  sheet?.validate('A3', { whole: { notEqual: 5 } })
+  sheet?.validate('A4', { whole: { lessThan: 5 } })
+  sheet?.validate('A5', { whole: { greaterThanOrEqual: 5 } })
+  sheet?.validate('A6', { whole: { lessThanOrEqual: 5 } })
+
+  const xml = sheetXml(workbook)
+  for (const operator of [
+    'notBetween',
+    'equal',
+    'notEqual',
+    'lessThan',
+    'greaterThanOrEqual',
+    'lessThanOrEqual',
+  ]) {
+    assert.match(xml, new RegExp(`operator="${operator}"`))
+  }
+})
+
+test('validate refuses a non-finite numeric bound, naming the sheet', () => {
+  const sheet = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>')).sheet('Data')
+  assert.throws(
+    () => sheet?.validate('A1', { whole: { equal: Number.POSITIVE_INFINITY } }),
+    (error: unknown) =>
+      error instanceof XlsxError && error.code === 'unwritable-value' && error.sheet === 'Data',
+  )
+})
+
 test('validate opens a self-closing dataValidations the sheet had', () => {
   const workbook = readWorkbook(
     build('<row r="1"><c r="A1"><v>1</v></c></row>', { after: '<dataValidations count="0"/>' }),

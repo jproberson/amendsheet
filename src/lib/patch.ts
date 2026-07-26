@@ -813,16 +813,25 @@ export interface DataValidationSpec {
   /** The range or cell the rule covers, canonical (`B2:B10`). */
   readonly sqref: string
   readonly allowBlank: boolean
+  /** The comparison for a numeric rule; absent for a list. */
+  readonly operator?: string
   /** Formula content, escaped when written. A list is a quoted, comma-joined set. */
   readonly formula1: string
+  /** The upper bound of a two-sided comparison like `between`. */
+  readonly formula2?: string
 }
 
 function dataValidationElement(spec: DataValidationSpec, prefix: string): string {
+  const operator = spec.operator === undefined ? '' : ` operator="${spec.operator}"`
+  const formula2 =
+    spec.formula2 === undefined
+      ? ''
+      : `<${prefix}formula2>${escapeXml(spec.formula2)}</${prefix}formula2>`
   return (
-    `<${prefix}dataValidation type="${spec.type}"` +
+    `<${prefix}dataValidation type="${spec.type}"${operator}` +
     ` allowBlank="${spec.allowBlank ? '1' : '0'}"` +
     ` showInputMessage="1" showErrorMessage="1" sqref="${spec.sqref}">` +
-    `<${prefix}formula1>${escapeXml(spec.formula1)}</${prefix}formula1>` +
+    `<${prefix}formula1>${escapeXml(spec.formula1)}</${prefix}formula1>${formula2}` +
     `</${prefix}dataValidation>`
   )
 }

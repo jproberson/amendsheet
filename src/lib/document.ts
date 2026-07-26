@@ -193,9 +193,10 @@ export interface Worksheet {
   /** Sets the sheet's auto-filter over a range, replacing any it already has. */
   autoFilter(range: string): void
   /**
-   * Adds a data validation over a cell or range. `{ list }` offers its values as
-   * a dropdown; no value may hold a comma, which the inline list uses to separate
-   * them. Joins any validations the sheet already has. Written by `toBytes()`.
+   * Adds a data validation over a cell or range. `{ list }` offers its values as a
+   * dropdown (no value may hold a comma, the inline list's separator); `{ whole }`
+   * and `{ decimal }` constrain a number against a comparison. Joins any the sheet
+   * already has. Written by `toBytes()`.
    */
   validate(range: string, rule: DataValidation): void
   /**
@@ -282,17 +283,30 @@ export interface Worksheet {
   link(reference: string, target: Hyperlink): void
 }
 
+/** A comparison for a `whole` or `decimal` rule. Each bound is a finite number. */
+export type NumberConstraint =
+  | { readonly between: readonly [number, number] }
+  | { readonly notBetween: readonly [number, number] }
+  | { readonly equal: number }
+  | { readonly notEqual: number }
+  | { readonly greaterThan: number }
+  | { readonly lessThan: number }
+  | { readonly greaterThanOrEqual: number }
+  | { readonly lessThanOrEqual: number }
+
 /**
- * A data-validation rule. Today a `list` dropdown; the shape is a discriminated
- * object so a numeric or date rule can arrive as another key without a break.
+ * A data-validation rule, keyed by kind: a `list` dropdown, or a `whole` or
+ * `decimal` numeric comparison. The union is open to more kinds without a break.
  */
-export interface DataValidation {
-  /** The values a cell may take, offered as a dropdown. At least one, none with a
-   * comma — the inline list separates values with commas. */
-  readonly list: readonly string[]
-  /** Whether a blank cell passes. Defaults to true. */
-  readonly allowBlank?: boolean
-}
+export type DataValidation = { readonly allowBlank?: boolean } & (
+  | {
+      /** The values a cell may take, as a dropdown. At least one, none with a
+       * comma — the inline list separates values with commas. */
+      readonly list: readonly string[]
+    }
+  | { readonly whole: NumberConstraint }
+  | { readonly decimal: NumberConstraint }
+)
 
 export interface SetOptions {
   /** A number format code, applied to the cell being written. */
@@ -360,6 +374,78 @@ function partText(container: Container, path: string): string | undefined {
 function validationSqref(range: string, at: SheetLocation): string {
   if (range.includes(':')) return mergeRangeReference(range, at)
   return formatReference(parseWritableReference(range))
+}
+
+function numberComparison(constraint: NumberConstraint): {
+  operator: string
+  formula1: number
+  formula2?: number
+} {
+  if ('between' in constraint)
+    return { operator: 'between', formula1: constraint.between[0], formula2: constraint.between[1] }
+  if ('notBetween' in constraint)
+    return {
+      operator: 'notBetween',
+      formula1: constraint.notBetween[0],
+      formula2: constraint.notBetween[1],
+    }
+  if ('equal' in constraint) return { operator: 'equal', formula1: constraint.equal }
+  if ('notEqual' in constraint) return { operator: 'notEqual', formula1: constraint.notEqual }
+  if ('greaterThan' in constraint)
+    return { operator: 'greaterThan', formula1: constraint.greaterThan }
+  if ('lessThan' in constraint) return { operator: 'lessThan', formula1: constraint.lessThan }
+  if ('greaterThanOrEqual' in constraint)
+    return { operator: 'greaterThanOrEqual', formula1: constraint.greaterThanOrEqual }
+  return { operator: 'lessThanOrEqual', formula1: constraint.lessThanOrEqual }
+}
+
+function buildValidationSpec(
+  rule: DataValidation,
+  sqref: string,
+  at: SheetLocation,
+): DataValidationSpec {
+  const allowBlank = rule.allowBlank ?? true
+  if ('list' in rule) {
+    if (rule.list.length === 0) {
+      throw new XlsxError('unwritable-value', 'A list validation needs at least one value', {
+        ...at,
+        reference: sqref,
+      })
+    }
+    for (const value of rule.list) {
+      if (value.includes(',')) {
+        throw new XlsxError(
+          'unwritable-value',
+          `List value "${value}" holds a comma, which an inline list reads as the next value`,
+          { ...at, reference: sqref },
+        )
+      }
+    }
+    return { type: 'list', sqref, allowBlank, formula1: `"${rule.list.join(',')}"` }
+  }
+
+  const constraint = 'whole' in rule ? rule.whole : rule.decimal
+  const comparison = numberComparison(constraint)
+  const bounds =
+    comparison.formula2 === undefined
+      ? [comparison.formula1]
+      : [comparison.formula1, comparison.formula2]
+  for (const bound of bounds) {
+    if (!Number.isFinite(bound)) {
+      throw new XlsxError('unwritable-value', `Validation bound ${bound} is not a finite number`, {
+        ...at,
+        reference: sqref,
+      })
+    }
+  }
+  return {
+    type: 'whole' in rule ? 'whole' : 'decimal',
+    sqref,
+    allowBlank,
+    operator: comparison.operator,
+    formula1: String(comparison.formula1),
+    formula2: comparison.formula2 === undefined ? undefined : String(comparison.formula2),
+  }
 }
 
 function checkOutlineLevel(level: number, at: SheetLocation): void {
@@ -937,27 +1023,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           )
         }
         const sqref = validationSqref(range, at)
-        if (rule.list.length === 0) {
-          throw new XlsxError('unwritable-value', 'A list validation needs at least one value', {
-            ...at,
-            reference: sqref,
-          })
-        }
-        for (const value of rule.list) {
-          if (value.includes(',')) {
-            throw new XlsxError(
-              'unwritable-value',
-              `List value "${value}" holds a comma, which an inline list reads as the next value`,
-              { ...at, reference: sqref },
-            )
-          }
-        }
-        const spec: DataValidationSpec = {
-          type: 'list',
-          sqref,
-          allowBlank: rule.allowBlank ?? true,
-          formula1: `"${rule.list.join(',')}"`,
-        }
+        const spec = buildValidationSpec(rule, sqref, at)
         const specs = sheetValidations.get(reference.path) ?? []
         specs.push(spec)
         sheetValidations.set(reference.path, specs)
