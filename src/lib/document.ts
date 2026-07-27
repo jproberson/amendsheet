@@ -53,6 +53,7 @@ import {
   type DateStyle,
   type FillFormat,
   type FontFormat,
+  type ReadFill,
   checkStyleOptions,
   ensureAlignmentStyle,
   ensureBorderStyle,
@@ -119,8 +120,8 @@ export interface Cell {
   readonly numberFormat?: string
   /** Absent when the cell uses the default font, so carries none of its own. */
   readonly font?: FontFormat
-  /** Absent unless the cell has a solid fill. */
-  readonly fill?: FillFormat
+  /** Absent unless the cell has a fill. A gradient is reported but not writable. */
+  readonly fill?: ReadFill
   /** Absent unless at least one side has a border. */
   readonly border?: BorderFormat
   /** Absent unless the cell sets an alignment of its own. */

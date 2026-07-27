@@ -1102,6 +1102,56 @@ test('conditionalFormat refuses a bad colour and a bad range', () => {
   )
 })
 
+test('cell reports a gradient fill, which set itself does not write', () => {
+  const styles =
+    '<styleSheet><fills count="3">' +
+    '<fill><patternFill patternType="none"/></fill>' +
+    '<fill><patternFill patternType="gray125"/></fill>' +
+    '<fill><gradientFill degree="90">' +
+    '<stop position="0"><color rgb="FFFF0000"/></stop>' +
+    '<stop position="1"><color rgb="FF0000FF"/></stop>' +
+    '</gradientFill></fill></fills>' +
+    '<cellXfs count="1"><xf fillId="2"/></cellXfs></styleSheet>'
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1" s="0"><v>1</v></c></row>', {
+      extra: { 'xl/styles.xml': styles },
+    }),
+  )
+
+  assert.deepEqual(workbook.sheets[0]?.cell('A1')?.fill, {
+    type: 'gradient',
+    degree: 90,
+    stops: [
+      { position: 0, color: 'FFFF0000' },
+      { position: 1, color: 'FF0000FF' },
+    ],
+  })
+})
+
+test('a gradient with no degree is reported without one', () => {
+  const styles =
+    '<styleSheet><fills count="1">' +
+    '<fill><gradientFill type="path">' +
+    '<stop position="0"><color rgb="FF000000"/></stop>' +
+    '<stop position="1"><color rgb="FFFFFFFF"/></stop>' +
+    '</gradientFill></fill></fills>' +
+    '<cellXfs count="1"><xf fillId="0"/></cellXfs></styleSheet>'
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1" s="0"><v>1</v></c></row>', {
+      extra: { 'xl/styles.xml': styles },
+    }),
+  )
+
+  const fill = workbook.sheets[0]?.cell('A1')?.fill
+  assert.deepEqual(fill, {
+    type: 'gradient',
+    stops: [
+      { position: 0, color: 'FF000000' },
+      { position: 1, color: 'FFFFFFFF' },
+    ],
+  })
+})
+
 test('set applies an alignment, adding it to the cell format', () => {
   const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
   workbook.sheets[0]?.set('A1', 'x', { alignment: { horizontal: 'center', wrapText: true } })

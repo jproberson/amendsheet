@@ -341,9 +341,10 @@ What a minor release is allowed to do, so you know which branches are safe:
   in memory.
 - Charts, pivot tables and drawings are preserved but never created.
 - `cell` exposes a cell's `font`, `fill`, `border` and `alignment`, but only the
-  parts this library models. A gradient fill is preserved in the file but not
-  reported. A theme or indexed colour is reported as the reference it is;
-  `workbook.resolveColor` turns one into the hex it displays as.
+  parts this library models. A gradient fill is reported as `{ type: 'gradient' }`
+  with its stops, though `set` writes only solid and pattern fills. A theme or
+  indexed colour is reported as the reference it is; `workbook.resolveColor` turns
+  one into the hex it displays as.
 - A table grows to include a cell written directly below or to the right of it,
   the way Excel would, adding a column when it grows sideways. Inserting or
   deleting rows and columns moves the references that name cells — formulas,

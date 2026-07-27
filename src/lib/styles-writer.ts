@@ -633,6 +633,26 @@ export interface PatternFill {
 
 export type FillFormat = SolidFill | PatternFill
 
+/** One colour stop of a gradient, at a position from 0 to 1 across it. */
+export interface GradientStop {
+  readonly position: number
+  readonly color: Color
+}
+
+/**
+ * A gradient fill, read off a cell but not written by `set` — the file keeps its
+ * own gradient byte for byte, and this only reports what is there. `degree` is the
+ * angle of a linear gradient; a path gradient has none.
+ */
+export interface GradientFill {
+  readonly type: 'gradient'
+  readonly degree?: number
+  readonly stops: readonly GradientStop[]
+}
+
+/** What `cell.fill` may be: a fill `set` can write, or a gradient it only reads. */
+export type ReadFill = FillFormat | GradientFill
+
 // fillId 0 (none) and 1 (gray125) are reserved, so a real solid fill is the
 // third entry; a file with no fills table has these seeded before ours is added.
 const RESERVED_FILLS =
@@ -1191,7 +1211,7 @@ export function ensureNumberFormat(
  * when the cell uses the default and so carries none of its own to report. */
 export interface CellFormatting {
   readonly font?: FontFormat
-  readonly fill?: FillFormat
+  readonly fill?: ReadFill
   readonly border?: BorderFormat
   readonly alignment?: Alignment
   readonly protection?: CellProtection
@@ -1222,12 +1242,30 @@ const toPatternStyle = (value: string | undefined): PatternStyle | undefined => 
   return undefined
 }
 
-function parseFill(element: string): FillFormat | undefined {
+function parseFill(element: string): ReadFill | undefined {
   let patternType: string | undefined
   let foreground: Color | undefined
   let background: Color | undefined
+  let isGradient = false
+  let degree: number | undefined
+  let pendingStop: number | undefined
+  const stops: GradientStop[] = []
   for (const event of readXml(element)) {
     if (event.kind !== 'open') continue
+    if (event.localName === 'gradientFill') {
+      isGradient = true
+      const value = Number(event.attributes.get('degree'))
+      if (Number.isFinite(value)) degree = value
+    }
+    if (event.localName === 'stop') {
+      const position = Number(event.attributes.get('position'))
+      pendingStop = Number.isFinite(position) ? position : 0
+    }
+    if (event.localName === 'color' && pendingStop !== undefined) {
+      const color = parseColor(event.attributes)
+      if (color !== undefined) stops.push({ position: pendingStop, color })
+      pendingStop = undefined
+    }
     if (event.localName === 'patternFill') patternType = event.attributes.get('patternType')
     if (event.localName === 'fgColor') foreground = parseColor(event.attributes) ?? foreground
     if (event.localName === 'bgColor') {
@@ -1237,6 +1275,10 @@ function parseFill(element: string): FillFormat | undefined {
       if (color !== undefined && !(typeof color === 'object' && 'indexed' in color))
         background = color
     }
+  }
+  if (isGradient) {
+    if (stops.length === 0) return undefined
+    return degree === undefined ? { type: 'gradient', stops } : { type: 'gradient', degree, stops }
   }
   if (foreground === undefined) return undefined
   if (patternType === 'solid') return { type: 'solid', color: foreground }
@@ -1278,7 +1320,7 @@ function fontFrom(xf: string, fonts: readonly string[]): FontFormat | undefined 
   return Object.keys(font).length === 0 ? undefined : font
 }
 
-const fillFrom = (xf: string, fills: readonly string[]): FillFormat | undefined => {
+const fillFrom = (xf: string, fills: readonly string[]): ReadFill | undefined => {
   const element = fills[attrId(xf, 'fillId')]
   return element === undefined ? undefined : parseFill(element)
 }
