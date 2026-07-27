@@ -977,6 +977,107 @@ test('a conditional format priority rises above the highest the sheet already us
   assert.match(xml, /sqref="A1"><cfRule type="colorScale" priority="6"/)
 })
 
+test('conditionalFormat writes a cellIs rule and a dxf holding its fill', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.conditionalFormat('A1:A20', {
+    cellIs: { when: { greaterThan: 100 }, fill: 'FFFF00' },
+  })
+
+  const parts = readContainer(workbook.toBytes()).parts
+  assert.match(
+    decode(parts.get('xl/worksheets/sheet1.xml')),
+    /<cfRule type="cellIs" operator="greaterThan" dxfId="0" priority="1"><formula>100<\/formula><\/cfRule>/,
+  )
+  assert.match(
+    decode(parts.get('xl/styles.xml')),
+    /<dxfs count="1"><dxf><fill><patternFill><bgColor rgb="FFFFFF00"\/><\/patternFill><\/fill><\/dxf><\/dxfs><\/styleSheet>/,
+  )
+})
+
+test('a cellIs between rule writes two formulas', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.conditionalFormat('B1', {
+    cellIs: { when: { between: [1, 10] }, fill: 'FF0000' },
+  })
+
+  const xml = sheetXml(workbook)
+  assert.match(
+    xml,
+    /<cfRule type="cellIs" operator="between" dxfId="0" priority="1"><formula>1<\/formula><formula>10<\/formula><\/cfRule>/,
+  )
+})
+
+test('a cellIs rule appends to a dxfs table the styles already have', () => {
+  const styles =
+    '<styleSheet><cellXfs count="1"><xf numFmtId="0"/></cellXfs>' +
+    '<dxfs count="1"><dxf><font><b/></font></dxf></dxfs></styleSheet>'
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', { extra: { 'xl/styles.xml': styles } }),
+  )
+  workbook.sheets[0]?.conditionalFormat('A1', { cellIs: { when: { equal: 0 }, fill: '00FF00' } })
+
+  const parts = readContainer(workbook.toBytes()).parts
+  assert.match(decode(parts.get('xl/styles.xml')), /<dxfs count="2">/)
+  assert.match(decode(parts.get('xl/worksheets/sheet1.xml')), /dxfId="1"/)
+})
+
+test('a cellIs rule opens a self-closing dxfs and lands before tableStyles', () => {
+  const styles =
+    '<styleSheet><cellXfs count="1"><xf numFmtId="0"/></cellXfs><dxfs count="0"/>' +
+    '<tableStyles count="0"/></styleSheet>'
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', { extra: { 'xl/styles.xml': styles } }),
+  )
+  workbook.sheets[0]?.conditionalFormat('A1', { cellIs: { when: { equal: 1 }, fill: 'FF0000' } })
+
+  const out = decode(readContainer(workbook.toBytes()).parts.get('xl/styles.xml'))
+  assert.match(out, /<dxfs count="1"><dxf>.*<\/dxf><\/dxfs><tableStyles count="0"\/>/)
+})
+
+test('a cellIs rule inserts a fresh dxfs before an existing tableStyles', () => {
+  const styles =
+    '<styleSheet><cellXfs count="1"><xf numFmtId="0"/></cellXfs>' +
+    '<tableStyles count="0"/></styleSheet>'
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', { extra: { 'xl/styles.xml': styles } }),
+  )
+  workbook.sheets[0]?.conditionalFormat('A1', { cellIs: { when: { equal: 1 }, fill: 'FF0000' } })
+
+  const out = decode(readContainer(workbook.toBytes()).parts.get('xl/styles.xml'))
+  assert.match(out, /<\/cellXfs><dxfs count="1"><dxf>.*<\/dxf><\/dxfs><tableStyles/)
+})
+
+test('a cellIs rule needs a style table to hold its fill', () => {
+  const bytes = writeContainer({
+    parts: new Map([
+      ['_rels/.rels', encode(ROOT_RELS)],
+      [
+        'xl/workbook.xml',
+        encode(
+          '<workbook><sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets></workbook>',
+        ),
+      ],
+      ['xl/_rels/workbook.xml.rels', encode(WORKBOOK_RELS)],
+      ['xl/worksheets/sheet1.xml', encode('<worksheet><sheetData/></worksheet>')],
+    ]),
+  })
+  const sheet = readWorkbook(bytes).sheet('Data')
+  assert.throws(
+    () => sheet?.conditionalFormat('A1', { cellIs: { when: { equal: 1 }, fill: 'FF0000' } }),
+    (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
+  )
+})
+
+test('conditionalFormat refuses a cellIs bound that is not finite', () => {
+  const sheet = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>')).sheet('Data')
+  assert.throws(
+    () =>
+      sheet?.conditionalFormat('A1', { cellIs: { when: { equal: Number.NaN }, fill: 'FF0000' } }),
+    (error: unknown) =>
+      error instanceof XlsxError && error.code === 'unwritable-value' && error.sheet === 'Data',
+  )
+})
+
 test('conditionalFormat refuses a bad colour and a bad range', () => {
   const sheet = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>')).sheet('Data')
   assert.throws(

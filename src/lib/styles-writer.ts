@@ -145,6 +145,70 @@ function ensureInTable(
   return { xml: `${head}${body}${prefixed}${xml.slice(table.insertAt)}`, id }
 }
 
+// The styleSheet children that follow dxfs. A fresh dxfs table opens before the
+// first of these, so it lands after cellXfs and cellStyles as the schema wants.
+const DXFS_LATER = new Set(['tableStyles', 'colors', 'extLst'])
+
+/** Where a fresh dxfs opens: before tableStyles/colors/extLst, else the close. */
+function dxfsInsertPoint(xml: string): { position: number; prefix: string } {
+  let laterStart = -1
+  let closeStart = -1
+  let prefix = ''
+  for (const event of readXml(xml)) {
+    if (event.kind === 'open' && DXFS_LATER.has(event.localName) && laterStart === -1) {
+      laterStart = event.start
+    }
+    if (event.kind === 'close' && event.localName === 'styleSheet') {
+      closeStart = event.start
+      prefix = prefixOf(event.name)
+    }
+  }
+  if (closeStart === -1) {
+    throw new XlsxError('malformed-xml', 'Style table has no styleSheet element', {
+      part: 'xl/styles.xml',
+    })
+  }
+  return { position: laterStart === -1 ? closeStart : laterStart, prefix }
+}
+
+/**
+ * Adds a differential format holding a solid fill to the dxfs table — for a
+ * conditional format's highlight — and returns its index. An identical dxf is
+ * reused. A dxf fill puts its colour in `bgColor`, unlike a cell fill's `fgColor`.
+ */
+export function ensureDxf(stylesXml: string, fill: string): DateStyle {
+  const dxfFor = (prefix: string): string =>
+    `<${prefix}dxf><${prefix}fill><${prefix}patternFill>` +
+    `<${prefix}bgColor rgb="${fill}"/>` +
+    `</${prefix}patternFill></${prefix}fill></${prefix}dxf>`
+
+  const table = readTable(stylesXml, 'dxfs', 'dxf')
+  if (table === undefined) {
+    const { position, prefix } = dxfsInsertPoint(stylesXml)
+    const created = `<${prefix}dxfs count="1">${dxfFor(prefix)}</${prefix}dxfs>`
+    return { xml: stylesXml.slice(0, position) + created + stylesXml.slice(position), index: 0 }
+  }
+
+  const dxf = dxfFor(table.prefix)
+  const existing = table.elements.indexOf(dxf)
+  if (existing !== -1) return { xml: stylesXml, index: existing }
+
+  const index = table.elements.length
+  const openTag = withAttribute(table.openTag, 'count', index + 1)
+  if (table.selfClosing) {
+    return {
+      xml:
+        stylesXml.slice(0, table.openStart) +
+        `${openTag.slice(0, -2)}>${dxf}</${table.prefix}dxfs>` +
+        stylesXml.slice(table.openEnd),
+      index,
+    }
+  }
+  const head = stylesXml.slice(0, table.openStart) + openTag
+  const body = stylesXml.slice(table.openEnd, table.insertAt)
+  return { xml: `${head}${body}${dxf}${stylesXml.slice(table.insertAt)}`, index }
+}
+
 const DEFAULT_XF = '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
 
 /** The parts of a cell format this library sets, each with its `apply*` flag. */

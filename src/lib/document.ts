@@ -59,6 +59,7 @@ import {
   ensureDateStyle,
   ensureFillStyle,
   ensureFontStyle,
+  ensureDxf,
   ensureNumberFormat,
   ensureProtectionStyle,
   normalizeColor,
@@ -325,11 +326,20 @@ export interface ColorScale {
   readonly max: string
 }
 
+/** Highlights a cell whose value meets `when` by filling it with `fill` (hex). */
+export interface CellValueRule {
+  readonly when: NumberConstraint
+  readonly fill: string
+}
+
 /**
- * A conditional-format rule, keyed by kind. Today a `colorScale`; the union is
- * open to cell-value rules and data bars without a break.
+ * A conditional-format rule, keyed by kind: a `colorScale` graded across a range,
+ * or a `cellIs` value comparison that fills the cells it matches. The union is
+ * open to data bars and more without a break.
  */
-export type ConditionalFormat = { readonly colorScale: ColorScale }
+export type ConditionalFormat =
+  | { readonly colorScale: ColorScale }
+  | { readonly cellIs: CellValueRule }
 
 export interface SetOptions {
   /** A number format code, applied to the cell being written. */
@@ -1063,14 +1073,46 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           )
         }
         const sqref = sqrefOf(range, at)
-        const { min, mid, max } = rule.colorScale
-        const colors =
-          mid === undefined
-            ? [normalizeColor(min, at), normalizeColor(max, at)]
-            : [normalizeColor(min, at), normalizeColor(mid, at), normalizeColor(max, at)]
-        const spec: ConditionalFormatSpec = { sqref, type: 'colorScale', colors }
         const specs = sheetConditionalFormats.get(reference.path) ?? []
-        specs.push(spec)
+        if ('colorScale' in rule) {
+          const { min, mid, max } = rule.colorScale
+          const colors =
+            mid === undefined
+              ? [normalizeColor(min, at), normalizeColor(max, at)]
+              : [normalizeColor(min, at), normalizeColor(mid, at), normalizeColor(max, at)]
+          specs.push({ kind: 'colorScale', sqref, colors })
+        } else {
+          if (workingStyles === undefined) {
+            throw new XlsxError(
+              'missing-part',
+              `Cannot fill ${sqref}: the package has no style table to hold the format`,
+              { ...at, part: 'xl/styles.xml', reference: sqref },
+            )
+          }
+          const comparison = numberComparison(rule.cellIs.when)
+          const formulas =
+            comparison.formula2 === undefined
+              ? [comparison.formula1]
+              : [comparison.formula1, comparison.formula2]
+          for (const bound of formulas) {
+            if (!Number.isFinite(bound)) {
+              throw new XlsxError(
+                'unwritable-value',
+                `Conditional-format bound ${bound} is not a finite number`,
+                { ...at, reference: sqref },
+              )
+            }
+          }
+          const dxf = ensureDxf(workingStyles, normalizeColor(rule.cellIs.fill, at))
+          workingStyles = dxf.xml
+          specs.push({
+            kind: 'cellIs',
+            sqref,
+            operator: comparison.operator,
+            formulas: formulas.map(String),
+            dxfId: dxf.index,
+          })
+        }
         sheetConditionalFormats.set(reference.path, specs)
       },
       freeze(cell: string): void {

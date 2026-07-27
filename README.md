@@ -210,9 +210,9 @@ A comparison is one of `between`, `notBetween`, `equal`, `notEqual`,
 finite number. A validation joins any the sheet already carries and lands in the
 schema's place, so a reader takes the file without offering to repair it.
 
-`worksheet.conditionalFormat(range, rule)` adds a conditional format. Today the
-rule is a `colorScale` that grades cells between two colours, or three with a
-`mid`:
+`worksheet.conditionalFormat(range, rule)` adds a conditional format. A
+`colorScale` grades cells between two colours, or three with a `mid`; a `cellIs`
+fills the cells whose value meets a comparison:
 
 ```ts
 const workbook = readWorkbook(bytes)
@@ -220,10 +220,14 @@ workbook.sheets[0]?.conditionalFormat('A1:A20', { colorScale: { min: 'FFFFFF', m
 workbook.sheets[0]?.conditionalFormat('B1:B20', {
   colorScale: { min: 'F8696B', mid: 'FFEB84', max: '63BE7B' },
 })
+workbook.sheets[0]?.conditionalFormat('C1:C20', {
+  cellIs: { when: { greaterThan: 100 }, fill: 'FFFF00' },
+})
 ```
 
-Its rule outranks any the sheet already has, so a new format wins where they
-overlap.
+The `when` of a `cellIs` is any of the comparisons `validate` takes; its `fill` is
+written as a differential format in `styles.xml`. A rule outranks any the sheet
+already has, so a new format wins where they overlap.
 
 `workbook.defineName('TaxRate', 'Sheet1!$B$1')` defines a global named range, and
 `workbook.definedNames` reads them back; a name scoped to one sheet is left as it

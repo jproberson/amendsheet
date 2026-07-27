@@ -845,29 +845,49 @@ function dataValidationElement(spec: DataValidationSpec, prefix: string): string
   )
 }
 
-/** One conditional-format rule. Today a colour scale, built by `patchSheet`. */
-export interface ConditionalFormatSpec {
-  readonly sqref: string
-  readonly type: string
-  /** Two ARGB stops for a two-colour scale, three for a mid-pointed one. */
-  readonly colors: readonly string[]
-}
+/** One conditional-format rule, built into a conditionalFormatting by `patchSheet`. */
+export type ConditionalFormatSpec =
+  | {
+      readonly kind: 'colorScale'
+      readonly sqref: string
+      /** Two ARGB stops for a two-colour scale, three for a mid-pointed one. */
+      readonly colors: readonly string[]
+    }
+  | {
+      readonly kind: 'cellIs'
+      readonly sqref: string
+      readonly operator: string
+      /** One formula for most comparisons, two for `between`/`notBetween`. */
+      readonly formulas: readonly string[]
+      /** Index of the dxf in styles.xml holding the highlight. */
+      readonly dxfId: number
+    }
 
 function conditionalFormattingElement(
   spec: ConditionalFormatSpec,
   priority: number,
   prefix: string,
 ): string {
-  const cfvo =
-    spec.colors.length === 2
-      ? `<${prefix}cfvo type="min"/><${prefix}cfvo type="max"/>`
-      : `<${prefix}cfvo type="min"/><${prefix}cfvo type="percentile" val="50"/><${prefix}cfvo type="max"/>`
-  const colors = spec.colors.map((color) => `<${prefix}color rgb="${color}"/>`).join('')
+  const open = `<${prefix}conditionalFormatting sqref="${spec.sqref}">`
+  const close = `</${prefix}conditionalFormatting>`
+  if (spec.kind === 'colorScale') {
+    const cfvo =
+      spec.colors.length === 2
+        ? `<${prefix}cfvo type="min"/><${prefix}cfvo type="max"/>`
+        : `<${prefix}cfvo type="min"/><${prefix}cfvo type="percentile" val="50"/><${prefix}cfvo type="max"/>`
+    const colors = spec.colors.map((color) => `<${prefix}color rgb="${color}"/>`).join('')
+    return (
+      `${open}<${prefix}cfRule type="colorScale" priority="${priority}">` +
+      `<${prefix}colorScale>${cfvo}${colors}</${prefix}colorScale>` +
+      `</${prefix}cfRule>${close}`
+    )
+  }
+  const formulas = spec.formulas
+    .map((formula) => `<${prefix}formula>${escapeXml(formula)}</${prefix}formula>`)
+    .join('')
   return (
-    `<${prefix}conditionalFormatting sqref="${spec.sqref}">` +
-    `<${prefix}cfRule type="${spec.type}" priority="${priority}">` +
-    `<${prefix}colorScale>${cfvo}${colors}</${prefix}colorScale>` +
-    `</${prefix}cfRule></${prefix}conditionalFormatting>`
+    `${open}<${prefix}cfRule type="cellIs" operator="${spec.operator}" dxfId="${spec.dxfId}"` +
+    ` priority="${priority}">${formulas}</${prefix}cfRule>${close}`
   )
 }
 
