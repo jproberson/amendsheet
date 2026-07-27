@@ -16,6 +16,7 @@ import { XlsxError } from './errors.js'
 import { LAST_SERIAL, dateToSerial, parseIsoDate, serialToDate } from './date.js'
 import {
   type CellInput,
+  type ConditionalFormatSpec,
   type DataValidationSpec,
   checkProtection,
   checkWritable,
@@ -200,6 +201,12 @@ export interface Worksheet {
    */
   validate(range: string, rule: DataValidation): void
   /**
+   * Adds a conditional format over a cell or range. `{ colorScale }` grades cells
+   * between two colours, or three with a `mid`. The rule outranks any the sheet
+   * already has, and is written by `toBytes()`.
+   */
+  conditionalFormat(range: string, rule: ConditionalFormat): void
+  /**
    * Sets the sheet tab's colour, into `sheetPr`, replacing any it already has.
    * The colour is a 6- or 8-digit hex string; a 6-digit one gains an opaque
    * alpha. Refuses anything else. Written by `toBytes()`.
@@ -308,6 +315,22 @@ export type DataValidation = { readonly allowBlank?: boolean } & (
   | { readonly decimal: NumberConstraint }
 )
 
+/** A colour scale graded across a range: two stops, or three with a midpoint. */
+export interface ColorScale {
+  /** Hex for the lowest value. */
+  readonly min: string
+  /** Hex for the midpoint (the 50th percentile), making it a three-colour scale. */
+  readonly mid?: string
+  /** Hex for the highest value. */
+  readonly max: string
+}
+
+/**
+ * A conditional-format rule, keyed by kind. Today a `colorScale`; the union is
+ * open to cell-value rules and data bars without a break.
+ */
+export type ConditionalFormat = { readonly colorScale: ColorScale }
+
 export interface SetOptions {
   /** A number format code, applied to the cell being written. */
   readonly numberFormat?: string
@@ -371,7 +394,8 @@ function partText(container: Container, path: string): string | undefined {
   return decodeXmlPart(bytes, path)
 }
 
-function validationSqref(range: string, at: SheetLocation): string {
+/** Canonicalises a cell or range into the `sqref` an element takes. */
+function sqrefOf(range: string, at: SheetLocation): string {
   if (range.includes(':')) return mergeRangeReference(range, at)
   return formatReference(parseWritableReference(range))
 }
@@ -560,6 +584,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   const sheetRowGroups = new Map<string, Map<number, number>>()
   const sheetColGroups = new Map<string, Map<number, number>>()
   const sheetValidations = new Map<string, DataValidationSpec[]>()
+  const sheetConditionalFormats = new Map<string, ConditionalFormatSpec[]>()
   // The per-sheet maps patchSheet applies in one rewrite. Both the "anything
   // pending?" check and the set of sheets to rewrite read this list, so a new
   // kind of sheet edit is registered in one place rather than two enumerations
@@ -582,6 +607,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     sheetRowGroups,
     sheetColGroups,
     sheetValidations,
+    sheetConditionalFormats,
   ]
   const fileNames = readDefinedNames(partText(container, part.path) ?? '')
   const pendingNames = new Map<string, string>()
@@ -1022,11 +1048,30 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             { ...at, reference: range },
           )
         }
-        const sqref = validationSqref(range, at)
+        const sqref = sqrefOf(range, at)
         const spec = buildValidationSpec(rule, sqref, at)
         const specs = sheetValidations.get(reference.path) ?? []
         specs.push(spec)
         sheetValidations.set(reference.path, specs)
+      },
+      conditionalFormat(range: string, rule: ConditionalFormat): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so ${range} cannot be formatted`,
+            { ...at, reference: range },
+          )
+        }
+        const sqref = sqrefOf(range, at)
+        const { min, mid, max } = rule.colorScale
+        const colors =
+          mid === undefined
+            ? [normalizeColor(min, at), normalizeColor(max, at)]
+            : [normalizeColor(min, at), normalizeColor(mid, at), normalizeColor(max, at)]
+        const spec: ConditionalFormatSpec = { sqref, type: 'colorScale', colors }
+        const specs = sheetConditionalFormats.get(reference.path) ?? []
+        specs.push(spec)
+        sheetConditionalFormats.set(reference.path, specs)
       },
       freeze(cell: string): void {
         if (sheetBytes === undefined) {
@@ -1467,6 +1512,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           rowOutlineLevels: sheetRowGroups.get(path),
           colOutlineLevels: sheetColGroups.get(path),
           dataValidations: sheetValidations.get(path),
+          conditionalFormats: sheetConditionalFormats.get(path),
         }),
       )
       // A cell written just past a table grows it, the way Excel would.

@@ -451,6 +451,8 @@ interface SheetShape {
   readonly laterSiblingStart: number
   /** Start of the worksheet's close tag, the fallback insertion point. */
   readonly worksheetEnd: number
+  /** The highest cfRule priority the sheet uses, so a new rule can outrank it. */
+  readonly maxPriority: number
   /** An existing mergeCells element, so a new merge joins it rather than a second. */
   readonly mergeContainer:
     | { openStart: number; openEnd: number; insertAt: number; selfClosing: boolean; count: number }
@@ -487,6 +489,7 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
   let dvCount = 0
   let laterSiblingStart = -1
   let worksheetEnd = -1
+  let maxPriority = 0
   let mergeOpenStart = -1
   let mergeOpenEnd = -1
   let mergeInsertAt = -1
@@ -656,6 +659,11 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
         laterSiblingStart = event.start
         continue
       }
+      if (event.localName === 'cfRule') {
+        const priority = Number(event.attributes.get('priority'))
+        if (Number.isFinite(priority)) maxPriority = Math.max(maxPriority, priority)
+        continue
+      }
       // Only the cell carrying ref owns the range. A shared dependent names the
       // si alone, and any of them may be written self closing.
       if (event.localName === 'f') {
@@ -749,6 +757,7 @@ function readShape(bytes: Uint8Array, at: SheetLocation = {}): SheetShape {
           },
     laterSiblingStart,
     worksheetEnd,
+    maxPriority,
     mergeContainer:
       mergeOpenStart === -1
         ? undefined
@@ -836,6 +845,32 @@ function dataValidationElement(spec: DataValidationSpec, prefix: string): string
   )
 }
 
+/** One conditional-format rule. Today a colour scale, built by `patchSheet`. */
+export interface ConditionalFormatSpec {
+  readonly sqref: string
+  readonly type: string
+  /** Two ARGB stops for a two-colour scale, three for a mid-pointed one. */
+  readonly colors: readonly string[]
+}
+
+function conditionalFormattingElement(
+  spec: ConditionalFormatSpec,
+  priority: number,
+  prefix: string,
+): string {
+  const cfvo =
+    spec.colors.length === 2
+      ? `<${prefix}cfvo type="min"/><${prefix}cfvo type="max"/>`
+      : `<${prefix}cfvo type="min"/><${prefix}cfvo type="percentile" val="50"/><${prefix}cfvo type="max"/>`
+  const colors = spec.colors.map((color) => `<${prefix}color rgb="${color}"/>`).join('')
+  return (
+    `<${prefix}conditionalFormatting sqref="${spec.sqref}">` +
+    `<${prefix}cfRule type="${spec.type}" priority="${priority}">` +
+    `<${prefix}colorScale>${cfvo}${colors}</${prefix}colorScale>` +
+    `</${prefix}cfRule></${prefix}conditionalFormatting>`
+  )
+}
+
 /** Edits to a sheet that are not cell values: the elements around sheetData. */
 export interface SheetEdits {
   readonly protection?: SheetProtection | 'remove'
@@ -867,6 +902,8 @@ export interface SheetEdits {
   readonly colOutlineLevels?: ReadonlyMap<number, number>
   /** Data-validation rules to add, joining any dataValidations the sheet has. */
   readonly dataValidations?: readonly DataValidationSpec[]
+  /** Conditional-format rules to add, each its own conditionalFormatting element. */
+  readonly conditionalFormats?: readonly ConditionalFormatSpec[]
 }
 
 export function patchSheet(
@@ -908,7 +945,8 @@ export function patchSheet(
     hiddenColumns.size === 0 &&
     rowOutlineLevels.size === 0 &&
     colOutlineLevels.size === 0 &&
-    (sheet.dataValidations === undefined || sheet.dataValidations.length === 0)
+    (sheet.dataValidations === undefined || sheet.dataValidations.length === 0) &&
+    (sheet.conditionalFormats === undefined || sheet.conditionalFormats.length === 0)
   ) {
     return bytes
   }
@@ -1433,6 +1471,24 @@ export function patchSheet(
       text: tag,
       order: 0,
     })
+  }
+
+  // conditionalFormatting sits just before dataValidations. Each rule is its own
+  // element, added after any the sheet has, before dataValidations or the first
+  // later sibling, or before the worksheet close. Its priority outranks the
+  // highest the sheet already uses, so a new rule wins ties of evaluation order.
+  const conditionalFormats = sheet.conditionalFormats ?? []
+  if (conditionalFormats.length > 0) {
+    const candidates: number[] = []
+    if (shape.dataValidations !== undefined) candidates.push(shape.dataValidations.openStart)
+    if (shape.laterSiblingStart !== -1) candidates.push(shape.laterSiblingStart)
+    const anchor = candidates.length === 0 ? shape.worksheetEnd : Math.min(...candidates)
+    const elements = conditionalFormats
+      .map((spec, index) =>
+        conditionalFormattingElement(spec, shape.maxPriority + 1 + index, shape.prefix),
+      )
+      .join('')
+    splices.push({ start: anchor, end: anchor, text: elements, order: -0.7 })
   }
 
   // dataValidations sits after mergeCells and conditionalFormatting, before

@@ -930,6 +930,66 @@ test('validate refuses an empty list, a value with a comma, and a bad range', ()
   )
 })
 
+test('conditionalFormat writes a two-colour scale', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.conditionalFormat('A1:A20', { colorScale: { min: 'FFFFFF', max: 'FF0000' } })
+
+  const xml = sheetXml(workbook)
+  assert.match(
+    xml,
+    /<conditionalFormatting sqref="A1:A20"><cfRule type="colorScale" priority="1"><colorScale><cfvo type="min"\/><cfvo type="max"\/><color rgb="FFFFFFFF"\/><color rgb="FFFF0000"\/><\/colorScale><\/cfRule><\/conditionalFormatting>/,
+  )
+})
+
+test('conditionalFormat writes a three-colour scale with a midpoint', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.conditionalFormat('B1:B5', {
+    colorScale: { min: 'F8696B', mid: 'FFEB84', max: '63BE7B' },
+  })
+
+  const xml = sheetXml(workbook)
+  assert.match(
+    xml,
+    /<colorScale><cfvo type="min"\/><cfvo type="percentile" val="50"\/><cfvo type="max"\/><color rgb="FFF8696B"\/><color rgb="FFFFEB84"\/><color rgb="FF63BE7B"\/><\/colorScale>/,
+  )
+})
+
+test('a conditional format lands before dataValidations', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', { after: '<dataValidations count="0"/>' }),
+  )
+  workbook.sheets[0]?.conditionalFormat('A1', { colorScale: { min: 'FFFFFF', max: '000000' } })
+
+  const xml = sheetXml(workbook)
+  assert.match(xml, /<\/conditionalFormatting><dataValidations/)
+})
+
+test('a conditional format priority rises above the highest the sheet already uses', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      after:
+        '<conditionalFormatting sqref="Z1"><cfRule type="expression" priority="5"><formula>TRUE</formula></cfRule></conditionalFormatting>',
+    }),
+  )
+  workbook.sheets[0]?.conditionalFormat('A1', { colorScale: { min: 'FFFFFF', max: '000000' } })
+
+  const xml = sheetXml(workbook)
+  assert.match(xml, /sqref="A1"><cfRule type="colorScale" priority="6"/)
+})
+
+test('conditionalFormat refuses a bad colour and a bad range', () => {
+  const sheet = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>')).sheet('Data')
+  assert.throws(
+    () => sheet?.conditionalFormat('A1', { colorScale: { min: 'nope', max: '000000' } }),
+    (error: unknown) =>
+      error instanceof XlsxError && error.code === 'unwritable-value' && error.sheet === 'Data',
+  )
+  assert.throws(
+    () => sheet?.conditionalFormat('bad range', { colorScale: { min: 'FFFFFF', max: '000000' } }),
+    (error: unknown) => error instanceof XlsxError && error.code === 'bad-reference',
+  )
+})
+
 test('set applies an alignment, adding it to the cell format', () => {
   const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
   workbook.sheets[0]?.set('A1', 'x', { alignment: { horizontal: 'center', wrapText: true } })
@@ -2214,6 +2274,11 @@ test('refuses a write to a sheet whose part is not in the package', () => {
   assert.throws(() => workbook.sheets[0]?.groupRows(1, 2), gone)
   assert.throws(() => workbook.sheets[0]?.groupColumns('A', 'B'), gone)
   assert.throws(() => workbook.sheets[0]?.validate('A1', { list: ['x'] }), gone)
+  assert.throws(
+    () =>
+      workbook.sheets[0]?.conditionalFormat('A1', { colorScale: { min: 'FFFFFF', max: '000000' } }),
+    gone,
+  )
 })
 
 test('a reference the sheet cannot hold does not break lookups around it', () => {
