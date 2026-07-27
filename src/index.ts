@@ -25,6 +25,7 @@ export type {
   CellValueRule,
   ColorScale,
   ConditionalFormat,
+  DataBar,
   DataValidation,
   Hyperlink,
   NumberConstraint,

@@ -862,6 +862,7 @@ export type ConditionalFormatSpec =
       /** Index of the dxf in styles.xml holding the highlight. */
       readonly dxfId: number
     }
+  | { readonly kind: 'dataBar'; readonly sqref: string; readonly color: string }
 
 function conditionalFormattingElement(
   spec: ConditionalFormatSpec,
@@ -880,6 +881,13 @@ function conditionalFormattingElement(
       `${open}<${prefix}cfRule type="colorScale" priority="${priority}">` +
       `<${prefix}colorScale>${cfvo}${colors}</${prefix}colorScale>` +
       `</${prefix}cfRule>${close}`
+    )
+  }
+  if (spec.kind === 'dataBar') {
+    return (
+      `${open}<${prefix}cfRule type="dataBar" priority="${priority}"><${prefix}dataBar>` +
+      `<${prefix}cfvo type="min"/><${prefix}cfvo type="max"/><${prefix}color rgb="${spec.color}"/>` +
+      `</${prefix}dataBar></${prefix}cfRule>${close}`
     )
   }
   const formulas = spec.formulas

@@ -954,6 +954,17 @@ test('conditionalFormat writes a three-colour scale with a midpoint', () => {
   )
 })
 
+test('conditionalFormat writes a data bar with min and max stops', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.conditionalFormat('A1:A20', { dataBar: { color: '638EC6' } })
+
+  const xml = sheetXml(workbook)
+  assert.match(
+    xml,
+    /<cfRule type="dataBar" priority="1"><dataBar><cfvo type="min"\/><cfvo type="max"\/><color rgb="FF638EC6"\/><\/dataBar><\/cfRule>/,
+  )
+})
+
 test('a conditional format lands before dataValidations', () => {
   const workbook = readWorkbook(
     build('<row r="1"><c r="A1"><v>1</v></c></row>', { after: '<dataValidations count="0"/>' }),

@@ -226,8 +226,9 @@ workbook.sheets[0]?.conditionalFormat('C1:C20', {
 ```
 
 The `when` of a `cellIs` is any of the comparisons `validate` takes; its `fill` is
-written as a differential format in `styles.xml`. A rule outranks any the sheet
-already has, so a new format wins where they overlap.
+written as a differential format in `styles.xml`. A `{ dataBar: { color } }` draws
+a bar in each cell, scaled between the range's smallest and largest values. A rule
+outranks any the sheet already has, so a new format wins where they overlap.
 
 `workbook.defineName('TaxRate', 'Sheet1!$B$1')` defines a global named range, and
 `workbook.definedNames` reads them back; a name scoped to one sheet is left as it

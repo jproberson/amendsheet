@@ -332,14 +332,21 @@ export interface CellValueRule {
   readonly fill: string
 }
 
+/** A bar drawn in each cell, its length scaled between the range's min and max. */
+export interface DataBar {
+  /** The bar's colour, hex. */
+  readonly color: string
+}
+
 /**
  * A conditional-format rule, keyed by kind: a `colorScale` graded across a range,
- * or a `cellIs` value comparison that fills the cells it matches. The union is
- * open to data bars and more without a break.
+ * a `cellIs` value comparison that fills the cells it matches, or a `dataBar`
+ * scaled across the range. The union is open to more kinds without a break.
  */
 export type ConditionalFormat =
   | { readonly colorScale: ColorScale }
   | { readonly cellIs: CellValueRule }
+  | { readonly dataBar: DataBar }
 
 export interface SetOptions {
   /** A number format code, applied to the cell being written. */
@@ -1081,6 +1088,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
               ? [normalizeColor(min, at), normalizeColor(max, at)]
               : [normalizeColor(min, at), normalizeColor(mid, at), normalizeColor(max, at)]
           specs.push({ kind: 'colorScale', sqref, colors })
+        } else if ('dataBar' in rule) {
+          specs.push({ kind: 'dataBar', sqref, color: normalizeColor(rule.dataBar.color, at) })
         } else {
           if (workingStyles === undefined) {
             throw new XlsxError(
