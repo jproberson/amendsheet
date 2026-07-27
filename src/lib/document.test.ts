@@ -1152,6 +1152,95 @@ test('a gradient with no degree is reported without one', () => {
   })
 })
 
+const COMMENTS_REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments'
+const commentsRels = (target: string) =>
+  '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+  `<Relationship Id="rId9" Type="${COMMENTS_REL}" Target="${target}"/></Relationships>`
+
+test('cell reports a comment wired through the sheet relationships', () => {
+  const comments =
+    '<comments><authors><author>Ada</author></authors><commentList>' +
+    '<comment ref="B2" authorId="0"><text><r><t>Look </t></r><r><t>here</t></r></text></comment>' +
+    '</commentList></comments>'
+  const workbook = readWorkbook(
+    build('<row r="2"><c r="B2"><v>5</v></c></row>', {
+      extra: {
+        'xl/comments1.xml': comments,
+        'xl/worksheets/_rels/sheet1.xml.rels': commentsRels('../comments1.xml'),
+      },
+    }),
+  )
+  assert.equal(workbook.sheets[0]?.cell('B2')?.comment, 'Look here')
+})
+
+test('comment writes a comments part, wires it to the sheet and declares its type', () => {
+  const contentTypes =
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+    '<Default Extension="xml" ContentType="application/xml"/>' +
+    '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/></Types>'
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      extra: { '[Content_Types].xml': contentTypes },
+    }),
+  )
+  workbook.sheets[0]?.comment('A1', 'a note')
+
+  const parts = readContainer(workbook.toBytes()).parts
+  assert.match(
+    decode(parts.get('xl/comments1.xml')),
+    /<comment ref="A1" authorId="0"><text><t xml:space="preserve">a note<\/t><\/text><\/comment>/,
+  )
+  assert.match(
+    decode(parts.get('xl/worksheets/_rels/sheet1.xml.rels')),
+    /Type="[^"]*relationships\/comments" Target="\.\.\/comments1\.xml"/,
+  )
+  assert.match(decode(parts.get('[Content_Types].xml')), /PartName="\/xl\/comments1\.xml"/)
+
+  // And it round-trips: reading the written file back sees the comment.
+  assert.equal(readWorkbook(workbook.toBytes()).sheets[0]?.cell('A1')?.comment, 'a note')
+})
+
+test('comment joins an existing sheet rels part rather than replacing it', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      extra: {
+        'xl/worksheets/_rels/sheet1.xml.rels':
+          '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+          '<Relationship Id="rId1" Type="http://x/drawing" Target="../drawings/d1.xml"/></Relationships>',
+      },
+    }),
+  )
+  workbook.sheets[0]?.comment('A1', 'note')
+
+  const rels = decode(
+    readContainer(workbook.toBytes()).parts.get('xl/worksheets/_rels/sheet1.xml.rels'),
+  )
+  assert.match(rels, /Target="\.\.\/drawings\/d1\.xml"/) // the one it had is kept
+  assert.match(rels, /relationships\/comments/) // and the comment is added
+})
+
+test('comment refuses a sheet that already carries comments', () => {
+  const comments =
+    '<comments><authors><author/></authors><commentList>' +
+    '<comment ref="A1" authorId="0"><text><t>existing</t></text></comment></commentList></comments>'
+  const sheet = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      extra: {
+        'xl/comments1.xml': comments,
+        'xl/worksheets/_rels/sheet1.xml.rels': commentsRels('../comments1.xml'),
+      },
+    }),
+  ).sheet('Data')
+
+  assert.throws(
+    () => sheet?.comment('A1', 'new'),
+    (error: unknown) => error instanceof XlsxError && error.code === 'unsupported-edit',
+  )
+  // The existing comment still reads.
+  assert.equal(sheet?.cell('A1')?.comment, 'existing')
+})
+
 test('set applies an alignment, adding it to the cell format', () => {
   const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
   workbook.sheets[0]?.set('A1', 'x', { alignment: { horizontal: 'center', wrapText: true } })

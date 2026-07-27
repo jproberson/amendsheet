@@ -230,6 +230,21 @@ written as a differential format in `styles.xml`. A `{ dataBar: { color } }` dra
 a bar in each cell, scaled between the range's smallest and largest values. A rule
 outranks any the sheet already has, so a new format wins where they overlap.
 
+`worksheet.comment(reference, text)` attaches a comment to a cell, and
+`cell.comment` reads one back. A comment's text is written into a comments part
+wired to the sheet; the box's visual shape (the legacy VML drawing) is not
+written, so a reader that needs it may place the note itself.
+
+```ts
+const workbook = readWorkbook(bytes)
+workbook.sheets[0]?.comment('B2', 'Double-check this figure')
+const note = workbook.sheets[0]?.cell('B2')?.comment
+```
+
+Adding a comment to a sheet that already has some is refused with
+`unsupported-edit`, since merging into its part would rebuild the rich text the
+existing comments hold as plain words.
+
 `workbook.defineName('TaxRate', 'Sheet1!$B$1')` defines a global named range, and
 `workbook.definedNames` reads them back; a name scoped to one sheet is left as it
 was. `worksheet.link('A1', { url: 'https://example.com' })` links a cell out to a

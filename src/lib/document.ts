@@ -9,7 +9,9 @@ import {
   withSheetsAdded,
 } from './add-sheet.js'
 import { blankWorkbookBytes } from './blank.js'
+import { buildCommentsPart, readComments } from './comments.js'
 import { checkDefinedName, readDefinedNames, withDefinedNames } from './defined-names.js'
+import { readRelationships, resolveTarget } from './relationships.js'
 import { type Hyperlink, writeSheetHyperlinks } from './hyperlinks.js'
 import { type Container, decodeXmlPart } from './container.js'
 import { XlsxError } from './errors.js'
@@ -128,6 +130,8 @@ export interface Cell {
   readonly alignment?: Alignment
   /** Absent unless the cell sets a `locked` or `hidden` protection of its own. */
   readonly protection?: CellProtection
+  /** The cell's comment text, when it has one. Joined from the note's runs. */
+  readonly comment?: string
 }
 
 export type { Hyperlink }
@@ -208,6 +212,12 @@ export interface Worksheet {
    * already has, and is written by `toBytes()`.
    */
   conditionalFormat(range: string, rule: ConditionalFormat): void
+  /**
+   * Attaches a comment to a cell, written by `toBytes()`. Refused with
+   * `unsupported-edit` on a sheet that already carries comments, since merging
+   * into its part would rebuild the rich text those comments hold as plain words.
+   */
+  comment(reference: string, text: string): void
   /**
    * Sets the sheet tab's colour, into `sheetPr`, replacing any it already has.
    * The colour is a 6- or 8-digit hex string; a 6-digit one gains an opaque
@@ -405,6 +415,10 @@ const EMPTY_EDITS: ReadonlyMap<string, CellInput> = new Map()
 
 const CALCULATION_CHAIN = 'xl/calcChain.xml'
 const CONTENT_TYPES = '[Content_Types].xml'
+const COMMENTS_RELATIONSHIP =
+  'http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments'
+const COMMENTS_CONTENT_TYPE =
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml'
 
 function partText(container: Container, path: string): string | undefined {
   const bytes = container.parts.get(path)
@@ -416,6 +430,36 @@ function partText(container: Container, path: string): string | undefined {
 function sqrefOf(range: string, at: SheetLocation): string {
   if (range.includes(':')) return mergeRangeReference(range, at)
   return formatReference(parseWritableReference(range))
+}
+
+const EMPTY_RELATIONSHIPS =
+  '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+  '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>'
+
+/** Adds a relationship to a rels part, opening a fresh one when there is none. */
+function withRelationship(relsXml: string | undefined, type: string, target: string): string {
+  const existing = relsXml ?? EMPTY_RELATIONSHIPS
+  let maxId = 0
+  for (const match of existing.matchAll(/Id="rId(\d+)"/g)) maxId = Math.max(maxId, Number(match[1]))
+  const relationship = `<Relationship Id="rId${maxId + 1}" Type="${type}" Target="${target}"/>`
+  const close = existing.indexOf('</Relationships>')
+  if (close === -1) {
+    throw new XlsxError('invalid-content', 'A relationships part is malformed', {})
+  }
+  return existing.slice(0, close) + relationship + existing.slice(close)
+}
+
+/** Declares a part in the content types with an Override, once. */
+function withContentTypeOverride(xml: string, partName: string, contentType: string): string {
+  if (xml.includes(`PartName="/${partName}"`)) return xml
+  const override = `<Override PartName="/${partName}" ContentType="${contentType}"/>`
+  const close = xml.indexOf('</Types>')
+  if (close === -1) {
+    throw new XlsxError('invalid-content', 'Content types part is malformed', {
+      part: '[Content_Types].xml',
+    })
+  }
+  return xml.slice(0, close) + override + xml.slice(close)
 }
 
 function numberComparison(constraint: NumberConstraint): {
@@ -603,6 +647,9 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   const sheetColGroups = new Map<string, Map<number, number>>()
   const sheetValidations = new Map<string, DataValidationSpec[]>()
   const sheetConditionalFormats = new Map<string, ConditionalFormatSpec[]>()
+  // Comments to add, per sheet, only for sheets that had none — an existing
+  // comments part is refused at the call rather than rebuilt.
+  const sheetComments = new Map<string, Map<string, string>>()
   // The per-sheet maps patchSheet applies in one rewrite. Both the "anything
   // pending?" check and the set of sheets to rewrite read this list, so a new
   // kind of sheet edit is registered in one place rather than two enumerations
@@ -675,6 +722,25 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     const sheetBytes = container.parts.get(reference.path) ?? addedSheets.get(reference.path)
     const at: SheetLocation = { sheet: reference.name, part: reference.path }
 
+    // The sheet points at its comments part through a relationship. Found once, it
+    // gives both what a cell reports and whether a new comment may be added: a
+    // sheet that already carries comments is refused, since merging into its part
+    // would rebuild the rich text it holds as plain words.
+    const existingCommentsPath = (() => {
+      const relsXml = partText(container, relationshipsPathFor(reference.path))
+      if (relsXml === undefined) return undefined
+      for (const relationship of readRelationships(relsXml, reference.path).values()) {
+        if (relationship.type === COMMENTS_RELATIONSHIP && !relationship.external) {
+          return resolveTarget(reference.path, relationship.target)
+        }
+      }
+      return undefined
+    })()
+    const commentsRead =
+      existingCommentsPath === undefined
+        ? new Map<string, string>()
+        : readComments(partText(container, existingCommentsPath) ?? '')
+
     const patched = (): Uint8Array | undefined => {
       if (sheetBytes === undefined) return undefined
       const pending = edits.get(reference.path)
@@ -714,7 +780,9 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         if (raw.ownsSharedRange === true && raw.sharedIndex !== undefined) {
           masters.set(raw.sharedIndex, canonicalReference(raw.address) ?? raw.reference)
         }
-        yield toCell(raw, stylesNow(), formattingFor(raw.styleIndex), date1904, masters)
+        const cell = toCell(raw, stylesNow(), formattingFor(raw.styleIndex), date1904, masters)
+        const comment = commentsRead.get(cell.reference)
+        yield comment === undefined ? cell : { ...cell, comment }
       }
     }
 
@@ -1125,6 +1193,26 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         }
         sheetConditionalFormats.set(reference.path, specs)
       },
+      comment(cellReference: string, text: string): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so ${cellReference} cannot be commented`,
+            { ...at, reference: cellReference },
+          )
+        }
+        if (existingCommentsPath !== undefined) {
+          throw new XlsxError(
+            'unsupported-edit',
+            `Sheet ${reference.name} already carries comments, which this does not add to yet`,
+            { ...at },
+          )
+        }
+        const canonical = formatReference(parseWritableReference(cellReference))
+        const notes = sheetComments.get(reference.path) ?? new Map<string, string>()
+        notes.set(canonical, text)
+        sheetComments.set(reference.path, notes)
+      },
       freeze(cell: string): void {
         if (sheetBytes === undefined) {
           throw new XlsxError(
@@ -1491,6 +1579,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     if (
       patchInputs.every((map) => map.size === 0) &&
       sheetHyperlinks.size === 0 &&
+      sheetComments.size === 0 &&
       addedRefs.length === 0 &&
       renames.size === 0 &&
       removed.size === 0 &&
@@ -1622,6 +1711,37 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       }
     }
 
+    // Comments go in their own part, wired to the sheet by a relationship and
+    // declared in the content types. Only sheets that had none reach here, so a
+    // fresh part is opened; its number skips any the package or this run already
+    // uses. The rels are read from what a hyperlink write may have just changed.
+    const commentParts: string[] = []
+    let commentNumber = 0
+    for (const [path, notes] of sheetComments) {
+      if (removed.has(path) || notes.size === 0) continue
+      do {
+        commentNumber += 1
+      } while (
+        container.parts.has(`xl/comments${commentNumber}.xml`) ||
+        changes.has(`xl/comments${commentNumber}.xml`)
+      )
+      const commentsPath = `xl/comments${commentNumber}.xml`
+      changes.set(commentsPath, encoder.encode(buildCommentsPart(notes)))
+      commentParts.push(commentsPath)
+
+      const relationshipsPath = relationshipsPathFor(path)
+      const pendingRels = changes.get(relationshipsPath)
+      const currentRels =
+        pendingRels === undefined || pendingRels === null
+          ? partText(container, relationshipsPath)
+          : decodePart.decode(pendingRels)
+      const target = `../${commentsPath.slice('xl/'.length)}`
+      changes.set(
+        relationshipsPath,
+        encoder.encode(withRelationship(currentRels, COMMENTS_RELATIONSHIP, target)),
+      )
+    }
+
     // Inserting or deleting a line moves references across the whole workbook. The
     // per-sheet patch above has already landed this session's edits in the old
     // grid, so each sheet's current text is shifted here: the edited sheet's own
@@ -1698,6 +1818,9 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         addedRefs,
       )
       for (const path of removedExisting) updated = withoutOverride(updated, path)
+      for (const commentsPath of commentParts) {
+        updated = withContentTypeOverride(updated, commentsPath, COMMENTS_CONTENT_TYPE)
+      }
       return updated
     })
 
