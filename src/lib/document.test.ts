@@ -1210,6 +1210,76 @@ test('mergedRanges is empty for a sheet with no merges', () => {
   assert.deepEqual(sheet?.mergedRanges, [])
 })
 
+test('validations round-trip a list, whole and decimal rule', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  const sheet = workbook.sheets[0]
+  sheet?.validate('A1:A5', { list: ['red', 'green'] })
+  sheet?.validate('B1', { whole: { between: [1, 10] } })
+  sheet?.validate('C1', { decimal: { greaterThan: 0 }, allowBlank: false })
+  const back = readWorkbook(workbook.toBytes()).sheets[0]
+  assert.deepEqual(back?.validations, [
+    { range: 'A1:A5', rule: { allowBlank: true, list: ['red', 'green'] } },
+    { range: 'B1', rule: { allowBlank: true, whole: { between: [1, 10] } } },
+    { range: 'C1', rule: { allowBlank: false, decimal: { greaterThan: 0 } } },
+  ])
+})
+
+test('validations round-trip every numeric operator', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  const sheet = workbook.sheets[0]
+  const wholes = [
+    { equal: 1 },
+    { notEqual: 2 },
+    { greaterThan: 3 },
+    { lessThan: 4 },
+    { greaterThanOrEqual: 5 },
+    { lessThanOrEqual: 6 },
+    { between: [7, 8] },
+    { notBetween: [9, 10] },
+  ] as const
+  const refs = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7', 'A8']
+  wholes.forEach((whole, i) => {
+    sheet?.validate(refs[i] ?? 'A1', { whole })
+  })
+  const back = readWorkbook(workbook.toBytes()).sheets[0]
+  assert.deepEqual(
+    back?.validations.map((v) => v.rule),
+    wholes.map((whole) => ({ allowBlank: true, whole })),
+  )
+})
+
+test('validations reflect a pending validate and skip a kind not modelled', () => {
+  const sheet = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      after:
+        '<dataValidations count="5">' +
+        '<dataValidation type="textLength" operator="lessThan" sqref="A1"><formula1>5</formula1></dataValidation>' +
+        '<dataValidation type="list" sqref="B1"><formula1>Sheet1!$A$1:$A$3</formula1></dataValidation>' +
+        '<dataValidation type="whole" operator="wonky" sqref="C1"><formula1>1</formula1></dataValidation>' +
+        '<dataValidation type="whole" operator="equal" sqref="D1"><formula1>abc</formula1></dataValidation>' +
+        '<dataValidation type="whole" operator="between" sqref="E1"><formula1>1</formula1><formula2>x</formula2></dataValidation>' +
+        '</dataValidations>',
+    }),
+  ).sheets[0]
+  // A textLength, a range-backed list, an unknown operator and non-numeric bounds
+  // are all left out.
+  assert.deepEqual(sheet?.validations, [])
+  sheet?.validate('F1', { whole: { equal: 7 } })
+  assert.deepEqual(sheet?.validations, [
+    { range: 'F1', rule: { allowBlank: true, whole: { equal: 7 } } },
+  ])
+})
+
+test('a list validation naming no values reads as an empty list', () => {
+  const sheet = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      after:
+        '<dataValidations count="1"><dataValidation type="list" sqref="A1"><formula1>""</formula1></dataValidation></dataValidations>',
+    }),
+  ).sheets[0]
+  assert.deepEqual(sheet?.validations, [{ range: 'A1', rule: { allowBlank: false, list: [] } }])
+})
+
 test('the view getters read the file', () => {
   const sheet = readWorkbook(
     build('<row r="1"><c r="A1"><v>1</v></c></row>', {
@@ -2770,6 +2840,7 @@ test('refuses a write to a sheet whose part is not in the package', () => {
   assert.equal(workbook.sheets[0]?.isColumnHidden('A'), false)
   assert.equal(workbook.sheets[0]?.rowGroupLevel(1), 0)
   assert.equal(workbook.sheets[0]?.columnGroupLevel('A'), 0)
+  assert.deepEqual(workbook.sheets[0]?.validations, [])
   assert.throws(
     () => workbook.sheets[0]?.protect(),
     (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',

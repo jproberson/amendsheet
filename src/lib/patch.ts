@@ -984,6 +984,55 @@ export interface DataValidationSpec {
   readonly formula2?: string
 }
 
+/**
+ * Reads a sheet's data-validation rules into the same spec they are written from,
+ * so the caller translates them the way it translates a pending one. `sqref` and
+ * `type` are required; a rule missing either is skipped.
+ */
+export function readDataValidations(bytes: Uint8Array): DataValidationSpec[] {
+  const specs: DataValidationSpec[] = []
+  let type: string | undefined
+  let sqref: string | undefined
+  let allowBlank = false
+  let operator: string | undefined
+  let formula1 = ''
+  let formula2: string | undefined
+  let capture: 'formula1' | 'formula2' | undefined
+  const flush = () => {
+    if (type !== undefined && sqref !== undefined) {
+      specs.push({ type, sqref, allowBlank, operator, formula1, formula2 })
+    }
+    type = undefined
+  }
+  for (const event of readXmlBytes(bytes)) {
+    if (event.kind === 'open' && event.localName === 'dataValidation') {
+      type = event.attributes.get('type')
+      sqref = event.attributes.get('sqref')
+      allowBlank = event.attributes.get('allowBlank') === '1'
+      operator = event.attributes.get('operator')
+      formula1 = ''
+      formula2 = undefined
+      // A rule with no formula children closes in its open tag; flush it now.
+      if (event.selfClosing) flush()
+    } else if (event.kind === 'open' && event.localName === 'formula1') {
+      capture = 'formula1'
+    } else if (event.kind === 'open' && event.localName === 'formula2') {
+      capture = 'formula2'
+    } else if (event.kind === 'text' && capture !== undefined) {
+      if (capture === 'formula1') formula1 += event.text
+      else formula2 = (formula2 ?? '') + event.text
+    } else if (
+      event.kind === 'close' &&
+      (event.localName === 'formula1' || event.localName === 'formula2')
+    ) {
+      capture = undefined
+    } else if (event.kind === 'close' && event.localName === 'dataValidation') {
+      flush()
+    }
+  }
+  return specs
+}
+
 function dataValidationElement(spec: DataValidationSpec, prefix: string): string {
   const operator = spec.operator === undefined ? '' : ` operator="${spec.operator}"`
   const formula2 =

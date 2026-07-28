@@ -35,6 +35,7 @@ import {
   indexSheet,
   readColumnGroupLevels,
   readColumnWidths,
+  readDataValidations,
   readHiddenColumns,
   readHiddenRows,
   readRowGroupLevels,
@@ -248,6 +249,13 @@ export interface Worksheet {
    * already has. Written by `toBytes()`.
    */
   validate(range: string, rule: DataValidation): void
+  /**
+   * The data validations in force, each with the range it covers, the file's own
+   * plus any added this session with `validate`. A rule of a kind this does not
+   * model — a date, a text length, a custom formula, or a list naming a range
+   * rather than inline values — is left out.
+   */
+  readonly validations: readonly { readonly range: string; readonly rule: DataValidation }[]
   /**
    * Adds a conditional format over a cell or range. `{ colorScale }` grades cells
    * between two colours, or three with a `mid`. The rule outranks any the sheet
@@ -643,6 +651,64 @@ function buildValidationSpec(
   }
 }
 
+/** The list a validation offers, or undefined when it names a range not an
+ * inline set — only the inline form maps back to string values. */
+function listFromFormula(formula1: string): readonly string[] | undefined {
+  if (formula1.length < 2 || !formula1.startsWith('"') || !formula1.endsWith('"')) return undefined
+  const inner = formula1.slice(1, -1)
+  return inner === '' ? [] : inner.split(',')
+}
+
+/** The inverse of `numberComparison`: an operator and its bounds back to a
+ * constraint, or undefined for an operator this does not model. */
+function comparisonToConstraint(
+  operator: string | undefined,
+  formula1: string,
+  formula2: string | undefined,
+): NumberConstraint | undefined {
+  const first = Number(formula1)
+  if (!Number.isFinite(first)) return undefined
+  switch (operator) {
+    case 'equal':
+      return { equal: first }
+    case 'notEqual':
+      return { notEqual: first }
+    case 'greaterThan':
+      return { greaterThan: first }
+    case 'lessThan':
+      return { lessThan: first }
+    case 'greaterThanOrEqual':
+      return { greaterThanOrEqual: first }
+    case 'lessThanOrEqual':
+      return { lessThanOrEqual: first }
+    case 'between':
+    case 'notBetween': {
+      const second = Number(formula2)
+      if (!Number.isFinite(second)) return undefined
+      return operator === 'between' ? { between: [first, second] } : { notBetween: [first, second] }
+    }
+    default:
+      return undefined
+  }
+}
+
+/** A stored validation spec back into the public rule, or undefined for a type
+ * this does not model (a date, a text length, a custom formula). */
+function validationFromSpec(spec: DataValidationSpec): DataValidation | undefined {
+  if (spec.type === 'list') {
+    const list = listFromFormula(spec.formula1)
+    return list === undefined ? undefined : { allowBlank: spec.allowBlank, list }
+  }
+  if (spec.type === 'whole' || spec.type === 'decimal') {
+    const constraint = comparisonToConstraint(spec.operator, spec.formula1, spec.formula2)
+    if (constraint === undefined) return undefined
+    return spec.type === 'whole'
+      ? { allowBlank: spec.allowBlank, whole: constraint }
+      : { allowBlank: spec.allowBlank, decimal: constraint }
+  }
+  return undefined
+}
+
 function checkOutlineLevel(level: number, at: SheetLocation): void {
   if (!Number.isInteger(level) || level < 1 || level > 7) {
     throw new XlsxError('unwritable-value', `Outline level ${level} is not between 1 and 7`, {
@@ -866,6 +932,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     let hiddenColumnsCache: readonly { min: number; max: number }[] | undefined
     let rowGroupsCache: ReadonlyMap<number, number> | undefined
     let columnGroupsCache: readonly { min: number; max: number; level: number }[] | undefined
+    let validationsCache: readonly DataValidationSpec[] | undefined
     let hyperlinksCache: ReadonlyMap<string, Hyperlink> | undefined
     const hyperlinksFor = (bytes: Uint8Array): ReadonlyMap<string, Hyperlink> => {
       if (hyperlinksCache === undefined) {
@@ -1219,6 +1286,17 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       },
       get autoFilterRange(): string | undefined {
         return sheetAutoFilters.get(reference.path) ?? viewState().autoFilter
+      },
+      get validations(): readonly { readonly range: string; readonly rule: DataValidation }[] {
+        if (validationsCache === undefined) {
+          validationsCache = sheetBytes === undefined ? [] : readDataValidations(sheetBytes)
+        }
+        const applied: { range: string; rule: DataValidation }[] = []
+        for (const spec of [...validationsCache, ...(sheetValidations.get(reference.path) ?? [])]) {
+          const rule = validationFromSpec(spec)
+          if (rule !== undefined) applied.push({ range: spec.sqref, rule })
+        }
+        return applied
       },
       rowHeight(row: number): number | undefined {
         const pending = sheetRowHeights.get(reference.path)?.get(row)

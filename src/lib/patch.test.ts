@@ -10,6 +10,7 @@ import {
   patchSheet as patchSheetBytes,
   readColumnGroupLevels,
   readColumnWidths,
+  readDataValidations,
   readHiddenColumns,
   readHiddenRows,
   readRowGroupLevels,
@@ -940,4 +941,35 @@ test('readRowGroupLevels and readColumnGroupLevels read outlineLevel, skipping z
   assert.equal(rows.has(2), false)
   assert.equal(rows.has(3), false)
   assert.deepEqual(readColumnGroupLevels(bytes), [{ min: 2, max: 3, level: 2 }])
+})
+
+test('readDataValidations reads type, sqref, allowBlank and formulas, skipping the incomplete', () => {
+  const bytes = encode(
+    '<worksheet><sheetData/><dataValidations count="3">' +
+      '<dataValidation type="list" allowBlank="1" sqref="A1:A5"><formula1>"a,b,c"</formula1></dataValidation>' +
+      '<dataValidation type="whole" operator="between" allowBlank="0" sqref="B1">' +
+      '<formula1>1</formula1><formula2>10</formula2></dataValidation>' +
+      '<dataValidation type="list" sqref="C1"/>' + // no formula1
+      '<dataValidation sqref="D1"><formula1>1</formula1></dataValidation>' + // no type, skipped
+      '</dataValidations></worksheet>',
+  )
+  const specs = readDataValidations(bytes)
+  assert.equal(specs.length, 3)
+  assert.deepEqual(specs[0], {
+    type: 'list',
+    sqref: 'A1:A5',
+    allowBlank: true,
+    operator: undefined,
+    formula1: '"a,b,c"',
+    formula2: undefined,
+  })
+  assert.deepEqual(specs[1], {
+    type: 'whole',
+    sqref: 'B1',
+    allowBlank: false,
+    operator: 'between',
+    formula1: '1',
+    formula2: '10',
+  })
+  assert.equal(specs[2]?.sqref, 'C1') // kept even with an empty formula
 })
