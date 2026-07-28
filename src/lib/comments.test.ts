@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { buildCommentsPart, buildVmlDrawing, readComments } from './comments.js'
+import {
+  appendCommentsPart,
+  appendVmlShapes,
+  buildCommentsPart,
+  buildVmlDrawing,
+  readComments,
+} from './comments.js'
+import { XlsxError } from './errors.js'
 
 test('readComments maps each cell to the joined text of its runs', () => {
   const xml =
@@ -39,6 +46,43 @@ test('buildVmlDrawing with no notes still closes to a well-formed part', () => {
   assert.match(vml, /<v:shapetype /)
   assert.doesNotMatch(vml, /<v:shape /)
   assert.match(vml, /<\/xml>$/)
+})
+
+test('appendCommentsPart adds notes without disturbing the rich text already there', () => {
+  const existing =
+    '<?xml version="1.0"?>\n<comments><authors><author>Ada</author></authors><commentList>' +
+    '<comment ref="A1" authorId="0"><text><r><rPr><b/></rPr><t>bold note</t></r></text></comment>' +
+    '</commentList></comments>'
+  const merged = appendCommentsPart(existing, new Map([['B2', 'plain']]))
+  // The existing rich comment survives byte for byte.
+  assert.match(merged, /<r><rPr><b\/><\/rPr><t>bold note<\/t><\/r>/)
+  assert.match(merged, /<comment ref="B2" authorId="0"><text><r><t xml:space="preserve">plain</)
+  const read = readComments(merged)
+  assert.equal(read.get('A1'), 'bold note')
+  assert.equal(read.get('B2'), 'plain')
+})
+
+test('appendCommentsPart on a malformed part is rejected', () => {
+  assert.throws(
+    () => appendCommentsPart('<comments/>', new Map([['A1', 'x']])),
+    (error: unknown) => error instanceof XlsxError && error.code === 'invalid-content',
+  )
+})
+
+test('appendVmlShapes gives new shapes ids and z-indexes past the existing ones', () => {
+  const existing = buildVmlDrawing(['A1']) // one shape at _x0000_s1025, z-index 1
+  const merged = appendVmlShapes(existing, ['C3'])
+  assert.match(merged, /<v:shape id="_x0000_s1025"/) // kept
+  assert.match(merged, /<v:shape id="_x0000_s1026"[^>]*z-index:2/) // appended past it
+  assert.match(merged, /<x:Row>2<\/x:Row><x:Column>2<\/x:Column>/)
+  assert.match(merged, /<\/xml>$/)
+})
+
+test('appendVmlShapes on a malformed drawing is rejected', () => {
+  assert.throws(
+    () => appendVmlShapes('<not-a-drawing/>', ['A1']),
+    (error: unknown) => error instanceof XlsxError && error.code === 'invalid-content',
+  )
 })
 
 test('a built comments part reads back to the same text', () => {

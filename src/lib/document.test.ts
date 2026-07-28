@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile, readdir } from 'node:fs/promises'
 import { test } from 'node:test'
+import { buildVmlDrawing } from './comments.js'
 import { readContainer, writeContainer } from './container.js'
 import { type Cell, createWorkbook, readWorkbook } from './document.js'
 import { XlsxError } from './errors.js'
@@ -1278,7 +1279,7 @@ test('comment joins an existing sheet rels part rather than replacing it', () =>
   assert.match(rels, /relationships\/comments/) // and the comment is added
 })
 
-test('comment refuses a sheet that already carries comments', () => {
+test('comment refuses a cell that already carries a comment, not the whole sheet', () => {
   const comments =
     '<comments><authors><author/></authors><commentList>' +
     '<comment ref="A1" authorId="0"><text><t>existing</t></text></comment></commentList></comments>'
@@ -1295,8 +1296,63 @@ test('comment refuses a sheet that already carries comments', () => {
     () => sheet?.comment('A1', 'new'),
     (error: unknown) => error instanceof XlsxError && error.code === 'unsupported-edit',
   )
-  // The existing comment still reads.
-  assert.equal(sheet?.cell('A1')?.comment, 'existing')
+  // A different cell is fine.
+  assert.doesNotThrow(() => sheet?.comment('B2', 'added'))
+})
+
+test('comment on a sheet with comments splices in without rebuilding the rich text', () => {
+  const comments =
+    '<comments><authors><author>Ada</author></authors><commentList>' +
+    '<comment ref="A1" authorId="0"><text><r><rPr><b/></rPr><t>rich existing</t></r></text></comment>' +
+    '</commentList></comments>'
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row><row r="3"><c r="C3"><v>2</v></c></row>', {
+      extra: {
+        'xl/comments1.xml': comments,
+        // A rels part naming the comments part and an existing VML drawing (B1).
+        'xl/worksheets/_rels/sheet1.xml.rels':
+          '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+          `<Relationship Id="rId1" Type="${COMMENTS_REL}" Target="../comments1.xml"/>` +
+          '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing" Target="../drawings/vmlDrawing1.vml"/>' +
+          '</Relationships>',
+        'xl/drawings/vmlDrawing1.vml': buildVmlDrawing(['A1']),
+      },
+    }),
+  )
+  workbook.sheet('Data')?.comment('C3', 'appended')
+  const parts = readContainer(workbook.toBytes()).parts
+
+  const merged = decode(parts.get('xl/comments1.xml'))
+  assert.match(merged, /<r><rPr><b\/><\/rPr><t>rich existing<\/t><\/r>/) // untouched
+  assert.match(merged, /<comment ref="C3" authorId="0">/) // added
+  const vml = decode(parts.get('xl/drawings/vmlDrawing1.vml'))
+  assert.match(vml, /<v:shape id="_x0000_s1025"/) // the one it had
+  assert.match(vml, /<v:shape id="_x0000_s1026"/) // and the appended note
+  // Both comments read back.
+  const back = readWorkbook(workbook.toBytes()).sheet('Data')
+  assert.equal(back?.cell('A1')?.comment, 'rich existing')
+  assert.equal(back?.cell('C3')?.comment, 'appended')
+})
+
+test('comment on a sheet whose comments lack a drawing authors one', () => {
+  const comments =
+    '<comments><authors><author/></authors><commentList>' +
+    '<comment ref="A1" authorId="0"><text><t>plain</t></text></comment></commentList></comments>'
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row><row r="2"><c r="B2"><v>2</v></c></row>', {
+      extra: {
+        'xl/comments1.xml': comments,
+        'xl/worksheets/_rels/sheet1.xml.rels': commentsRels('../comments1.xml'), // no VML (B2)
+      },
+    }),
+  )
+  workbook.sheet('Data')?.comment('B2', 'added')
+  const parts = readContainer(workbook.toBytes()).parts
+
+  // A drawing is authored and the sheet is pointed at it.
+  assert.match(decode(parts.get('xl/drawings/vmlDrawing1.vml')), /ObjectType="Note"/)
+  assert.match(decode(parts.get('xl/worksheets/sheet1.xml')), /<legacyDrawing r:id="/)
+  assert.equal(readWorkbook(workbook.toBytes()).sheet('Data')?.cell('B2')?.comment, 'added')
 })
 
 test('set applies an alignment, adding it to the cell format', () => {

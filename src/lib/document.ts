@@ -9,7 +9,13 @@ import {
   withSheetsAdded,
 } from './add-sheet.js'
 import { blankWorkbookBytes } from './blank.js'
-import { buildCommentsPart, buildVmlDrawing, readComments } from './comments.js'
+import {
+  appendCommentsPart,
+  appendVmlShapes,
+  buildCommentsPart,
+  buildVmlDrawing,
+  readComments,
+} from './comments.js'
 import { checkDefinedName, readDefinedNames, withDefinedNames } from './defined-names.js'
 import { readRelationships, resolveTarget } from './relationships.js'
 import { type Hyperlink, writeSheetHyperlinks } from './hyperlinks.js'
@@ -213,9 +219,10 @@ export interface Worksheet {
    */
   conditionalFormat(range: string, rule: ConditionalFormat): void
   /**
-   * Attaches a comment to a cell, written by `toBytes()`. Refused with
-   * `unsupported-edit` on a sheet that already carries comments, since merging
-   * into its part would rebuild the rich text those comments hold as plain words.
+   * Attaches a comment to a cell, written by `toBytes()`. A sheet that already
+   * has comments is added to in place, its existing rich text kept. Refused with
+   * `unsupported-edit` only on a cell that already carries one, which this does
+   * not replace.
    */
   comment(reference: string, text: string): void
   /**
@@ -767,9 +774,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     const at: SheetLocation = { sheet: reference.name, part: reference.path }
 
     // The sheet points at its comments part through a relationship. Found once, it
-    // gives both what a cell reports and whether a new comment may be added: a
-    // sheet that already carries comments is refused, since merging into its part
-    // would rebuild the rich text it holds as plain words.
+    // gives what each cell reports and which cells are already taken, so a second
+    // comment on one of them is refused rather than rebuilding its rich text.
     const existingCommentsPath = (() => {
       const relsXml = partText(container, relationshipsPathFor(reference.path))
       if (relsXml === undefined) return undefined
@@ -1245,14 +1251,14 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             { ...at, reference: cellReference },
           )
         }
-        if (existingCommentsPath !== undefined) {
+        const canonical = formatReference(parseWritableReference(cellReference))
+        if (commentsRead.has(canonical)) {
           throw new XlsxError(
             'unsupported-edit',
-            `Sheet ${reference.name} already carries comments, which this does not add to yet`,
-            { ...at },
+            `Cell ${canonical} on sheet ${reference.name} already carries a comment, which this does not replace`,
+            { ...at, reference: canonical },
           )
         }
-        const canonical = formatReference(parseWritableReference(cellReference))
         const notes = sheetComments.get(reference.path) ?? new Map<string, string>()
         notes.set(canonical, text)
         sheetComments.set(reference.path, notes)
@@ -1758,34 +1764,31 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     // Comments go in two parts, wired to the sheet and declared in the content
     // types. The comments part holds the text; a legacy VML drawing holds the box
     // Excel draws for each note, without which the note is stored but never shown.
-    // Only sheets that had none reach here, so fresh parts are opened; each number
-    // skips any the package or this run already uses. The rels are read from what
-    // a hyperlink write may have just changed.
+    // A sheet with no comments yet opens fresh parts, their numbers skipping any
+    // the package or this run already uses; a sheet that already has some has the
+    // new notes and their shapes spliced into its parts, so the rich text already
+    // there survives untouched. A cell that already carries a comment is refused
+    // at the call, not here. The rels are read from what a hyperlink write may
+    // have just changed.
+    const relationshipTarget = (
+      relsXml: string | undefined,
+      sheetPath: string,
+      type: string,
+    ): string | undefined => {
+      if (relsXml === undefined) return undefined
+      for (const relationship of readRelationships(relsXml, sheetPath).values()) {
+        if (relationship.type === type && !relationship.external) {
+          return resolveTarget(sheetPath, relationship.target)
+        }
+      }
+      return undefined
+    }
     const commentParts: string[] = []
     const vmlDrawingParts: string[] = []
     let commentNumber = 0
     let vmlDrawingNumber = 0
     for (const [path, notes] of sheetComments) {
       if (removed.has(path) || notes.size === 0) continue
-      do {
-        commentNumber += 1
-      } while (
-        container.parts.has(`xl/comments${commentNumber}.xml`) ||
-        changes.has(`xl/comments${commentNumber}.xml`)
-      )
-      const commentsPath = `xl/comments${commentNumber}.xml`
-      changes.set(commentsPath, encoder.encode(buildCommentsPart(notes)))
-      commentParts.push(commentsPath)
-
-      do {
-        vmlDrawingNumber += 1
-      } while (
-        container.parts.has(`xl/drawings/vmlDrawing${vmlDrawingNumber}.vml`) ||
-        changes.has(`xl/drawings/vmlDrawing${vmlDrawingNumber}.vml`)
-      )
-      const vmlDrawingPath = `xl/drawings/vmlDrawing${vmlDrawingNumber}.vml`
-      changes.set(vmlDrawingPath, encoder.encode(buildVmlDrawing([...notes.keys()])))
-      vmlDrawingParts.push(vmlDrawingPath)
 
       const relationshipsPath = relationshipsPathFor(path)
       const pendingRels = changes.get(relationshipsPath)
@@ -1793,22 +1796,59 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         pendingRels === undefined || pendingRels === null
           ? partText(container, relationshipsPath)
           : decodePart.decode(pendingRels)
-      const withComments = withRelationship(
-        currentRels,
-        COMMENTS_RELATIONSHIP,
-        `../${commentsPath.slice('xl/'.length)}`,
-      )
-      const withVml = withRelationship(
-        withComments.xml,
-        VML_DRAWING_RELATIONSHIP,
-        `../${vmlDrawingPath.slice('xl/'.length)}`,
-      )
-      changes.set(relationshipsPath, encoder.encode(withVml.xml))
+      let relsXml = currentRels
 
-      const sheetXml = sheetTextNow(path)
-      if (sheetXml !== undefined) {
-        changes.set(path, encoder.encode(withLegacyDrawing(sheetXml, withVml.id)))
+      const existingComments = relationshipTarget(currentRels, path, COMMENTS_RELATIONSHIP)
+      if (existingComments === undefined) {
+        do {
+          commentNumber += 1
+        } while (
+          container.parts.has(`xl/comments${commentNumber}.xml`) ||
+          changes.has(`xl/comments${commentNumber}.xml`)
+        )
+        const commentsPath = `xl/comments${commentNumber}.xml`
+        changes.set(commentsPath, encoder.encode(buildCommentsPart(notes)))
+        commentParts.push(commentsPath)
+        relsXml = withRelationship(
+          relsXml,
+          COMMENTS_RELATIONSHIP,
+          `../${commentsPath.slice('xl/'.length)}`,
+        ).xml
+      } else {
+        const existing = partText(container, existingComments) ?? ''
+        changes.set(existingComments, encoder.encode(appendCommentsPart(existing, notes)))
       }
+
+      // A sheet's legacy drawing may hold shapes other than notes (form controls),
+      // so an existing one is appended to rather than replaced; only a sheet with
+      // none needs a drawing authored and pointed at by a fresh <legacyDrawing>.
+      const existingVml = relationshipTarget(currentRels, path, VML_DRAWING_RELATIONSHIP)
+      if (existingVml === undefined) {
+        do {
+          vmlDrawingNumber += 1
+        } while (
+          container.parts.has(`xl/drawings/vmlDrawing${vmlDrawingNumber}.vml`) ||
+          changes.has(`xl/drawings/vmlDrawing${vmlDrawingNumber}.vml`)
+        )
+        const vmlDrawingPath = `xl/drawings/vmlDrawing${vmlDrawingNumber}.vml`
+        changes.set(vmlDrawingPath, encoder.encode(buildVmlDrawing([...notes.keys()])))
+        vmlDrawingParts.push(vmlDrawingPath)
+        const withVml = withRelationship(
+          relsXml,
+          VML_DRAWING_RELATIONSHIP,
+          `../${vmlDrawingPath.slice('xl/'.length)}`,
+        )
+        relsXml = withVml.xml
+        const sheetXml = sheetTextNow(path)
+        if (sheetXml !== undefined) {
+          changes.set(path, encoder.encode(withLegacyDrawing(sheetXml, withVml.id)))
+        }
+      } else {
+        const existing = partText(container, existingVml) ?? ''
+        changes.set(existingVml, encoder.encode(appendVmlShapes(existing, [...notes.keys()])))
+      }
+
+      if (relsXml !== currentRels) changes.set(relationshipsPath, encoder.encode(relsXml ?? ''))
     }
 
     // Inserting or deleting a line moves references across the whole workbook. The

@@ -1,3 +1,4 @@
+import { XlsxError } from './errors.js'
 import { parseReference } from './reference.js'
 import { readXml } from './xml.js'
 
@@ -40,21 +41,19 @@ export function readComments(xml: string): ReadonlyMap<string, string> {
 
 const COMMENTS_NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
 
+// The text goes in an `<r>` run: a bare `<t>` is valid CT_Rst, but Excel and
+// other readers write and expect a run, and some drop the text of a runless one.
+const commentElement = (reference: string, text: string): string =>
+  `<comment ref="${reference}" authorId="0"><text>` +
+  `<r><t xml:space="preserve">${escapeXml(text)}</t></r></text></comment>`
+
 /**
  * Builds a fresh comments part. One empty author holds every note, since the
  * model carries a note's text but not who wrote it. `xml:space="preserve"` keeps
- * leading and trailing spaces a reader would otherwise trim. The text goes in an
- * `<r>` run: a bare `<t>` is valid CT_Rst, but Excel and other readers write and
- * expect a run, and some drop the text of a runless comment.
+ * leading and trailing spaces a reader would otherwise trim.
  */
 export function buildCommentsPart(entries: ReadonlyMap<string, string>): string {
-  const list = [...entries]
-    .map(
-      ([reference, text]) =>
-        `<comment ref="${reference}" authorId="0"><text>` +
-        `<r><t xml:space="preserve">${escapeXml(text)}</t></r></text></comment>`,
-    )
-    .join('')
+  const list = [...entries].map(([reference, text]) => commentElement(reference, text)).join('')
   return (
     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
     `<comments xmlns="${COMMENTS_NS}"><authors><author/></authors>` +
@@ -73,32 +72,78 @@ const VML_HEADER =
   '<v:path gradientshapeok="t" o:connecttype="rect"/></v:shapetype>'
 
 /**
+ * One note's box: a shape borrowing the shared `_x0000_t202` textbox type,
+ * hidden until the cell is hovered, anchored to the cell's zero-based row and
+ * column. The anchor's finer offsets are the defaults Excel writes; it recomputes
+ * them when it lays the note out. The shape id and z-index are passed in so a
+ * fresh drawing and one being appended to both stay collision-free.
+ */
+function noteShape(reference: string, shapeId: number, zIndex: number): string {
+  const { row, column } = parseReference(reference)
+  const cellRow = row - 1
+  const cellColumn = column - 1
+  const anchor = [cellColumn + 1, 15, cellRow, 2, cellColumn + 3, 15, cellRow + 4, 4].join(', ')
+  return (
+    `<v:shape id="_x0000_s${shapeId}" type="#_x0000_t202" ` +
+    'style="position:absolute;margin-left:60pt;margin-top:1.5pt;' +
+    `width:108pt;height:60pt;z-index:${zIndex};visibility:hidden" ` +
+    'fillcolor="#ffffe1" o:insetmode="auto"><v:fill color2="#ffffe1"/>' +
+    '<v:shadow on="t" color="black" obscured="t"/><v:path o:connecttype="none"/>' +
+    '<v:textbox style="mso-direction-alt:auto"><div style="text-align:left"/></v:textbox>' +
+    '<x:ClientData ObjectType="Note"><x:MoveWithCells/><x:SizeWithCells/>' +
+    `<x:Anchor>${anchor}</x:Anchor><x:AutoFill>False</x:AutoFill>` +
+    `<x:Row>${cellRow}</x:Row><x:Column>${cellColumn}</x:Column></x:ClientData></v:shape>`
+  )
+}
+
+/**
  * Builds the legacy VML drawing that gives each note its box. The text lives in
  * the comments part; the box's shape, position and size live here, and without
- * it Excel stores the note but draws nothing. Each shape borrows the shared
- * `_x0000_t202` textbox type, stays hidden until the cell is hovered, and
- * anchors to its cell's zero-based row and column. The anchor's finer offsets
- * are the defaults Excel writes; it recomputes them when it lays the note out.
+ * it Excel stores the note but draws nothing.
  */
 export function buildVmlDrawing(references: readonly string[]): string {
-  const shapes = references
-    .map((reference, index) => {
-      const { row, column } = parseReference(reference)
-      const cellRow = row - 1
-      const cellColumn = column - 1
-      const anchor = [cellColumn + 1, 15, cellRow, 2, cellColumn + 3, 15, cellRow + 4, 4].join(', ')
-      return (
-        `<v:shape id="_x0000_s${1025 + index}" type="#_x0000_t202" ` +
-        'style="position:absolute;margin-left:60pt;margin-top:1.5pt;' +
-        `width:108pt;height:60pt;z-index:${index + 1};visibility:hidden" ` +
-        'fillcolor="#ffffe1" o:insetmode="auto"><v:fill color2="#ffffe1"/>' +
-        '<v:shadow on="t" color="black" obscured="t"/><v:path o:connecttype="none"/>' +
-        '<v:textbox style="mso-direction-alt:auto"><div style="text-align:left"/></v:textbox>' +
-        '<x:ClientData ObjectType="Note"><x:MoveWithCells/><x:SizeWithCells/>' +
-        `<x:Anchor>${anchor}</x:Anchor><x:AutoFill>False</x:AutoFill>` +
-        `<x:Row>${cellRow}</x:Row><x:Column>${cellColumn}</x:Column></x:ClientData></v:shape>`
-      )
-    })
+  const shapes = references.map((reference, index) => noteShape(reference, 1025 + index, index + 1))
+  return `${VML_HEADER}${shapes.join('')}</xml>`
+}
+
+/**
+ * Splices more note shapes into an existing drawing, keeping its bytes and giving
+ * each new shape an id and z-index past the highest already there so nothing
+ * collides. Excel's shape-id block holds 1024 ids, plenty for the notes a splice
+ * adds, so the layout's id map is left as it is.
+ */
+export function appendVmlShapes(existingXml: string, references: readonly string[]): string {
+  let maxShapeId = 1024
+  for (const match of existingXml.matchAll(/_x0000_s(\d+)/g))
+    maxShapeId = Math.max(maxShapeId, Number(match[1]))
+  let maxZIndex = 0
+  for (const match of existingXml.matchAll(/z-index:(\d+)/g))
+    maxZIndex = Math.max(maxZIndex, Number(match[1]))
+  const shapes = references.map((reference, index) =>
+    noteShape(reference, maxShapeId + 1 + index, maxZIndex + 1 + index),
+  )
+  const close = existingXml.lastIndexOf('</xml>')
+  if (close === -1) {
+    throw new XlsxError('invalid-content', 'A legacy drawing part is malformed', {})
+  }
+  return existingXml.slice(0, close) + shapes.join('') + existingXml.slice(close)
+}
+
+/**
+ * Splices more comments into an existing part, keeping its bytes so the rich text
+ * the notes already hold survives untouched. New notes take the first author, the
+ * one every comments part carries.
+ */
+export function appendCommentsPart(
+  existingXml: string,
+  entries: ReadonlyMap<string, string>,
+): string {
+  const additions = [...entries]
+    .map(([reference, text]) => commentElement(reference, text))
     .join('')
-  return `${VML_HEADER}${shapes}</xml>`
+  const close = existingXml.indexOf('</commentList>')
+  if (close === -1) {
+    throw new XlsxError('invalid-content', 'A comments part is malformed', {})
+  }
+  return existingXml.slice(0, close) + additions + existingXml.slice(close)
 }
