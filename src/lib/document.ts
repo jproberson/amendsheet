@@ -36,8 +36,10 @@ import {
   readColumnWidths,
   readRowHeights,
   readSheetProtection,
+  readSheetView,
   sharedFormulaRefusal,
   type SheetIndex,
+  type SheetViewState,
   type SheetLocation,
   type SheetProtection,
 } from './patch.js'
@@ -204,6 +206,22 @@ export interface Worksheet {
   protect(options?: SheetProtection): void
   /** Removes worksheet protection, if the sheet had any. */
   unprotect(): void
+  /** Whether the sheet shows gridlines. On unless a `showGridlines(false)` or the
+   * file turned them off. */
+  readonly gridlinesVisible: boolean
+  /** Whether the sheet shows row and column headings. On by the same terms as
+   * `gridlinesVisible`. */
+  readonly headingsVisible: boolean
+  /** The sheet's zoom as a whole percentage, or undefined at the default 100. */
+  readonly zoomPercent: number | undefined
+  /** The cell below-and-right of the frozen rows and columns, like `freeze` takes,
+   * or undefined when the sheet is not frozen. */
+  readonly frozenAt: string | undefined
+  /** The tab colour as the 8-digit ARGB hex the file stores, or undefined for no
+   * colour or one given as a theme or indexed reference this does not resolve. */
+  readonly tabColorHex: string | undefined
+  /** The sheet's auto-filter range, or undefined when it has none. */
+  readonly autoFilterRange: string | undefined
   /**
    * The ranges the sheet merges, each as `A1:B2`, the file's own plus any added
    * this session with `merge`. Reflects the file as read; a shift from inserting
@@ -819,6 +837,14 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     // Read on first use from the same bytes the cells stream from, and memoised;
     // unlike comments this parses the whole sheet, so a workbook whose cells are
     // never read does not pay for it.
+    let viewCache: SheetViewState | undefined
+    const viewState = (): SheetViewState => {
+      if (viewCache === undefined) {
+        viewCache =
+          sheetBytes === undefined ? { gridlines: true, headings: true } : readSheetView(sheetBytes)
+      }
+      return viewCache
+    }
     let rowHeightsCache: ReadonlyMap<number, number> | undefined
     let columnWidthsCache: readonly { min: number; max: number; width: number }[] | undefined
     let hyperlinksCache: ReadonlyMap<string, Hyperlink> | undefined
@@ -1156,6 +1182,24 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             `${merge.anchor}:${formatReference({ row: merge.maxRow, column: merge.maxColumn })}`,
         )
         return [...new Set([...fromFile, ...(sheetMerges.get(reference.path) ?? [])])]
+      },
+      get gridlinesVisible(): boolean {
+        return sheetGridlines.get(reference.path) ?? viewState().gridlines
+      },
+      get headingsVisible(): boolean {
+        return sheetHeadings.get(reference.path) ?? viewState().headings
+      },
+      get zoomPercent(): number | undefined {
+        return sheetZoom.get(reference.path) ?? viewState().zoom
+      },
+      get frozenAt(): string | undefined {
+        return sheetFreezes.get(reference.path) ?? viewState().frozen
+      },
+      get tabColorHex(): string | undefined {
+        return sheetTabColors.get(reference.path) ?? viewState().tabColor
+      },
+      get autoFilterRange(): string | undefined {
+        return sheetAutoFilters.get(reference.path) ?? viewState().autoFilter
       },
       rowHeight(row: number): number | undefined {
         const pending = sheetRowHeights.get(reference.path)?.get(row)

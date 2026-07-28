@@ -130,6 +130,61 @@ export function readRowHeights(bytes: Uint8Array): ReadonlyMap<number, number> {
   return heights
 }
 
+/** A sheet's scalar display state, as the read accessors report it. */
+export interface SheetViewState {
+  readonly gridlines: boolean
+  readonly headings: boolean
+  readonly zoom?: number
+  readonly frozen?: string
+  readonly tabColor?: string
+  readonly autoFilter?: string
+}
+
+/**
+ * Reads a sheet's scalar display state in one pass: the primary view's gridlines,
+ * headings and zoom and its frozen corner, the tab colour from `sheetPr`, and the
+ * autoFilter range. Gridlines and headings default on, so a missing attribute
+ * reads as visible.
+ */
+export function readSheetView(bytes: Uint8Array): SheetViewState {
+  let gridlines = true
+  let headings = true
+  let zoom: number | undefined
+  let frozen: string | undefined
+  let tabColor: string | undefined
+  let autoFilter: string | undefined
+  let inFirstView = false
+  let doneFirstView = false
+  for (const event of readXmlBytes(bytes)) {
+    if (event.kind === 'close') {
+      if (event.localName === 'sheetView' && inFirstView) {
+        inFirstView = false
+        doneFirstView = true
+      }
+      continue
+    }
+    if (event.kind !== 'open') continue
+    if (event.localName === 'sheetView' && !doneFirstView) {
+      gridlines = event.attributes.get('showGridLines') !== '0'
+      headings = event.attributes.get('showRowColHeaders') !== '0'
+      const scale = event.attributes.get('zoomScale')
+      if (scale !== undefined && Number.isFinite(Number(scale))) zoom = Number(scale)
+      // A self-closing view has no pane and no close event to end its span.
+      if (event.selfClosing) doneFirstView = true
+      else inFirstView = true
+    } else if (event.localName === 'pane' && inFirstView && frozen === undefined) {
+      const state = event.attributes.get('state')
+      if (state === 'frozen' || state === 'frozenSplit')
+        frozen = event.attributes.get('topLeftCell')
+    } else if (event.localName === 'tabColor' && tabColor === undefined) {
+      tabColor = event.attributes.get('rgb')
+    } else if (event.localName === 'autoFilter' && autoFilter === undefined) {
+      autoFilter = event.attributes.get('ref')
+    }
+  }
+  return { gridlines, headings, zoom, frozen, tabColor, autoFilter }
+}
+
 /**
  * The column-width ranges a sheet stores, each width covering columns `min` to
  * `max`. Kept as ranges rather than expanded per column, since one `<col>` may

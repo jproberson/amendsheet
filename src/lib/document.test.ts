@@ -1210,6 +1210,45 @@ test('mergedRanges is empty for a sheet with no merges', () => {
   assert.deepEqual(sheet?.mergedRanges, [])
 })
 
+test('the view getters read the file', () => {
+  const sheet = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      sheetPr: '<sheetPr><tabColor rgb="FFFF0000"/></sheetPr>',
+      views:
+        '<sheetViews><sheetView showGridLines="0" showRowColHeaders="0" zoomScale="150">' +
+        '<pane xSplit="1" ySplit="1" topLeftCell="B2" state="frozen"/></sheetView></sheetViews>',
+      after: '<autoFilter ref="A1:C1"/>',
+    }),
+  ).sheets[0]
+  assert.equal(sheet?.gridlinesVisible, false)
+  assert.equal(sheet?.headingsVisible, false)
+  assert.equal(sheet?.zoomPercent, 150)
+  assert.equal(sheet?.frozenAt, 'B2')
+  assert.equal(sheet?.tabColorHex, 'FFFF0000')
+  assert.equal(sheet?.autoFilterRange, 'A1:C1')
+})
+
+test('the view getters default sensibly and reflect a pending change', () => {
+  const sheet = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>')).sheets[0]
+  assert.equal(sheet?.gridlinesVisible, true)
+  assert.equal(sheet?.headingsVisible, true)
+  assert.equal(sheet?.zoomPercent, undefined)
+  assert.equal(sheet?.frozenAt, undefined)
+  assert.equal(sheet?.tabColorHex, undefined)
+  assert.equal(sheet?.autoFilterRange, undefined)
+
+  sheet?.showGridlines(false)
+  sheet?.zoom(200)
+  sheet?.freeze('B2')
+  sheet?.tabColor('00FF00')
+  sheet?.autoFilter('A1:B2')
+  assert.equal(sheet?.gridlinesVisible, false)
+  assert.equal(sheet?.zoomPercent, 200)
+  assert.equal(sheet?.frozenAt, 'B2')
+  assert.equal(sheet?.tabColorHex, 'FF00FF00') // normalised to 8-digit ARGB
+  assert.equal(sheet?.autoFilterRange, 'A1:B2')
+})
+
 test('rowHeight and columnWidth read the file', () => {
   const sheet = readWorkbook(
     build('<row r="1" ht="30" customHeight="1"><c r="A1"><v>1</v></c></row>', {
@@ -2693,6 +2732,8 @@ test('refuses a write to a sheet whose part is not in the package', () => {
   assert.deepEqual(workbook.sheets[0]?.mergedRanges, []) // no bytes to read merges from
   assert.equal(workbook.sheets[0]?.rowHeight(1), undefined)
   assert.equal(workbook.sheets[0]?.columnWidth('A'), undefined)
+  assert.equal(workbook.sheets[0]?.gridlinesVisible, true) // default, no bytes to read
+  assert.equal(workbook.sheets[0]?.zoomPercent, undefined)
   assert.throws(
     () => workbook.sheets[0]?.protect(),
     (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',

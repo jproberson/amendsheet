@@ -11,6 +11,7 @@ import {
   readColumnWidths,
   readRowHeights,
   readSheetProtection,
+  readSheetView,
 } from './patch.js'
 import { XlsxError } from './errors.js'
 
@@ -881,4 +882,35 @@ test('readColumnWidths reads width ranges and skips a col without a width or wit
       '</cols><sheetData/></worksheet>',
   )
   assert.deepEqual(readColumnWidths(bytes), [{ min: 1, max: 3, width: 10 }])
+})
+
+test('readSheetView reads gridlines, headings, zoom, freeze, tab colour and autoFilter', () => {
+  const bytes = encode(
+    '<worksheet><sheetPr><tabColor rgb="FFFF0000"/></sheetPr>' +
+      '<sheetViews><sheetView showGridLines="0" showRowColHeaders="0" zoomScale="150">' +
+      '<pane xSplit="1" ySplit="1" topLeftCell="B2" state="frozen"/></sheetView></sheetViews>' +
+      '<sheetData/><autoFilter ref="A1:C1"/></worksheet>',
+  )
+  const view = readSheetView(bytes)
+  assert.equal(view.gridlines, false)
+  assert.equal(view.headings, false)
+  assert.equal(view.zoom, 150)
+  assert.equal(view.frozen, 'B2')
+  assert.equal(view.tabColor, 'FFFF0000')
+  assert.equal(view.autoFilter, 'A1:C1')
+})
+
+test('readSheetView defaults gridlines and headings on and reads only the first view', () => {
+  const bytes = encode(
+    '<worksheet><sheetViews>' +
+      '<sheetView zoomScale="x"/><sheetView showGridLines="0"/>' + // second view ignored; bad zoom dropped
+      '</sheetViews><sheetData/></worksheet>',
+  )
+  const view = readSheetView(bytes)
+  assert.equal(view.gridlines, true)
+  assert.equal(view.headings, true)
+  assert.equal(view.zoom, undefined)
+  assert.equal(view.frozen, undefined)
+  assert.equal(view.tabColor, undefined)
+  assert.equal(view.autoFilter, undefined)
 })
