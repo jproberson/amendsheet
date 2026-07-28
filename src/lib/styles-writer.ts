@@ -209,6 +209,24 @@ export function ensureDxf(stylesXml: string, fill: string): DateStyle {
   return { xml: `${head}${body}${dxf}${stylesXml.slice(table.insertAt)}`, index }
 }
 
+/**
+ * The solid fill colour a dxf holds, by index, as the ARGB hex `ensureDxf` wrote
+ * it — read back for a conditional format's highlight. The colour lives in
+ * `bgColor`. Undefined when the index is absent or the fill names a colour other
+ * than a plain rgb, which this does not resolve.
+ */
+export function readDxfFill(stylesXml: string, index: number): string | undefined {
+  const dxf = readTable(stylesXml, 'dxfs', 'dxf')?.elements[index]
+  if (dxf === undefined) return undefined
+  for (const event of readXml(dxf)) {
+    if (event.kind === 'open' && event.localName === 'bgColor') {
+      const rgb = event.attributes.get('rgb')
+      if (rgb !== undefined) return rgb
+    }
+  }
+  return undefined
+}
+
 const DEFAULT_XF = '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
 
 /** The parts of a cell format this library sets, each with its `apply*` flag. */

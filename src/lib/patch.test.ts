@@ -10,6 +10,7 @@ import {
   patchSheet as patchSheetBytes,
   readColumnGroupLevels,
   readColumnWidths,
+  readConditionalFormats,
   readDataValidations,
   readHiddenColumns,
   readHiddenRows,
@@ -972,4 +973,32 @@ test('readDataValidations reads type, sqref, allowBlank and formulas, skipping t
     formula2: '10',
   })
   assert.equal(specs[2]?.sqref, 'C1') // kept even with an empty formula
+})
+
+test('readConditionalFormats reads colour scales, cellIs and data bars', () => {
+  const bytes = encode(
+    '<worksheet><sheetData/>' +
+      '<conditionalFormatting sqref="A1:A9"><cfRule type="colorScale" priority="1"><colorScale>' +
+      '<cfvo type="min"/><cfvo type="percentile" val="50"/><cfvo type="max"/>' +
+      '<color rgb="FFF8696B"/><color rgb="FFFFEB84"/><color rgb="FF63BE7B"/></colorScale></cfRule></conditionalFormatting>' +
+      '<conditionalFormatting sqref="B1"><cfRule type="cellIs" operator="between" dxfId="3" priority="2">' +
+      '<formula>1</formula><formula>10</formula></cfRule></conditionalFormatting>' +
+      '<conditionalFormatting sqref="C1:C5"><cfRule type="dataBar" priority="3"><dataBar>' +
+      '<cfvo type="min"/><cfvo type="max"/><color rgb="FF638EC6"/></dataBar></cfRule></conditionalFormatting>' +
+      '</worksheet>',
+  )
+  const specs = readConditionalFormats(bytes)
+  assert.deepEqual(specs[0], {
+    kind: 'colorScale',
+    sqref: 'A1:A9',
+    colors: ['FFF8696B', 'FFFFEB84', 'FF63BE7B'],
+  })
+  assert.deepEqual(specs[1], {
+    kind: 'cellIs',
+    sqref: 'B1',
+    operator: 'between',
+    formulas: ['1', '10'],
+    dxfId: 3,
+  })
+  assert.deepEqual(specs[2], { kind: 'dataBar', sqref: 'C1:C5', color: 'FF638EC6' })
 })

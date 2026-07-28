@@ -1067,6 +1067,82 @@ export type ConditionalFormatSpec =
     }
   | { readonly kind: 'dataBar'; readonly sqref: string; readonly color: string }
 
+/**
+ * Reads a sheet's conditional formats into the same specs they are written from.
+ * A `cellIs` carries the `dxfId` of its highlight, which the caller resolves to a
+ * colour against the styles. A rule whose kind or shape this does not model — a
+ * colour scale that is not two or three stops, a theme-coloured stop — is skipped.
+ */
+export function readConditionalFormats(bytes: Uint8Array): ConditionalFormatSpec[] {
+  const specs: ConditionalFormatSpec[] = []
+  let sqref: string | undefined
+  let type: string | undefined
+  let operator: string | undefined
+  let dxfId: number | undefined
+  let formulas: string[] = []
+  let colors: string[] = []
+  let barColor: string | undefined
+  let inColorScale = false
+  let inDataBar = false
+  let captureFormula = false
+  let formulaText = ''
+  const flush = () => {
+    // A colour scale is pushed with whatever rgb stops it had; the caller validates
+    // the count, so a scale with a theme-coloured stop is dropped there, not here.
+    if (sqref !== undefined && type === 'colorScale') {
+      specs.push({ kind: 'colorScale', sqref, colors: [...colors] })
+    } else if (sqref !== undefined && type === 'dataBar' && barColor !== undefined) {
+      specs.push({ kind: 'dataBar', sqref, color: barColor })
+    } else if (
+      sqref !== undefined &&
+      type === 'cellIs' &&
+      operator !== undefined &&
+      dxfId !== undefined &&
+      formulas.length > 0
+    ) {
+      specs.push({ kind: 'cellIs', sqref, operator, formulas: [...formulas], dxfId })
+    }
+    type = undefined
+    operator = undefined
+    dxfId = undefined
+    formulas = []
+    colors = []
+    barColor = undefined
+    inColorScale = false
+    inDataBar = false
+  }
+  for (const event of readXmlBytes(bytes)) {
+    if (event.kind === 'open') {
+      if (event.localName === 'conditionalFormatting') sqref = event.attributes.get('sqref')
+      else if (event.localName === 'cfRule') {
+        type = event.attributes.get('type')
+        operator = event.attributes.get('operator')
+        const dxf = event.attributes.get('dxfId')
+        dxfId = dxf !== undefined && Number.isInteger(Number(dxf)) ? Number(dxf) : undefined
+      } else if (event.localName === 'colorScale') inColorScale = true
+      else if (event.localName === 'dataBar') inDataBar = true
+      else if (event.localName === 'color') {
+        const rgb = event.attributes.get('rgb')
+        if (rgb !== undefined && inColorScale) colors.push(rgb)
+        else if (rgb !== undefined && inDataBar && barColor === undefined) barColor = rgb
+      } else if (event.localName === 'formula') {
+        captureFormula = true
+        formulaText = ''
+      }
+    } else if (event.kind === 'text' && captureFormula) {
+      formulaText += event.text
+    } else if (event.kind === 'close') {
+      if (event.localName === 'formula' && captureFormula) {
+        formulas.push(formulaText)
+        captureFormula = false
+      } else if (event.localName === 'colorScale') inColorScale = false
+      else if (event.localName === 'dataBar') inDataBar = false
+      else if (event.localName === 'cfRule') flush()
+    }
+  }
+  return specs
+}
+
 function conditionalFormattingElement(
   spec: ConditionalFormatSpec,
   priority: number,

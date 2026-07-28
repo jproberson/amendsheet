@@ -35,6 +35,7 @@ import {
   indexSheet,
   readColumnGroupLevels,
   readColumnWidths,
+  readConditionalFormats,
   readDataValidations,
   readHiddenColumns,
   readHiddenRows,
@@ -81,6 +82,7 @@ import {
   ensureNumberFormat,
   ensureProtectionStyle,
   normalizeColor,
+  readDxfFill,
   readFormatting,
 } from './styles-writer.js'
 import { type ShiftSpec, shiftDefinedNames } from './shift.js'
@@ -262,6 +264,16 @@ export interface Worksheet {
    * already has, and is written by `toBytes()`.
    */
   conditionalFormat(range: string, rule: ConditionalFormat): void
+  /**
+   * The conditional formats in force, each with the range it covers, the file's
+   * own plus any added this session. A rule of a kind this does not model — a
+   * colour scale with a theme-coloured stop, a `cellIs` whose highlight is not a
+   * plain colour — is left out.
+   */
+  readonly conditionalFormats: readonly {
+    readonly range: string
+    readonly rule: ConditionalFormat
+  }[]
   /**
    * Attaches a comment to a cell, written by `toBytes()`. A sheet that already
    * has comments is added to in place, its existing rich text kept. Refused with
@@ -709,6 +721,28 @@ function validationFromSpec(spec: DataValidationSpec): DataValidation | undefine
   return undefined
 }
 
+/** A stored conditional-format spec back into the public rule, or undefined for
+ * one this does not model: a colour scale short of two rgb stops, a `cellIs` whose
+ * comparison or highlight colour cannot be recovered. `stylesXml` resolves the
+ * highlight the `cellIs` names by its dxf index. */
+function conditionalFormatFromSpec(
+  spec: ConditionalFormatSpec,
+  stylesXml: string | undefined,
+): ConditionalFormat | undefined {
+  if (spec.kind === 'dataBar') return { dataBar: { color: spec.color } }
+  if (spec.kind === 'colorScale') {
+    const [min, second, third] = spec.colors
+    if (min === undefined || second === undefined) return undefined
+    return third === undefined
+      ? { colorScale: { min, max: second } }
+      : { colorScale: { min, mid: second, max: third } }
+  }
+  const when = comparisonToConstraint(spec.operator, spec.formulas[0] ?? '', spec.formulas[1])
+  if (when === undefined) return undefined
+  const fill = stylesXml === undefined ? undefined : readDxfFill(stylesXml, spec.dxfId)
+  return fill === undefined ? undefined : { cellIs: { when, fill } }
+}
+
 function checkOutlineLevel(level: number, at: SheetLocation): void {
   if (!Number.isInteger(level) || level < 1 || level > 7) {
     throw new XlsxError('unwritable-value', `Outline level ${level} is not between 1 and 7`, {
@@ -933,6 +967,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     let rowGroupsCache: ReadonlyMap<number, number> | undefined
     let columnGroupsCache: readonly { min: number; max: number; level: number }[] | undefined
     let validationsCache: readonly DataValidationSpec[] | undefined
+    let conditionalFormatsCache: readonly ConditionalFormatSpec[] | undefined
     let hyperlinksCache: ReadonlyMap<string, Hyperlink> | undefined
     const hyperlinksFor = (bytes: Uint8Array): ReadonlyMap<string, Hyperlink> => {
       if (hyperlinksCache === undefined) {
@@ -1294,6 +1329,22 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         const applied: { range: string; rule: DataValidation }[] = []
         for (const spec of [...validationsCache, ...(sheetValidations.get(reference.path) ?? [])]) {
           const rule = validationFromSpec(spec)
+          if (rule !== undefined) applied.push({ range: spec.sqref, rule })
+        }
+        return applied
+      },
+      get conditionalFormats(): readonly {
+        readonly range: string
+        readonly rule: ConditionalFormat
+      }[] {
+        if (conditionalFormatsCache === undefined) {
+          conditionalFormatsCache =
+            sheetBytes === undefined ? [] : readConditionalFormats(sheetBytes)
+        }
+        const applied: { range: string; rule: ConditionalFormat }[] = []
+        const pending = sheetConditionalFormats.get(reference.path) ?? []
+        for (const spec of [...conditionalFormatsCache, ...pending]) {
+          const rule = conditionalFormatFromSpec(spec, workingStyles)
           if (rule !== undefined) applied.push({ range: spec.sqref, rule })
         }
         return applied

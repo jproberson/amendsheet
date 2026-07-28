@@ -1280,6 +1280,42 @@ test('a list validation naming no values reads as an empty list', () => {
   assert.deepEqual(sheet?.validations, [{ range: 'A1', rule: { allowBlank: false, list: [] } }])
 })
 
+test('conditionalFormats round-trip colour scales, cellIs and data bars', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  const sheet = workbook.sheets[0]
+  sheet?.conditionalFormat('A1:A9', { colorScale: { min: 'FF0000', max: '00FF00' } })
+  sheet?.conditionalFormat('B1:B9', { colorScale: { min: 'FF0000', mid: 'FFFF00', max: '00FF00' } })
+  sheet?.conditionalFormat('C1', { cellIs: { when: { greaterThan: 5 }, fill: 'FFFF00' } })
+  sheet?.conditionalFormat('D1:D9', { dataBar: { color: '638EC6' } })
+  const back = readWorkbook(workbook.toBytes()).sheets[0]
+  assert.deepEqual(back?.conditionalFormats, [
+    { range: 'A1:A9', rule: { colorScale: { min: 'FFFF0000', max: 'FF00FF00' } } },
+    { range: 'B1:B9', rule: { colorScale: { min: 'FFFF0000', mid: 'FFFFFF00', max: 'FF00FF00' } } },
+    { range: 'C1', rule: { cellIs: { when: { greaterThan: 5 }, fill: 'FFFFFF00' } } },
+    { range: 'D1:D9', rule: { dataBar: { color: 'FF638EC6' } } },
+  ])
+})
+
+test('conditionalFormats reflect pending and skip kinds not modelled', () => {
+  const sheet = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      after:
+        '<conditionalFormatting sqref="A1"><cfRule type="colorScale"><colorScale>' +
+        '<cfvo type="min"/><cfvo type="max"/><color theme="4"/><color theme="5"/></colorScale></cfRule></conditionalFormatting>' +
+        '<conditionalFormatting sqref="B1"><cfRule type="colorScale"><colorScale>' +
+        '<cfvo type="min"/><cfvo type="max"/><color rgb="FFFF0000"/><color theme="5"/></colorScale></cfRule></conditionalFormatting>' +
+        '<conditionalFormatting sqref="C1"><cfRule type="cellIs" operator="equal" dxfId="99"><formula>1</formula></cfRule></conditionalFormatting>' +
+        '<conditionalFormatting sqref="D1"><cfRule type="cellIs" operator="wonky" dxfId="0"><formula>1</formula></cfRule></conditionalFormatting>',
+    }),
+  ).sheets[0]
+  // Theme-only stops, one rgb stop, a missing dxf and an unknown operator are all left out.
+  assert.deepEqual(sheet?.conditionalFormats, [])
+  sheet?.conditionalFormat('E1:E9', { dataBar: { color: '000000' } })
+  assert.deepEqual(sheet?.conditionalFormats, [
+    { range: 'E1:E9', rule: { dataBar: { color: 'FF000000' } } },
+  ])
+})
+
 test('the view getters read the file', () => {
   const sheet = readWorkbook(
     build('<row r="1"><c r="A1"><v>1</v></c></row>', {
@@ -2841,6 +2877,7 @@ test('refuses a write to a sheet whose part is not in the package', () => {
   assert.equal(workbook.sheets[0]?.rowGroupLevel(1), 0)
   assert.equal(workbook.sheets[0]?.columnGroupLevel('A'), 0)
   assert.deepEqual(workbook.sheets[0]?.validations, [])
+  assert.deepEqual(workbook.sheets[0]?.conditionalFormats, [])
   assert.throws(
     () => workbook.sheets[0]?.protect(),
     (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
