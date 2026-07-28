@@ -233,6 +233,41 @@ export function readHiddenColumns(bytes: Uint8Array): readonly { min: number; ma
   return ranges
 }
 
+/** The outline level of each grouped row, one-based row to level (1 or more). */
+export function readRowGroupLevels(bytes: Uint8Array): ReadonlyMap<number, number> {
+  const levels = new Map<number, number>()
+  for (const event of readXmlBytes(bytes)) {
+    if (event.kind !== 'open' || event.localName !== 'row') continue
+    const stored = event.attributes.get('outlineLevel')
+    if (stored === undefined) continue
+    const number = Number(event.attributes.get('r'))
+    const level = Number(stored)
+    if (Number.isInteger(number) && number >= 1 && Number.isInteger(level) && level > 0) {
+      levels.set(number, level)
+    }
+  }
+  return levels
+}
+
+/** The outline level of each grouped column range, covering columns `min` to `max`. */
+export function readColumnGroupLevels(
+  bytes: Uint8Array,
+): readonly { min: number; max: number; level: number }[] {
+  const ranges: { min: number; max: number; level: number }[] = []
+  for (const event of readXmlBytes(bytes)) {
+    if (event.kind !== 'open' || event.localName !== 'col') continue
+    const stored = event.attributes.get('outlineLevel')
+    if (stored === undefined) continue
+    const min = Number(event.attributes.get('min'))
+    const max = Number(event.attributes.get('max'))
+    const level = Number(stored)
+    if (Number.isInteger(min) && Number.isInteger(max) && Number.isInteger(level) && level > 0) {
+      ranges.push({ min, max, level })
+    }
+  }
+  return ranges
+}
+
 /** Element content only. Quotes need no escaping there, and Excel leaves them. */
 const escapeXml = (text: string) =>
   text

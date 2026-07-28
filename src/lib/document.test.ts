@@ -1262,6 +1262,22 @@ test('rowHeight and columnWidth read the file', () => {
   assert.equal(sheet?.columnWidth('C'), undefined)
 })
 
+test('rowGroupLevel and columnGroupLevel read the file and a pending group', () => {
+  const sheet = readWorkbook(
+    build('<row r="1" outlineLevel="2"><c r="A1"><v>1</v></c></row>', {
+      views: '<cols><col min="2" max="3" outlineLevel="1"/></cols>',
+    }),
+  ).sheets[0]
+  assert.equal(sheet?.rowGroupLevel(1), 2)
+  assert.equal(sheet?.rowGroupLevel(2), 0)
+  assert.equal(sheet?.columnGroupLevel('B'), 1)
+  assert.equal(sheet?.columnGroupLevel('A'), 0)
+  sheet?.groupRows(5, 6)
+  sheet?.groupColumns('D', 'E')
+  assert.equal(sheet?.rowGroupLevel(5), 1)
+  assert.equal(sheet?.columnGroupLevel('D'), 1)
+})
+
 test('isRowHidden and isColumnHidden read the file and a pending hide', () => {
   const sheet = readWorkbook(
     build('<row r="1" hidden="1"><c r="A1"><v>1</v></c></row>', {
@@ -2752,6 +2768,8 @@ test('refuses a write to a sheet whose part is not in the package', () => {
   assert.equal(workbook.sheets[0]?.zoomPercent, undefined)
   assert.equal(workbook.sheets[0]?.isRowHidden(1), false)
   assert.equal(workbook.sheets[0]?.isColumnHidden('A'), false)
+  assert.equal(workbook.sheets[0]?.rowGroupLevel(1), 0)
+  assert.equal(workbook.sheets[0]?.columnGroupLevel('A'), 0)
   assert.throws(
     () => workbook.sheets[0]?.protect(),
     (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',

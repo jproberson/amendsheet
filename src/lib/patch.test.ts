@@ -8,9 +8,11 @@ import {
   indexSheet,
   mergeRangeReference,
   patchSheet as patchSheetBytes,
+  readColumnGroupLevels,
   readColumnWidths,
   readHiddenColumns,
   readHiddenRows,
+  readRowGroupLevels,
   readRowHeights,
   readSheetProtection,
   readSheetView,
@@ -926,4 +928,16 @@ test('readHiddenRows and readHiddenColumns read the hidden flag', () => {
   assert.equal(rows.has(1), true)
   assert.equal(rows.has(2), false)
   assert.deepEqual(readHiddenColumns(bytes), [{ min: 2, max: 3 }])
+})
+
+test('readRowGroupLevels and readColumnGroupLevels read outlineLevel, skipping zero', () => {
+  const bytes = encode(
+    '<worksheet><cols><col min="2" max="3" outlineLevel="2"/><col min="5" max="5" outlineLevel="0"/></cols>' +
+      '<sheetData><row r="1" outlineLevel="1"/><row r="2"/><row r="3" outlineLevel="0"/></sheetData></worksheet>',
+  )
+  const rows = readRowGroupLevels(bytes)
+  assert.equal(rows.get(1), 1)
+  assert.equal(rows.has(2), false)
+  assert.equal(rows.has(3), false)
+  assert.deepEqual(readColumnGroupLevels(bytes), [{ min: 2, max: 3, level: 2 }])
 })

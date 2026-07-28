@@ -33,9 +33,11 @@ import {
   mergeRefusal,
   patchSheet,
   indexSheet,
+  readColumnGroupLevels,
   readColumnWidths,
   readHiddenColumns,
   readHiddenRows,
+  readRowGroupLevels,
   readRowHeights,
   readSheetProtection,
   readSheetView,
@@ -282,6 +284,12 @@ export interface Worksheet {
    * level, on the same terms as `groupRows`.
    */
   groupColumns(from: string, to: string, level?: number): void
+  /** The outline level a row sits at, 1 or more, or 0 when it is not grouped. In
+   * the file or by a `groupRows` this session. The row is one-based. */
+  rowGroupLevel(row: number): number
+  /** The outline level a column sits at, or 0 when it is not grouped, by the same
+   * terms as `rowGroupLevel`. The column is a letter like `A`. */
+  columnGroupLevel(column: string): number
   /**
    * Freezes the rows above and the columns left of `cell`, so they stay in view
    * when the sheet is scrolled. `freeze('B2')` freezes row 1 and column A.
@@ -856,6 +864,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     let columnWidthsCache: readonly { min: number; max: number; width: number }[] | undefined
     let hiddenRowsCache: ReadonlySet<number> | undefined
     let hiddenColumnsCache: readonly { min: number; max: number }[] | undefined
+    let rowGroupsCache: ReadonlyMap<number, number> | undefined
+    let columnGroupsCache: readonly { min: number; max: number; level: number }[] | undefined
     let hyperlinksCache: ReadonlyMap<string, Hyperlink> | undefined
     const hyperlinksFor = (bytes: Uint8Array): ReadonlyMap<string, Hyperlink> => {
       if (hyperlinksCache === undefined) {
@@ -1237,6 +1247,23 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         if (sheetBytes === undefined) return false
         hiddenColumnsCache ??= readHiddenColumns(sheetBytes)
         return hiddenColumnsCache.some((range) => index >= range.min && index <= range.max)
+      },
+      rowGroupLevel(row: number): number {
+        const pending = sheetRowGroups.get(reference.path)?.get(row)
+        if (pending !== undefined) return pending
+        if (sheetBytes === undefined) return 0
+        rowGroupsCache ??= readRowGroupLevels(sheetBytes)
+        return rowGroupsCache.get(row) ?? 0
+      },
+      columnGroupLevel(column: string): number {
+        const index = columnToIndex(column)
+        const pending = sheetColGroups.get(reference.path)?.get(index)
+        if (pending !== undefined) return pending
+        if (sheetBytes === undefined) return 0
+        columnGroupsCache ??= readColumnGroupLevels(sheetBytes)
+        return (
+          columnGroupsCache.find((range) => index >= range.min && index <= range.max)?.level ?? 0
+        )
       },
       cells: () => readCells(),
       cell(cellReference: string): Cell | undefined {
