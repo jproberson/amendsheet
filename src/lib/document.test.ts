@@ -1252,17 +1252,15 @@ test('validations reflect a pending validate and skip a kind not modelled', () =
   const sheet = readWorkbook(
     build('<row r="1"><c r="A1"><v>1</v></c></row>', {
       after:
-        '<dataValidations count="5">' +
-        '<dataValidation type="date" operator="lessThan" sqref="A1"><formula1>40000</formula1></dataValidation>' +
-        '<dataValidation type="list" sqref="B1"><formula1>Sheet1!$A$1:$A$3</formula1></dataValidation>' +
+        '<dataValidations count="4">' +
+        '<dataValidation type="time" operator="lessThan" sqref="A1"><formula1>0.5</formula1></dataValidation>' +
         '<dataValidation type="whole" operator="wonky" sqref="C1"><formula1>1</formula1></dataValidation>' +
         '<dataValidation type="whole" operator="equal" sqref="D1"><formula1>abc</formula1></dataValidation>' +
         '<dataValidation type="whole" operator="between" sqref="E1"><formula1>1</formula1><formula2>x</formula2></dataValidation>' +
         '</dataValidations>',
     }),
   ).sheets[0]
-  // A date, a range-backed list, an unknown operator and non-numeric bounds
-  // are all left out.
+  // A time, an unknown operator and non-numeric bounds are all left out.
   assert.deepEqual(sheet?.validations, [])
   sheet?.validate('F1', { whole: { equal: 7 } })
   assert.deepEqual(sheet?.validations, [
@@ -1280,6 +1278,51 @@ test('validations round-trip textLength and custom rules', () => {
     { range: 'A1', rule: { allowBlank: true, textLength: { lessThanOrEqual: 10 } } },
     { range: 'B1', rule: { allowBlank: false, custom: 'LEN(B1)>3' } }, // formula's > survives escaping
   ])
+})
+
+test('validations round-trip a range-backed list and a date rule', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  const sheet = workbook.sheets[0]
+  sheet?.validate('A1', { listRange: 'Sheet1!$A$1:$A$3' })
+  sheet?.validate('B1', {
+    date: { between: [new Date(Date.UTC(2020, 0, 1)), new Date(Date.UTC(2020, 11, 31))] },
+  })
+  const back = readWorkbook(workbook.toBytes()).sheets[0]
+  assert.deepEqual(back?.validations, [
+    { range: 'A1', rule: { allowBlank: true, listRange: 'Sheet1!$A$1:$A$3' } },
+    {
+      range: 'B1',
+      rule: {
+        allowBlank: true,
+        date: { between: [new Date(Date.UTC(2020, 0, 1)), new Date(Date.UTC(2020, 11, 31))] },
+      },
+    },
+  ])
+})
+
+test('validations round-trip every date operator', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  const sheet = workbook.sheets[0]
+  const day = (n: number) => new Date(Date.UTC(2020, 0, n))
+  const dates = [
+    { equal: day(1) },
+    { notEqual: day(2) },
+    { greaterThan: day(3) },
+    { lessThan: day(4) },
+    { greaterThanOrEqual: day(5) },
+    { lessThanOrEqual: day(6) },
+    { between: [day(7), day(8)] as [Date, Date] },
+    { notBetween: [day(9), day(10)] as [Date, Date] },
+  ]
+  const refs = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7', 'A8']
+  dates.forEach((date, i) => {
+    sheet?.validate(refs[i] ?? 'A1', { date })
+  })
+  const back = readWorkbook(workbook.toBytes()).sheets[0]
+  assert.deepEqual(
+    back?.validations.map((v) => v.rule),
+    dates.map((date) => ({ allowBlank: true, date })),
+  )
 })
 
 test('a list validation naming no values reads as an empty list', () => {

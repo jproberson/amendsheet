@@ -245,18 +245,18 @@ export interface Worksheet {
   /** Sets the sheet's auto-filter over a range, replacing any it already has. */
   autoFilter(range: string): void
   /**
-   * Adds a data validation over a cell or range. `{ list }` offers its values as a
-   * dropdown (no value may hold a comma, the inline list's separator); `{ whole }`,
-   * `{ decimal }` and `{ textLength }` constrain a number, a decimal or the text
-   * length against a comparison; `{ custom }` requires a formula. Joins any the
-   * sheet already has. Written by `toBytes()`.
+   * Adds a data validation over a cell or range. `{ list }` offers inline values as
+   * a dropdown (no value may hold a comma, the inline list's separator) and
+   * `{ listRange }` reads them from a range; `{ whole }`, `{ decimal }` and
+   * `{ textLength }` constrain a number, a decimal or the text length against a
+   * comparison, `{ date }` a date against `Date` bounds; `{ custom }` requires a
+   * formula. Joins any the sheet already has. Written by `toBytes()`.
    */
   validate(range: string, rule: DataValidation): void
   /**
    * The data validations in force, each with the range it covers, the file's own
    * plus any added this session with `validate`. A rule of a kind this does not
-   * model — a date, a time, or a list naming a range
-   * rather than inline values — is left out.
+   * model — a time — is left out.
    */
   readonly validations: readonly { readonly range: string; readonly rule: DataValidation }[]
   /**
@@ -388,16 +388,25 @@ export interface Worksheet {
   link(reference: string, target: Hyperlink): void
 }
 
-/** A comparison for a `whole` or `decimal` rule. Each bound is a finite number. */
-export type NumberConstraint =
-  | { readonly between: readonly [number, number] }
-  | { readonly notBetween: readonly [number, number] }
-  | { readonly equal: number }
-  | { readonly notEqual: number }
-  | { readonly greaterThan: number }
-  | { readonly lessThan: number }
-  | { readonly greaterThanOrEqual: number }
-  | { readonly lessThanOrEqual: number }
+/** A comparison keyed by operator: a range for `between`/`notBetween`, a single
+ * bound otherwise. The bound type varies — a number for a numeric rule, a `Date`
+ * for a date rule. */
+export type Constraint<T> =
+  | { readonly between: readonly [T, T] }
+  | { readonly notBetween: readonly [T, T] }
+  | { readonly equal: T }
+  | { readonly notEqual: T }
+  | { readonly greaterThan: T }
+  | { readonly lessThan: T }
+  | { readonly greaterThanOrEqual: T }
+  | { readonly lessThanOrEqual: T }
+
+/** A comparison for a `whole`, `decimal` or `textLength` rule. Each bound is a
+ * finite number. */
+export type NumberConstraint = Constraint<number>
+
+/** A comparison for a `date` rule. Each bound is a `Date`. */
+export type DateConstraint = Constraint<Date>
 
 /**
  * A data-validation rule, keyed by kind: a `list` dropdown, or a `whole` or
@@ -409,10 +418,14 @@ export type DataValidation = { readonly allowBlank?: boolean } & (
        * comma — the inline list separates values with commas. */
       readonly list: readonly string[]
     }
+  /** A dropdown reading its values from a range, like `Sheet1!$A$1:$A$10`. */
+  | { readonly listRange: string }
   | { readonly whole: NumberConstraint }
   | { readonly decimal: NumberConstraint }
   /** Constrains the cell's text length, the same comparisons as `whole`. */
   | { readonly textLength: NumberConstraint }
+  /** Constrains the cell's date against `Date` bounds. */
+  | { readonly date: DateConstraint }
   /** A formula the cell must satisfy, written verbatim (`ISNUMBER(A1)`). */
   | { readonly custom: string }
 )
@@ -596,6 +609,22 @@ function withContentTypeOverride(xml: string, partName: string, contentType: str
   return xml.slice(0, close) + override + xml.slice(close)
 }
 
+/** Maps a constraint's bounds through `f`, preserving its operator — a date
+ * constraint into the serial one written, and back again on read. */
+function mapConstraint<A, B>(constraint: Constraint<A>, f: (bound: A) => B): Constraint<B> {
+  if ('between' in constraint)
+    return { between: [f(constraint.between[0]), f(constraint.between[1])] }
+  if ('notBetween' in constraint)
+    return { notBetween: [f(constraint.notBetween[0]), f(constraint.notBetween[1])] }
+  if ('equal' in constraint) return { equal: f(constraint.equal) }
+  if ('notEqual' in constraint) return { notEqual: f(constraint.notEqual) }
+  if ('greaterThan' in constraint) return { greaterThan: f(constraint.greaterThan) }
+  if ('lessThan' in constraint) return { lessThan: f(constraint.lessThan) }
+  if ('greaterThanOrEqual' in constraint)
+    return { greaterThanOrEqual: f(constraint.greaterThanOrEqual) }
+  return { lessThanOrEqual: f(constraint.lessThanOrEqual) }
+}
+
 function numberComparison(constraint: NumberConstraint): {
   operator: string
   formula1: number
@@ -623,6 +652,7 @@ function buildValidationSpec(
   rule: DataValidation,
   sqref: string,
   at: SheetLocation,
+  date1904: boolean,
 ): DataValidationSpec {
   const allowBlank = rule.allowBlank ?? true
   if ('list' in rule) {
@@ -643,13 +673,31 @@ function buildValidationSpec(
     }
     return { type: 'list', sqref, allowBlank, formula1: `"${rule.list.join(',')}"` }
   }
+  if ('listRange' in rule) {
+    return { type: 'list', sqref, allowBlank, formula1: rule.listRange }
+  }
   if ('custom' in rule) {
     return { type: 'custom', sqref, allowBlank, formula1: rule.custom }
   }
 
-  const type = 'whole' in rule ? 'whole' : 'decimal' in rule ? 'decimal' : 'textLength'
+  // A date rule compares against serials, so its Date bounds become the same
+  // number rules do; the type marks it a date so a reader turns them back.
+  const type =
+    'whole' in rule
+      ? 'whole'
+      : 'decimal' in rule
+        ? 'decimal'
+        : 'textLength' in rule
+          ? 'textLength'
+          : 'date'
   const constraint =
-    'whole' in rule ? rule.whole : 'decimal' in rule ? rule.decimal : rule.textLength
+    'whole' in rule
+      ? rule.whole
+      : 'decimal' in rule
+        ? rule.decimal
+        : 'textLength' in rule
+          ? rule.textLength
+          : mapConstraint(rule.date, (date) => dateToSerial(date, date1904))
   const comparison = numberComparison(constraint)
   const bounds =
     comparison.formula2 === undefined
@@ -715,21 +763,30 @@ function comparisonToConstraint(
 }
 
 /** A stored validation spec back into the public rule, or undefined for a type
- * this does not model (a date, a time, a list naming a range). */
-function validationFromSpec(spec: DataValidationSpec): DataValidation | undefined {
+ * this does not model (a time). */
+function validationFromSpec(
+  spec: DataValidationSpec,
+  date1904: boolean,
+): DataValidation | undefined {
   if (spec.type === 'list') {
     const list = listFromFormula(spec.formula1)
-    return list === undefined ? undefined : { allowBlank: spec.allowBlank, list }
+    return list === undefined
+      ? { allowBlank: spec.allowBlank, listRange: spec.formula1 }
+      : { allowBlank: spec.allowBlank, list }
   }
   if (spec.type === 'custom') {
     return { allowBlank: spec.allowBlank, custom: spec.formula1 }
   }
-  if (spec.type === 'whole' || spec.type === 'decimal' || spec.type === 'textLength') {
-    const constraint = comparisonToConstraint(spec.operator, spec.formula1, spec.formula2)
-    if (constraint === undefined) return undefined
-    if (spec.type === 'whole') return { allowBlank: spec.allowBlank, whole: constraint }
-    if (spec.type === 'decimal') return { allowBlank: spec.allowBlank, decimal: constraint }
-    return { allowBlank: spec.allowBlank, textLength: constraint }
+  const constraint = comparisonToConstraint(spec.operator, spec.formula1, spec.formula2)
+  if (constraint === undefined) return undefined
+  if (spec.type === 'whole') return { allowBlank: spec.allowBlank, whole: constraint }
+  if (spec.type === 'decimal') return { allowBlank: spec.allowBlank, decimal: constraint }
+  if (spec.type === 'textLength') return { allowBlank: spec.allowBlank, textLength: constraint }
+  if (spec.type === 'date') {
+    return {
+      allowBlank: spec.allowBlank,
+      date: mapConstraint(constraint, (serial) => serialToDate(serial, date1904)),
+    }
   }
   return undefined
 }
@@ -1341,7 +1398,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         }
         const applied: { range: string; rule: DataValidation }[] = []
         for (const spec of [...validationsCache, ...(sheetValidations.get(reference.path) ?? [])]) {
-          const rule = validationFromSpec(spec)
+          const rule = validationFromSpec(spec, date1904)
           if (rule !== undefined) applied.push({ range: spec.sqref, rule })
         }
         return applied
@@ -1512,7 +1569,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           )
         }
         const sqref = sqrefOf(range, at)
-        const spec = buildValidationSpec(rule, sqref, at)
+        const spec = buildValidationSpec(rule, sqref, at, date1904)
         const specs = sheetValidations.get(reference.path) ?? []
         specs.push(spec)
         sheetValidations.set(reference.path, specs)
