@@ -1002,3 +1002,19 @@ test('readConditionalFormats reads colour scales, cellIs and data bars', () => {
   })
   assert.deepEqual(specs[2], { kind: 'dataBar', sqref: 'C1:C5', color: 'FF638EC6' })
 })
+
+test('readConditionalFormats reads expression, duplicate and unique rules', () => {
+  const bytes = encode(
+    '<worksheet><sheetData/>' +
+      '<conditionalFormatting sqref="A1:A9"><cfRule type="expression" dxfId="1" priority="1">' +
+      '<formula>$A1&gt;0</formula></cfRule></conditionalFormatting>' +
+      '<conditionalFormatting sqref="B1:B9"><cfRule type="duplicateValues" dxfId="2" priority="2"/></conditionalFormatting>' +
+      '<conditionalFormatting sqref="C1:C9"><cfRule type="uniqueValues" dxfId="3" priority="3"/></conditionalFormatting>' +
+      '</worksheet>',
+  )
+  assert.deepEqual(readConditionalFormats(bytes), [
+    { kind: 'expression', sqref: 'A1:A9', formula: '$A1>0', dxfId: 1 },
+    { kind: 'duplicateValues', sqref: 'B1:B9', dxfId: 2 },
+    { kind: 'uniqueValues', sqref: 'C1:C9', dxfId: 3 },
+  ])
+})

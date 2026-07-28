@@ -1351,6 +1351,20 @@ test('conditionalFormats round-trip colour scales, cellIs and data bars', () => 
   ])
 })
 
+test('conditionalFormats round-trip expression, duplicates and unique rules', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  const sheet = workbook.sheets[0]
+  sheet?.conditionalFormat('A1:A9', { expression: { formula: '$A1>0', fill: 'FFFF00' } })
+  sheet?.conditionalFormat('B1:B9', { duplicates: { fill: 'FF0000' } })
+  sheet?.conditionalFormat('C1:C9', { unique: { fill: '00FF00' } })
+  const back = readWorkbook(workbook.toBytes()).sheets[0]
+  assert.deepEqual(back?.conditionalFormats, [
+    { range: 'A1:A9', rule: { expression: { formula: '$A1>0', fill: 'FFFFFF00' } } },
+    { range: 'B1:B9', rule: { duplicates: { fill: 'FFFF0000' } } },
+    { range: 'C1:C9', rule: { unique: { fill: 'FF00FF00' } } },
+  ])
+})
+
 test('conditionalFormats reflect pending and skip kinds not modelled', () => {
   const sheet = readWorkbook(
     build('<row r="1"><c r="A1"><v>1</v></c></row>', {

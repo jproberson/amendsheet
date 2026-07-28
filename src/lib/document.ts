@@ -261,8 +261,10 @@ export interface Worksheet {
   readonly validations: readonly { readonly range: string; readonly rule: DataValidation }[]
   /**
    * Adds a conditional format over a cell or range. `{ colorScale }` grades cells
-   * between two colours, or three with a `mid`. The rule outranks any the sheet
-   * already has, and is written by `toBytes()`.
+   * between two colours, or three with a `mid`; `{ cellIs }` fills cells matching a
+   * comparison, `{ expression }` cells matching a formula, `{ duplicates }` and
+   * `{ unique }` the repeated or one-off values; `{ dataBar }` draws a bar. The
+   * rule outranks any the sheet already has, and is written by `toBytes()`.
    */
   conditionalFormat(range: string, rule: ConditionalFormat): void
   /**
@@ -446,6 +448,17 @@ export interface CellValueRule {
   readonly fill: string
 }
 
+/** Fills a cell when a formula holds. `formula` is written verbatim; `fill` is hex. */
+export interface FormulaRule {
+  readonly formula: string
+  readonly fill: string
+}
+
+/** Fills the cells a rule matches. `fill` is hex. */
+export interface FillRule {
+  readonly fill: string
+}
+
 /** A bar drawn in each cell, its length scaled between the range's min and max. */
 export interface DataBar {
   /** The bar's colour, hex. */
@@ -461,6 +474,12 @@ export type ConditionalFormat =
   | { readonly colorScale: ColorScale }
   | { readonly cellIs: CellValueRule }
   | { readonly dataBar: DataBar }
+  /** Fills a cell whose value satisfies a formula, like `$B1>0`. */
+  | { readonly expression: FormulaRule }
+  /** Fills the cells whose value is duplicated within the range. */
+  | { readonly duplicates: FillRule }
+  /** Fills the cells whose value is unique within the range. */
+  | { readonly unique: FillRule }
 
 export interface SetOptions {
   /** A number format code, applied to the cell being written. */
@@ -792,9 +811,9 @@ function validationFromSpec(
 }
 
 /** A stored conditional-format spec back into the public rule, or undefined for
- * one this does not model: a colour scale short of two rgb stops, a `cellIs` whose
- * comparison or highlight colour cannot be recovered. `stylesXml` resolves the
- * highlight the `cellIs` names by its dxf index. */
+ * one this does not model: a colour scale short of two rgb stops, a highlight rule
+ * whose colour or comparison cannot be recovered. `stylesXml` resolves the
+ * highlight a dxf-backed rule names by its index. */
 function conditionalFormatFromSpec(
   spec: ConditionalFormatSpec,
   stylesXml: string | undefined,
@@ -807,10 +826,15 @@ function conditionalFormatFromSpec(
       ? { colorScale: { min, max: second } }
       : { colorScale: { min, mid: second, max: third } }
   }
-  const when = comparisonToConstraint(spec.operator, spec.formulas[0] ?? '', spec.formulas[1])
-  if (when === undefined) return undefined
   const fill = stylesXml === undefined ? undefined : readDxfFill(stylesXml, spec.dxfId)
-  return fill === undefined ? undefined : { cellIs: { when, fill } }
+  if (fill === undefined) return undefined
+  if (spec.kind === 'expression') return { expression: { formula: spec.formula, fill } }
+  if (spec.kind === 'cellIs') {
+    const when = comparisonToConstraint(spec.operator, spec.formulas[0] ?? '', spec.formulas[1])
+    return when === undefined ? undefined : { cellIs: { when, fill } }
+  }
+  // Only duplicateValues and uniqueValues remain.
+  return spec.kind === 'duplicateValues' ? { duplicates: { fill } } : { unique: { fill } }
 }
 
 function checkOutlineLevel(level: number, at: SheetLocation): void {
@@ -1594,6 +1618,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         } else if ('dataBar' in rule) {
           specs.push({ kind: 'dataBar', sqref, color: normalizeColor(rule.dataBar.color, at) })
         } else {
+          // The rest fill matching cells with a highlight held in a dxf.
           if (workingStyles === undefined) {
             throw new XlsxError(
               'missing-part',
@@ -1601,29 +1626,46 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
               { ...at, part: 'xl/styles.xml', reference: sqref },
             )
           }
-          const comparison = numberComparison(rule.cellIs.when)
-          const formulas =
-            comparison.formula2 === undefined
-              ? [comparison.formula1]
-              : [comparison.formula1, comparison.formula2]
-          for (const bound of formulas) {
-            if (!Number.isFinite(bound)) {
-              throw new XlsxError(
-                'unwritable-value',
-                `Conditional-format bound ${bound} is not a finite number`,
-                { ...at, reference: sqref },
-              )
-            }
-          }
-          const dxf = ensureDxf(workingStyles, normalizeColor(rule.cellIs.fill, at))
+          const highlight =
+            'cellIs' in rule
+              ? rule.cellIs.fill
+              : 'expression' in rule
+                ? rule.expression.fill
+                : 'duplicates' in rule
+                  ? rule.duplicates.fill
+                  : rule.unique.fill
+          const dxf = ensureDxf(workingStyles, normalizeColor(highlight, at))
           workingStyles = dxf.xml
-          specs.push({
-            kind: 'cellIs',
-            sqref,
-            operator: comparison.operator,
-            formulas: formulas.map(String),
-            dxfId: dxf.index,
-          })
+          const dxfId = dxf.index
+          if ('cellIs' in rule) {
+            const comparison = numberComparison(rule.cellIs.when)
+            const formulas =
+              comparison.formula2 === undefined
+                ? [comparison.formula1]
+                : [comparison.formula1, comparison.formula2]
+            for (const bound of formulas) {
+              if (!Number.isFinite(bound)) {
+                throw new XlsxError(
+                  'unwritable-value',
+                  `Conditional-format bound ${bound} is not a finite number`,
+                  { ...at, reference: sqref },
+                )
+              }
+            }
+            specs.push({
+              kind: 'cellIs',
+              sqref,
+              operator: comparison.operator,
+              formulas: formulas.map(String),
+              dxfId,
+            })
+          } else if ('expression' in rule) {
+            specs.push({ kind: 'expression', sqref, formula: rule.expression.formula, dxfId })
+          } else if ('duplicates' in rule) {
+            specs.push({ kind: 'duplicateValues', sqref, dxfId })
+          } else {
+            specs.push({ kind: 'uniqueValues', sqref, dxfId })
+          }
         }
         sheetConditionalFormats.set(reference.path, specs)
       },

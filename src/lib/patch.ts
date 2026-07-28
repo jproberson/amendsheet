@@ -1066,6 +1066,20 @@ export type ConditionalFormatSpec =
       readonly dxfId: number
     }
   | { readonly kind: 'dataBar'; readonly sqref: string; readonly color: string }
+  | {
+      /** A formula the cell must satisfy to take the highlight. */
+      readonly kind: 'expression'
+      readonly sqref: string
+      readonly formula: string
+      readonly dxfId: number
+    }
+  | {
+      /** Highlights the duplicated (`duplicateValues`) or unique (`uniqueValues`)
+       * cells in the range; no formula, just the highlight. */
+      readonly kind: 'duplicateValues' | 'uniqueValues'
+      readonly sqref: string
+      readonly dxfId: number
+    }
 
 /**
  * Reads a sheet's conditional formats into the same specs they are written from.
@@ -1101,6 +1115,19 @@ export function readConditionalFormats(bytes: Uint8Array): ConditionalFormatSpec
       formulas.length > 0
     ) {
       specs.push({ kind: 'cellIs', sqref, operator, formulas: [...formulas], dxfId })
+    } else if (
+      sqref !== undefined &&
+      type === 'expression' &&
+      dxfId !== undefined &&
+      formulas[0] !== undefined
+    ) {
+      specs.push({ kind: 'expression', sqref, formula: formulas[0], dxfId })
+    } else if (
+      sqref !== undefined &&
+      (type === 'duplicateValues' || type === 'uniqueValues') &&
+      dxfId !== undefined
+    ) {
+      specs.push({ kind: type, sqref, dxfId })
     }
     type = undefined
     operator = undefined
@@ -1119,6 +1146,8 @@ export function readConditionalFormats(bytes: Uint8Array): ConditionalFormatSpec
         operator = event.attributes.get('operator')
         const dxf = event.attributes.get('dxfId')
         dxfId = dxf !== undefined && Number.isInteger(Number(dxf)) ? Number(dxf) : undefined
+        // A duplicate/unique rule has no children, so it closes in its open tag.
+        if (event.selfClosing) flush()
       } else if (event.localName === 'colorScale') inColorScale = true
       else if (event.localName === 'dataBar') inDataBar = true
       else if (event.localName === 'color') {
@@ -1169,13 +1198,23 @@ function conditionalFormattingElement(
       `</${prefix}dataBar></${prefix}cfRule>${close}`
     )
   }
-  const formulas = spec.formulas
-    .map((formula) => `<${prefix}formula>${escapeXml(formula)}</${prefix}formula>`)
-    .join('')
-  return (
-    `${open}<${prefix}cfRule type="cellIs" operator="${spec.operator}" dxfId="${spec.dxfId}"` +
-    ` priority="${priority}">${formulas}</${prefix}cfRule>${close}`
-  )
+  if (spec.kind === 'expression') {
+    return (
+      `${open}<${prefix}cfRule type="expression" dxfId="${spec.dxfId}" priority="${priority}">` +
+      `<${prefix}formula>${escapeXml(spec.formula)}</${prefix}formula></${prefix}cfRule>${close}`
+    )
+  }
+  if (spec.kind === 'cellIs') {
+    const formulas = spec.formulas
+      .map((formula) => `<${prefix}formula>${escapeXml(formula)}</${prefix}formula>`)
+      .join('')
+    return (
+      `${open}<${prefix}cfRule type="cellIs" operator="${spec.operator}" dxfId="${spec.dxfId}"` +
+      ` priority="${priority}">${formulas}</${prefix}cfRule>${close}`
+    )
+  }
+  // Only duplicateValues and uniqueValues remain; the kind is the cfRule type.
+  return `${open}<${prefix}cfRule type="${spec.kind}" dxfId="${spec.dxfId}" priority="${priority}"/>${close}`
 }
 
 /** Edits to a sheet that are not cell values: the elements around sheetData. */
