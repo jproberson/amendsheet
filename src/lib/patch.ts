@@ -208,6 +208,31 @@ export function readColumnWidths(
   return ranges
 }
 
+/** The one-based rows a sheet hides. */
+export function readHiddenRows(bytes: Uint8Array): ReadonlySet<number> {
+  const hidden = new Set<number>()
+  for (const event of readXmlBytes(bytes)) {
+    if (event.kind !== 'open' || event.localName !== 'row') continue
+    if (event.attributes.get('hidden') !== '1') continue
+    const number = Number(event.attributes.get('r'))
+    if (Number.isInteger(number) && number >= 1) hidden.add(number)
+  }
+  return hidden
+}
+
+/** The column ranges a sheet hides, each covering columns `min` to `max`. */
+export function readHiddenColumns(bytes: Uint8Array): readonly { min: number; max: number }[] {
+  const ranges: { min: number; max: number }[] = []
+  for (const event of readXmlBytes(bytes)) {
+    if (event.kind !== 'open' || event.localName !== 'col') continue
+    if (event.attributes.get('hidden') !== '1') continue
+    const min = Number(event.attributes.get('min'))
+    const max = Number(event.attributes.get('max'))
+    if (Number.isInteger(min) && Number.isInteger(max)) ranges.push({ min, max })
+  }
+  return ranges
+}
+
 /** Element content only. Quotes need no escaping there, and Excel leaves them. */
 const escapeXml = (text: string) =>
   text

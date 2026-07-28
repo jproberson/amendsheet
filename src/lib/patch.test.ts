@@ -9,6 +9,8 @@ import {
   mergeRangeReference,
   patchSheet as patchSheetBytes,
   readColumnWidths,
+  readHiddenColumns,
+  readHiddenRows,
   readRowHeights,
   readSheetProtection,
   readSheetView,
@@ -913,4 +915,15 @@ test('readSheetView defaults gridlines and headings on and reads only the first 
   assert.equal(view.frozen, undefined)
   assert.equal(view.tabColor, undefined)
   assert.equal(view.autoFilter, undefined)
+})
+
+test('readHiddenRows and readHiddenColumns read the hidden flag', () => {
+  const bytes = encode(
+    '<worksheet><cols><col min="2" max="3" hidden="1"/><col min="5" max="5" width="8"/></cols>' +
+      '<sheetData><row r="1" hidden="1"/><row r="2"/></sheetData></worksheet>',
+  )
+  const rows = readHiddenRows(bytes)
+  assert.equal(rows.has(1), true)
+  assert.equal(rows.has(2), false)
+  assert.deepEqual(readHiddenColumns(bytes), [{ min: 2, max: 3 }])
 })

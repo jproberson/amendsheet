@@ -34,6 +34,8 @@ import {
   patchSheet,
   indexSheet,
   readColumnWidths,
+  readHiddenColumns,
+  readHiddenRows,
   readRowHeights,
   readSheetProtection,
   readSheetView,
@@ -309,6 +311,11 @@ export interface Worksheet {
    * zero.
    */
   setColumnWidth(column: string, width: number): void
+  /** Whether the row is hidden, in the file or by a `hideRow` this session. */
+  isRowHidden(row: number): boolean
+  /** Whether the column is hidden, in the file or by a `hideColumn` this session.
+   * The column is a letter like `A`. */
+  isColumnHidden(column: string): boolean
   /** Hides a row, keeping any height it also has. The row is one-based. */
   hideRow(row: number): void
   /** Hides a column, keeping any width it also has. The column is a letter. */
@@ -847,6 +854,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     }
     let rowHeightsCache: ReadonlyMap<number, number> | undefined
     let columnWidthsCache: readonly { min: number; max: number; width: number }[] | undefined
+    let hiddenRowsCache: ReadonlySet<number> | undefined
+    let hiddenColumnsCache: readonly { min: number; max: number }[] | undefined
     let hyperlinksCache: ReadonlyMap<string, Hyperlink> | undefined
     const hyperlinksFor = (bytes: Uint8Array): ReadonlyMap<string, Hyperlink> => {
       if (hyperlinksCache === undefined) {
@@ -1215,6 +1224,19 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         if (sheetBytes === undefined) return undefined
         columnWidthsCache ??= readColumnWidths(sheetBytes)
         return columnWidthsCache.find((range) => index >= range.min && index <= range.max)?.width
+      },
+      isRowHidden(row: number): boolean {
+        if (sheetHiddenRows.get(reference.path)?.has(row) === true) return true
+        if (sheetBytes === undefined) return false
+        hiddenRowsCache ??= readHiddenRows(sheetBytes)
+        return hiddenRowsCache.has(row)
+      },
+      isColumnHidden(column: string): boolean {
+        const index = columnToIndex(column)
+        if (sheetHiddenColumns.get(reference.path)?.has(index) === true) return true
+        if (sheetBytes === undefined) return false
+        hiddenColumnsCache ??= readHiddenColumns(sheetBytes)
+        return hiddenColumnsCache.some((range) => index >= range.min && index <= range.max)
       },
       cells: () => readCells(),
       cell(cellReference: string): Cell | undefined {

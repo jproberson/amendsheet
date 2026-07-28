@@ -1262,6 +1262,22 @@ test('rowHeight and columnWidth read the file', () => {
   assert.equal(sheet?.columnWidth('C'), undefined)
 })
 
+test('isRowHidden and isColumnHidden read the file and a pending hide', () => {
+  const sheet = readWorkbook(
+    build('<row r="1" hidden="1"><c r="A1"><v>1</v></c></row>', {
+      views: '<cols><col min="2" max="2" hidden="1"/></cols>',
+    }),
+  ).sheets[0]
+  assert.equal(sheet?.isRowHidden(1), true)
+  assert.equal(sheet?.isRowHidden(2), false)
+  assert.equal(sheet?.isColumnHidden('B'), true)
+  assert.equal(sheet?.isColumnHidden('A'), false)
+  sheet?.hideRow(2)
+  sheet?.hideColumn('A')
+  assert.equal(sheet?.isRowHidden(2), true)
+  assert.equal(sheet?.isColumnHidden('A'), true)
+})
+
 test('rowHeight and columnWidth reflect a pending set before it is written', () => {
   const sheet = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>')).sheets[0]
   assert.equal(sheet?.rowHeight(1), undefined)
@@ -2734,6 +2750,8 @@ test('refuses a write to a sheet whose part is not in the package', () => {
   assert.equal(workbook.sheets[0]?.columnWidth('A'), undefined)
   assert.equal(workbook.sheets[0]?.gridlinesVisible, true) // default, no bytes to read
   assert.equal(workbook.sheets[0]?.zoomPercent, undefined)
+  assert.equal(workbook.sheets[0]?.isRowHidden(1), false)
+  assert.equal(workbook.sheets[0]?.isColumnHidden('A'), false)
   assert.throws(
     () => workbook.sheets[0]?.protect(),
     (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
