@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { withHyperlinkRelationships, withHyperlinks, writeSheetHyperlinks } from './hyperlinks.js'
+import {
+  readSheetHyperlinks,
+  withHyperlinkRelationships,
+  withHyperlinks,
+  writeSheetHyperlinks,
+} from './hyperlinks.js'
 
 const worksheet = (body: string) =>
   `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${body}</worksheet>`
@@ -129,4 +134,32 @@ test('writeSheetHyperlinks writes an internal location inline and needs no rels'
   )
   assert.match(written.sheetXml, /<hyperlink ref="B2" location="Sheet2!C3" tooltip="see C3"\/>/)
   assert.equal(written.relsXml, undefined)
+})
+
+test('readSheetHyperlinks reads urls and locations, with or without a tooltip', () => {
+  const rels =
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+    '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://example.com/x" TargetMode="External"/>' +
+    '</Relationships>'
+  const sheet = worksheet(
+    '<sheetData/><hyperlinks>' +
+      '<hyperlink ref="A1" r:id="rId1"/>' + // url, no tooltip
+      '<hyperlink ref="B2:C3" location="Sheet1!D4" tooltip="see"/>' + // location + tooltip, range
+      '<hyperlink r:id="rId1"/>' + // no ref, skipped
+      '<hyperlink ref="E5"/>' + // neither r:id nor location, skipped
+      '</hyperlinks>',
+  )
+  const links = readSheetHyperlinks(sheet, rels, 'xl/worksheets/_rels/sheet1.xml.rels')
+  assert.deepEqual(links.get('A1'), { url: 'https://example.com/x' })
+  assert.deepEqual(links.get('B2'), { location: 'Sheet1!D4', tooltip: 'see' }) // range's top-left
+  assert.equal(links.size, 2)
+})
+
+test('readSheetHyperlinks handles a self-closing element and drops a missing relationship', () => {
+  assert.equal(
+    readSheetHyperlinks(worksheet('<sheetData/><hyperlinks/>'), undefined, 'rels').size,
+    0,
+  )
+  const sheet = worksheet('<sheetData/><hyperlinks><hyperlink ref="A1" r:id="rId9"/></hyperlinks>')
+  assert.equal(readSheetHyperlinks(sheet, undefined, 'rels').size, 0)
 })

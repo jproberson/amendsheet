@@ -1210,6 +1210,55 @@ test('mergedRanges is empty for a sheet with no merges', () => {
   assert.deepEqual(sheet?.mergedRanges, [])
 })
 
+test('link round-trips: an external url is read back on the cell', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.link('A1', { url: 'https://example.com/a', tooltip: 'go' })
+  const cell = readWorkbook(workbook.toBytes()).sheets[0]?.cell('A1')
+  assert.deepEqual(cell?.hyperlink, { url: 'https://example.com/a', tooltip: 'go' })
+})
+
+test('link round-trips: an internal location is read back on the cell', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.link('A1', { location: 'Sheet2!B2' })
+  const cell = readWorkbook(workbook.toBytes()).sheets[0]?.cell('A1')
+  assert.deepEqual(cell?.hyperlink, { location: 'Sheet2!B2' })
+})
+
+test('a link on a cell with no value is still read', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.link('D4', { url: 'https://x.test/' })
+  const cell = readWorkbook(workbook.toBytes()).sheets[0]?.cell('D4')
+  assert.deepEqual(cell?.hyperlink, { url: 'https://x.test/' })
+  assert.deepEqual(cell?.value, { kind: 'empty' })
+})
+
+test('a range hyperlink is reported on its top-left cell', () => {
+  const sheet = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      after: '<hyperlinks><hyperlink ref="A1:B2" location="Sheet1!C3"/></hyperlinks>',
+    }),
+  ).sheets[0]
+  assert.deepEqual(sheet?.cell('A1')?.hyperlink, { location: 'Sheet1!C3' })
+})
+
+test('a cell can carry both a comment and a hyperlink', () => {
+  const comments =
+    '<comments><authors><author/></authors><commentList>' +
+    '<comment ref="A1" authorId="0"><text><r><t>note</t></r></text></comment></commentList></comments>'
+  const sheet = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      after: '<hyperlinks><hyperlink ref="A1" location="Sheet1!Z9"/></hyperlinks>',
+      extra: {
+        'xl/comments1.xml': comments,
+        'xl/worksheets/_rels/sheet1.xml.rels': commentsRels('../comments1.xml'),
+      },
+    }),
+  ).sheets[0]
+  const cell = sheet?.cell('A1')
+  assert.equal(cell?.comment, 'note')
+  assert.deepEqual(cell?.hyperlink, { location: 'Sheet1!Z9' })
+})
+
 test('comment writes a comments part, wires it to the sheet and declares its type', () => {
   const contentTypes =
     '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
@@ -2619,6 +2668,7 @@ test('refuses a write to a sheet whose part is not in the package', () => {
     (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
   )
   assert.equal(workbook.sheets[0]?.cell('A1'), undefined)
+  assert.deepEqual(workbook.sheets[0]?.mergedRanges, []) // no bytes to read merges from
   assert.throws(
     () => workbook.sheets[0]?.protect(),
     (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',

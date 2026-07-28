@@ -18,7 +18,7 @@ import {
 } from './comments.js'
 import { checkDefinedName, readDefinedNames, withDefinedNames } from './defined-names.js'
 import { readRelationships, resolveTarget } from './relationships.js'
-import { type Hyperlink, writeSheetHyperlinks } from './hyperlinks.js'
+import { type Hyperlink, readSheetHyperlinks, writeSheetHyperlinks } from './hyperlinks.js'
 import { type Container, decodeXmlPart } from './container.js'
 import { XlsxError } from './errors.js'
 import { LAST_SERIAL, dateToSerial, parseIsoDate, serialToDate } from './date.js'
@@ -138,6 +138,9 @@ export interface Cell {
   readonly protection?: CellProtection
   /** The cell's comment text, when it has one. Joined from the note's runs. */
   readonly comment?: string
+  /** Where the cell links, when it links: a URL out of the package or a
+   * `location` within the workbook. A range link is reported on its top-left. */
+  readonly hyperlink?: Hyperlink
 }
 
 export type { Hyperlink }
@@ -798,6 +801,22 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         ? new Map<string, string>()
         : readComments(partText(container, existingCommentsPath) ?? '')
 
+    // Read on first use from the same bytes the cells stream from, and memoised;
+    // unlike comments this parses the whole sheet, so a workbook whose cells are
+    // never read does not pay for it.
+    let hyperlinksCache: ReadonlyMap<string, Hyperlink> | undefined
+    const hyperlinksFor = (bytes: Uint8Array): ReadonlyMap<string, Hyperlink> => {
+      if (hyperlinksCache === undefined) {
+        const relationshipsPath = relationshipsPathFor(reference.path)
+        hyperlinksCache = readSheetHyperlinks(
+          decodeXmlPart(bytes, reference.path),
+          partText(container, relationshipsPath),
+          relationshipsPath,
+        )
+      }
+      return hyperlinksCache
+    }
+
     const patched = (): Uint8Array | undefined => {
       if (sheetBytes === undefined) return undefined
       const pending = edits.get(reference.path)
@@ -833,26 +852,40 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       // this in as the sheet streams resolves every one of them.
       const masters: SharedMasters = new Map()
 
-      // Only when there are comments to place; a comment can sit on a cell the
-      // sheet never gave a <c>, and any left after the stream are surfaced below.
-      const unplaced = commentsRead.size > 0 ? new Map(commentsRead) : undefined
+      // A comment or a link can sit on a cell the sheet never gave a <c>, so the
+      // refs carrying one are tracked and any left after the stream are surfaced
+      // as empty cells below. Only paid for when the sheet has some.
+      const links = hyperlinksFor(bytes)
+      const annotate = (cell: Cell, reference: string): Cell => {
+        const comment = commentsRead.get(reference)
+        const hyperlink = links.get(reference)
+        if (comment === undefined && hyperlink === undefined) return cell
+        return {
+          ...cell,
+          ...(comment === undefined ? {} : { comment }),
+          ...(hyperlink === undefined ? {} : { hyperlink }),
+        }
+      }
+      const unplaced =
+        commentsRead.size + links.size > 0
+          ? new Set<string>([...commentsRead.keys(), ...links.keys()])
+          : undefined
       for (const raw of readSheet(bytes, sharedStrings, at)) {
         if (raw.ownsSharedRange === true && raw.sharedIndex !== undefined) {
           masters.set(raw.sharedIndex, canonicalReference(raw.address) ?? raw.reference)
         }
         const cell = toCell(raw, stylesNow(), formattingFor(raw.styleIndex), date1904, masters)
-        const comment = commentsRead.get(cell.reference)
         unplaced?.delete(cell.reference)
-        yield comment === undefined ? cell : { ...cell, comment }
+        yield annotate(cell, cell.reference)
       }
-      for (const [reference, comment] of unplaced ?? []) {
+      for (const reference of unplaced ?? []) {
         const address = parseReference(reference)
-        yield {
+        const base: Cell = {
           address,
           reference: canonicalReference(address) ?? reference,
           value: { kind: 'empty' },
-          comment,
         }
+        yield annotate(base, reference)
       }
     }
 

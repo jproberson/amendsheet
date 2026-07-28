@@ -1,4 +1,6 @@
 import { escapeSheetName } from './add-sheet.js'
+import { canonicalReference, parseReference } from './reference.js'
+import { readRelationships } from './relationships.js'
 import { type Splice, applySplices } from './splices.js'
 import { readXml } from './xml.js'
 
@@ -182,4 +184,50 @@ export function writeSheetHyperlinks(
   const written = withHyperlinks(sheetXml, entries)
   if (externalRels.length === 0) return { sheetXml: written }
   return { sheetXml: written, relsXml: withHyperlinkRelationships(existingRels, externalRels) }
+}
+
+/**
+ * Reads a sheet's hyperlinks, keyed by the cell each anchors at — the top-left of
+ * the ref, so a range link lands on the cell a reader clicks first. An `r:id`
+ * link resolves to its external URL through the sheet's rels; a `location` link is
+ * inline. A link whose relationship is missing is dropped rather than reported
+ * pointing nowhere.
+ */
+export function readSheetHyperlinks(
+  sheetXml: string,
+  relsXml: string | undefined,
+  part: string,
+): ReadonlyMap<string, Hyperlink> {
+  const links = new Map<string, Hyperlink>()
+  const relationships = relsXml === undefined ? undefined : readRelationships(relsXml, part)
+  let inside = false
+  for (const event of readXml(sheetXml)) {
+    if (event.kind === 'close') {
+      if (event.localName === 'hyperlinks') inside = false
+      continue
+    }
+    if (event.kind !== 'open') continue
+    if (event.localName === 'hyperlinks') {
+      inside = !event.selfClosing
+      continue
+    }
+    if (!inside || event.localName !== 'hyperlink') continue
+    const ref = event.attributes.get('ref')
+    if (ref === undefined) continue
+    const colon = ref.indexOf(':')
+    const anchor = colon === -1 ? ref : ref.slice(0, colon)
+    const key = canonicalReference(parseReference(anchor)) ?? anchor
+    const tooltip = event.attributes.get('tooltip')
+    const relationshipId = event.attributes.get('r:id')
+    if (relationshipId !== undefined) {
+      const url = relationships?.get(relationshipId)?.target
+      if (url !== undefined) links.set(key, tooltip === undefined ? { url } : { url, tooltip })
+    } else {
+      const location = event.attributes.get('location')
+      if (location !== undefined) {
+        links.set(key, tooltip === undefined ? { location } : { location, tooltip })
+      }
+    }
+  }
+  return links
 }
