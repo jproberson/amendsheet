@@ -141,7 +141,9 @@ export interface Cell {
   /** The cell's comment text, when it has one. Joined from the note's runs. */
   readonly comment?: string
   /** Where the cell links, when it links: a URL out of the package or a
-   * `location` within the workbook. A range link is reported on its top-left. */
+   * `location` within the workbook. As read from the file, like `comment`; a
+   * pending `link` shows after `toBytes`. A range link is reported on its
+   * top-left. */
   readonly hyperlink?: Hyperlink
 }
 
