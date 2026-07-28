@@ -161,8 +161,9 @@ export interface Worksheet {
    */
   readonly protection?: SheetProtection
   /**
-   * Every cell the sheet stores. A cell that was cleared, or that carries only
-   * formatting, is still stored, and arrives with a value of `kind: 'empty'`.
+   * Every cell the sheet stores. A cell that was cleared, that carries only
+   * formatting, or that a comment sits on without a value of its own is still
+   * stored, and arrives with a value of `kind: 'empty'`.
    *
    * Each call re-reads the sheet, so a call per cell is quadratic.
    */
@@ -826,13 +827,26 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       // this in as the sheet streams resolves every one of them.
       const masters: SharedMasters = new Map()
 
+      // Only when there are comments to place; a comment can sit on a cell the
+      // sheet never gave a <c>, and any left after the stream are surfaced below.
+      const unplaced = commentsRead.size > 0 ? new Map(commentsRead) : undefined
       for (const raw of readSheet(bytes, sharedStrings, at)) {
         if (raw.ownsSharedRange === true && raw.sharedIndex !== undefined) {
           masters.set(raw.sharedIndex, canonicalReference(raw.address) ?? raw.reference)
         }
         const cell = toCell(raw, stylesNow(), formattingFor(raw.styleIndex), date1904, masters)
         const comment = commentsRead.get(cell.reference)
+        unplaced?.delete(cell.reference)
         yield comment === undefined ? cell : { ...cell, comment }
+      }
+      for (const [reference, comment] of unplaced ?? []) {
+        const address = parseReference(reference)
+        yield {
+          address,
+          reference: canonicalReference(address) ?? reference,
+          value: { kind: 'empty' },
+          comment,
+        }
       }
     }
 

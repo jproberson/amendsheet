@@ -1174,6 +1174,26 @@ test('cell reports a comment wired through the sheet relationships', () => {
   assert.equal(workbook.sheets[0]?.cell('B2')?.comment, 'Look here')
 })
 
+test('a comment on a cell the sheet never gave a value is still read', () => {
+  const comments =
+    '<comments><authors><author/></authors><commentList>' +
+    '<comment ref="D4" authorId="0"><text><r><t>note on an empty cell</t></r></text></comment>' +
+    '</commentList></comments>'
+  const sheet = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      extra: {
+        'xl/comments1.xml': comments,
+        'xl/worksheets/_rels/sheet1.xml.rels': commentsRels('../comments1.xml'),
+      },
+    }),
+  ).sheet('Data')
+
+  const cell = sheet?.cell('D4')
+  assert.equal(cell?.comment, 'note on an empty cell')
+  assert.deepEqual(cell?.value, { kind: 'empty' })
+  assert.ok([...(sheet?.cells() ?? [])].some((c) => c.reference === 'D4'))
+})
+
 test('comment writes a comments part, wires it to the sheet and declares its type', () => {
   const contentTypes =
     '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
