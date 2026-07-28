@@ -14,12 +14,12 @@ test('readComments maps each cell to the joined text of its runs', () => {
   assert.equal(comments.size, 2)
 })
 
-test('buildCommentsPart writes each note under one empty author, escaping the text', () => {
+test('buildCommentsPart wraps each note text in a run, escaping it', () => {
   const xml = buildCommentsPart(new Map([['A1', 'a < b & c']]))
   assert.match(xml, /<authors><author\/><\/authors>/)
   assert.match(
     xml,
-    /<comment ref="A1" authorId="0"><text><t xml:space="preserve">a &lt; b &amp; c<\/t><\/text><\/comment>/,
+    /<comment ref="A1" authorId="0"><text><r><t xml:space="preserve">a &lt; b &amp; c<\/t><\/r><\/text><\/comment>/,
   )
 })
 

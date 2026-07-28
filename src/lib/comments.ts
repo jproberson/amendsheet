@@ -42,14 +42,16 @@ const COMMENTS_NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
 /**
  * Builds a fresh comments part. One empty author holds every note, since the
  * model carries a note's text but not who wrote it. `xml:space="preserve"` keeps
- * leading and trailing spaces a reader would otherwise trim.
+ * leading and trailing spaces a reader would otherwise trim. The text goes in an
+ * `<r>` run: a bare `<t>` is valid CT_Rst, but Excel and other readers write and
+ * expect a run, and some drop the text of a runless comment.
  */
 export function buildCommentsPart(entries: ReadonlyMap<string, string>): string {
   const list = [...entries]
     .map(
       ([reference, text]) =>
         `<comment ref="${reference}" authorId="0"><text>` +
-        `<t xml:space="preserve">${escapeXml(text)}</t></text></comment>`,
+        `<r><t xml:space="preserve">${escapeXml(text)}</t></r></text></comment>`,
     )
     .join('')
   return (

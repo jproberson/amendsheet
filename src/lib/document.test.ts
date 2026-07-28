@@ -1189,7 +1189,7 @@ test('comment writes a comments part, wires it to the sheet and declares its typ
   const parts = readContainer(workbook.toBytes()).parts
   assert.match(
     decode(parts.get('xl/comments1.xml')),
-    /<comment ref="A1" authorId="0"><text><t xml:space="preserve">a note<\/t><\/text><\/comment>/,
+    /<comment ref="A1" authorId="0"><text><r><t xml:space="preserve">a note<\/t><\/r><\/text><\/comment>/,
   )
   assert.match(
     decode(parts.get('xl/worksheets/_rels/sheet1.xml.rels')),
