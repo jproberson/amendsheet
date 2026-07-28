@@ -1,3 +1,4 @@
+import { parseReference } from './reference.js'
 import { readXml } from './xml.js'
 
 const escapeXml = (text: string): string =>
@@ -59,4 +60,45 @@ export function buildCommentsPart(entries: ReadonlyMap<string, string>): string 
     `<comments xmlns="${COMMENTS_NS}"><authors><author/></authors>` +
     `<commentList>${list}</commentList></comments>`
   )
+}
+
+const VML_HEADER =
+  '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+  '<xml xmlns:v="urn:schemas-microsoft-com:vml" ' +
+  'xmlns:o="urn:schemas-microsoft-com:office:office" ' +
+  'xmlns:x="urn:schemas-microsoft-com:office:excel">' +
+  '<o:shapelayout v:ext="edit"><o:idmap v:ext="edit" data="1"/></o:shapelayout>' +
+  '<v:shapetype id="_x0000_t202" coordsize="21600,21600" o:spt="202" ' +
+  'path="m,l,21600r21600,l21600,xe"><v:stroke joinstyle="miter"/>' +
+  '<v:path gradientshapeok="t" o:connecttype="rect"/></v:shapetype>'
+
+/**
+ * Builds the legacy VML drawing that gives each note its box. The text lives in
+ * the comments part; the box's shape, position and size live here, and without
+ * it Excel stores the note but draws nothing. Each shape borrows the shared
+ * `_x0000_t202` textbox type, stays hidden until the cell is hovered, and
+ * anchors to its cell's zero-based row and column. The anchor's finer offsets
+ * are the defaults Excel writes; it recomputes them when it lays the note out.
+ */
+export function buildVmlDrawing(references: readonly string[]): string {
+  const shapes = references
+    .map((reference, index) => {
+      const { row, column } = parseReference(reference)
+      const cellRow = row - 1
+      const cellColumn = column - 1
+      const anchor = [cellColumn + 1, 15, cellRow, 2, cellColumn + 3, 15, cellRow + 4, 4].join(', ')
+      return (
+        `<v:shape id="_x0000_s${1025 + index}" type="#_x0000_t202" ` +
+        'style="position:absolute;margin-left:60pt;margin-top:1.5pt;' +
+        `width:108pt;height:60pt;z-index:${index + 1};visibility:hidden" ` +
+        'fillcolor="#ffffe1" o:insetmode="auto"><v:fill color2="#ffffe1"/>' +
+        '<v:shadow on="t" color="black" obscured="t"/><v:path o:connecttype="none"/>' +
+        '<v:textbox style="mso-direction-alt:auto"><div style="text-align:left"/></v:textbox>' +
+        '<x:ClientData ObjectType="Note"><x:MoveWithCells/><x:SizeWithCells/>' +
+        `<x:Anchor>${anchor}</x:Anchor><x:AutoFill>False</x:AutoFill>` +
+        `<x:Row>${cellRow}</x:Row><x:Column>${cellColumn}</x:Column></x:ClientData></v:shape>`
+      )
+    })
+    .join('')
+  return `${VML_HEADER}${shapes}</xml>`
 }

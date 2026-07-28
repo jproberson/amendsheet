@@ -1201,6 +1201,64 @@ test('comment writes a comments part, wires it to the sheet and declares its typ
   assert.equal(readWorkbook(workbook.toBytes()).sheets[0]?.cell('A1')?.comment, 'a note')
 })
 
+test('comment writes a VML drawing and a legacyDrawing so Excel draws the note box', () => {
+  const contentTypes =
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+    '<Default Extension="xml" ContentType="application/xml"/></Types>'
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      extra: { '[Content_Types].xml': contentTypes },
+    }),
+  )
+  workbook.sheets[0]?.comment('A1', 'a note')
+  const parts = readContainer(workbook.toBytes()).parts
+
+  const vml = decode(parts.get('xl/drawings/vmlDrawing1.vml'))
+  assert.match(vml, /ObjectType="Note"/)
+  assert.match(vml, /<x:Row>0<\/x:Row><x:Column>0<\/x:Column>/)
+
+  // The comment took rId1, so the drawing takes rId2, and the sheet points at it.
+  assert.match(
+    decode(parts.get('xl/worksheets/sheet1.xml')),
+    /<legacyDrawing r:id="rId2"\/><\/worksheet>/,
+  )
+  assert.match(
+    decode(parts.get('xl/worksheets/_rels/sheet1.xml.rels')),
+    /Id="rId2"[^>]*relationships\/vmlDrawing[^>]*Target="\.\.\/drawings\/vmlDrawing1\.vml"/,
+  )
+  assert.match(
+    decode(parts.get('[Content_Types].xml')),
+    /PartName="\/xl\/drawings\/vmlDrawing1\.vml"/,
+  )
+})
+
+test('comment inserts legacyDrawing before tableParts in schema order', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      after: '<tableParts count="1"><tablePart r:id="rId9"/></tableParts>',
+    }),
+  )
+  workbook.sheets[0]?.comment('A1', 'note')
+  assert.match(
+    decode(readContainer(workbook.toBytes()).parts.get('xl/worksheets/sheet1.xml')),
+    /<legacyDrawing r:id="rId2"\/><tableParts/,
+  )
+})
+
+test('comment inserts legacyDrawing before a worksheet extLst', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      after: '<extLst><ext uri="{FEATURE}"><x14:sparklineGroups/></ext></extLst>',
+    }),
+  )
+  workbook.sheets[0]?.comment('A1', 'note')
+  assert.match(
+    decode(readContainer(workbook.toBytes()).parts.get('xl/worksheets/sheet1.xml')),
+    /<legacyDrawing r:id="rId2"\/><extLst>/,
+  )
+})
+
 test('comment joins an existing sheet rels part rather than replacing it', () => {
   const workbook = readWorkbook(
     build('<row r="1"><c r="A1"><v>1</v></c></row>', {

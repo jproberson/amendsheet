@@ -9,7 +9,7 @@ import {
   withSheetsAdded,
 } from './add-sheet.js'
 import { blankWorkbookBytes } from './blank.js'
-import { buildCommentsPart, readComments } from './comments.js'
+import { buildCommentsPart, buildVmlDrawing, readComments } from './comments.js'
 import { checkDefinedName, readDefinedNames, withDefinedNames } from './defined-names.js'
 import { readRelationships, resolveTarget } from './relationships.js'
 import { type Hyperlink, writeSheetHyperlinks } from './hyperlinks.js'
@@ -419,6 +419,9 @@ const COMMENTS_RELATIONSHIP =
   'http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments'
 const COMMENTS_CONTENT_TYPE =
   'application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml'
+const VML_DRAWING_RELATIONSHIP =
+  'http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing'
+const VML_DRAWING_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.vmlDrawing'
 
 function partText(container: Container, path: string): string | undefined {
   const bytes = container.parts.get(path)
@@ -436,17 +439,58 @@ const EMPTY_RELATIONSHIPS =
   '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
   '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>'
 
-/** Adds a relationship to a rels part, opening a fresh one when there is none. */
-function withRelationship(relsXml: string | undefined, type: string, target: string): string {
+/**
+ * Adds a relationship to a rels part, opening a fresh one when there is none.
+ * Returns the id it assigned as well as the text, since a part wired this way is
+ * often referenced back by that id from the sheet — a legacy drawing is.
+ */
+function withRelationship(
+  relsXml: string | undefined,
+  type: string,
+  target: string,
+): { xml: string; id: string } {
   const existing = relsXml ?? EMPTY_RELATIONSHIPS
   let maxId = 0
   for (const match of existing.matchAll(/Id="rId(\d+)"/g)) maxId = Math.max(maxId, Number(match[1]))
-  const relationship = `<Relationship Id="rId${maxId + 1}" Type="${type}" Target="${target}"/>`
+  const id = `rId${maxId + 1}`
+  const relationship = `<Relationship Id="${id}" Type="${type}" Target="${target}"/>`
   const close = existing.indexOf('</Relationships>')
   if (close === -1) {
     throw new XlsxError('invalid-content', 'A relationships part is malformed', {})
   }
-  return existing.slice(0, close) + relationship + existing.slice(close)
+  return { xml: existing.slice(0, close) + relationship + existing.slice(close), id }
+}
+
+// A worksheet's <legacyDrawing> must sit after the drawing elements and before
+// these, which the schema orders after it. Inserting before the earliest present
+// keeps the order valid; a worksheet-level <extLst> is always the last child, so
+// it is handled separately from any <extLst> nested in an earlier element.
+const LEGACY_DRAWING_SUCCESSORS = [
+  '<legacyDrawingHF',
+  '<drawingHF',
+  '<picture',
+  '<oleObjects',
+  '<controls',
+  '<webPublishItems',
+  '<tableParts',
+]
+
+/** Wires a legacy drawing into a sheet, placed in worksheet schema order. */
+function withLegacyDrawing(sheetXml: string, relationshipId: string): string {
+  const end = sheetXml.indexOf('</worksheet>')
+  if (end === -1) {
+    throw new XlsxError('invalid-content', 'A worksheet part is malformed', {})
+  }
+  let at = end
+  for (const successor of LEGACY_DRAWING_SUCCESSORS) {
+    const found = sheetXml.indexOf(successor)
+    if (found !== -1 && found < at) at = found
+  }
+  if (/<\/extLst>\s*<\/worksheet>\s*$/.test(sheetXml)) {
+    const worksheetExtLst = sheetXml.lastIndexOf('<extLst')
+    if (worksheetExtLst !== -1 && worksheetExtLst < at) at = worksheetExtLst
+  }
+  return `${sheetXml.slice(0, at)}<legacyDrawing r:id="${relationshipId}"/>${sheetXml.slice(at)}`
 }
 
 /** Declares a part in the content types with an Override, once. */
@@ -1711,12 +1755,16 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       }
     }
 
-    // Comments go in their own part, wired to the sheet by a relationship and
-    // declared in the content types. Only sheets that had none reach here, so a
-    // fresh part is opened; its number skips any the package or this run already
-    // uses. The rels are read from what a hyperlink write may have just changed.
+    // Comments go in two parts, wired to the sheet and declared in the content
+    // types. The comments part holds the text; a legacy VML drawing holds the box
+    // Excel draws for each note, without which the note is stored but never shown.
+    // Only sheets that had none reach here, so fresh parts are opened; each number
+    // skips any the package or this run already uses. The rels are read from what
+    // a hyperlink write may have just changed.
     const commentParts: string[] = []
+    const vmlDrawingParts: string[] = []
     let commentNumber = 0
+    let vmlDrawingNumber = 0
     for (const [path, notes] of sheetComments) {
       if (removed.has(path) || notes.size === 0) continue
       do {
@@ -1729,17 +1777,38 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       changes.set(commentsPath, encoder.encode(buildCommentsPart(notes)))
       commentParts.push(commentsPath)
 
+      do {
+        vmlDrawingNumber += 1
+      } while (
+        container.parts.has(`xl/drawings/vmlDrawing${vmlDrawingNumber}.vml`) ||
+        changes.has(`xl/drawings/vmlDrawing${vmlDrawingNumber}.vml`)
+      )
+      const vmlDrawingPath = `xl/drawings/vmlDrawing${vmlDrawingNumber}.vml`
+      changes.set(vmlDrawingPath, encoder.encode(buildVmlDrawing([...notes.keys()])))
+      vmlDrawingParts.push(vmlDrawingPath)
+
       const relationshipsPath = relationshipsPathFor(path)
       const pendingRels = changes.get(relationshipsPath)
       const currentRels =
         pendingRels === undefined || pendingRels === null
           ? partText(container, relationshipsPath)
           : decodePart.decode(pendingRels)
-      const target = `../${commentsPath.slice('xl/'.length)}`
-      changes.set(
-        relationshipsPath,
-        encoder.encode(withRelationship(currentRels, COMMENTS_RELATIONSHIP, target)),
+      const withComments = withRelationship(
+        currentRels,
+        COMMENTS_RELATIONSHIP,
+        `../${commentsPath.slice('xl/'.length)}`,
       )
+      const withVml = withRelationship(
+        withComments.xml,
+        VML_DRAWING_RELATIONSHIP,
+        `../${vmlDrawingPath.slice('xl/'.length)}`,
+      )
+      changes.set(relationshipsPath, encoder.encode(withVml.xml))
+
+      const sheetXml = sheetTextNow(path)
+      if (sheetXml !== undefined) {
+        changes.set(path, encoder.encode(withLegacyDrawing(sheetXml, withVml.id)))
+      }
     }
 
     // Inserting or deleting a line moves references across the whole workbook. The
@@ -1820,6 +1889,9 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       for (const path of removedExisting) updated = withoutOverride(updated, path)
       for (const commentsPath of commentParts) {
         updated = withContentTypeOverride(updated, commentsPath, COMMENTS_CONTENT_TYPE)
+      }
+      for (const vmlDrawingPath of vmlDrawingParts) {
+        updated = withContentTypeOverride(updated, vmlDrawingPath, VML_DRAWING_CONTENT_TYPE)
       }
       return updated
     })
