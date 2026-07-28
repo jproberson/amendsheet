@@ -246,15 +246,16 @@ export interface Worksheet {
   autoFilter(range: string): void
   /**
    * Adds a data validation over a cell or range. `{ list }` offers its values as a
-   * dropdown (no value may hold a comma, the inline list's separator); `{ whole }`
-   * and `{ decimal }` constrain a number against a comparison. Joins any the sheet
-   * already has. Written by `toBytes()`.
+   * dropdown (no value may hold a comma, the inline list's separator); `{ whole }`,
+   * `{ decimal }` and `{ textLength }` constrain a number, a decimal or the text
+   * length against a comparison; `{ custom }` requires a formula. Joins any the
+   * sheet already has. Written by `toBytes()`.
    */
   validate(range: string, rule: DataValidation): void
   /**
    * The data validations in force, each with the range it covers, the file's own
    * plus any added this session with `validate`. A rule of a kind this does not
-   * model — a date, a text length, a custom formula, or a list naming a range
+   * model — a date, a time, or a list naming a range
    * rather than inline values — is left out.
    */
   readonly validations: readonly { readonly range: string; readonly rule: DataValidation }[]
@@ -410,6 +411,10 @@ export type DataValidation = { readonly allowBlank?: boolean } & (
     }
   | { readonly whole: NumberConstraint }
   | { readonly decimal: NumberConstraint }
+  /** Constrains the cell's text length, the same comparisons as `whole`. */
+  | { readonly textLength: NumberConstraint }
+  /** A formula the cell must satisfy, written verbatim (`ISNUMBER(A1)`). */
+  | { readonly custom: string }
 )
 
 /** A colour scale graded across a range: two stops, or three with a midpoint. */
@@ -638,8 +643,13 @@ function buildValidationSpec(
     }
     return { type: 'list', sqref, allowBlank, formula1: `"${rule.list.join(',')}"` }
   }
+  if ('custom' in rule) {
+    return { type: 'custom', sqref, allowBlank, formula1: rule.custom }
+  }
 
-  const constraint = 'whole' in rule ? rule.whole : rule.decimal
+  const type = 'whole' in rule ? 'whole' : 'decimal' in rule ? 'decimal' : 'textLength'
+  const constraint =
+    'whole' in rule ? rule.whole : 'decimal' in rule ? rule.decimal : rule.textLength
   const comparison = numberComparison(constraint)
   const bounds =
     comparison.formula2 === undefined
@@ -654,7 +664,7 @@ function buildValidationSpec(
     }
   }
   return {
-    type: 'whole' in rule ? 'whole' : 'decimal',
+    type,
     sqref,
     allowBlank,
     operator: comparison.operator,
@@ -705,18 +715,21 @@ function comparisonToConstraint(
 }
 
 /** A stored validation spec back into the public rule, or undefined for a type
- * this does not model (a date, a text length, a custom formula). */
+ * this does not model (a date, a time, a list naming a range). */
 function validationFromSpec(spec: DataValidationSpec): DataValidation | undefined {
   if (spec.type === 'list') {
     const list = listFromFormula(spec.formula1)
     return list === undefined ? undefined : { allowBlank: spec.allowBlank, list }
   }
-  if (spec.type === 'whole' || spec.type === 'decimal') {
+  if (spec.type === 'custom') {
+    return { allowBlank: spec.allowBlank, custom: spec.formula1 }
+  }
+  if (spec.type === 'whole' || spec.type === 'decimal' || spec.type === 'textLength') {
     const constraint = comparisonToConstraint(spec.operator, spec.formula1, spec.formula2)
     if (constraint === undefined) return undefined
-    return spec.type === 'whole'
-      ? { allowBlank: spec.allowBlank, whole: constraint }
-      : { allowBlank: spec.allowBlank, decimal: constraint }
+    if (spec.type === 'whole') return { allowBlank: spec.allowBlank, whole: constraint }
+    if (spec.type === 'decimal') return { allowBlank: spec.allowBlank, decimal: constraint }
+    return { allowBlank: spec.allowBlank, textLength: constraint }
   }
   return undefined
 }

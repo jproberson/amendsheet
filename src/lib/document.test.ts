@@ -1253,7 +1253,7 @@ test('validations reflect a pending validate and skip a kind not modelled', () =
     build('<row r="1"><c r="A1"><v>1</v></c></row>', {
       after:
         '<dataValidations count="5">' +
-        '<dataValidation type="textLength" operator="lessThan" sqref="A1"><formula1>5</formula1></dataValidation>' +
+        '<dataValidation type="date" operator="lessThan" sqref="A1"><formula1>40000</formula1></dataValidation>' +
         '<dataValidation type="list" sqref="B1"><formula1>Sheet1!$A$1:$A$3</formula1></dataValidation>' +
         '<dataValidation type="whole" operator="wonky" sqref="C1"><formula1>1</formula1></dataValidation>' +
         '<dataValidation type="whole" operator="equal" sqref="D1"><formula1>abc</formula1></dataValidation>' +
@@ -1261,12 +1261,24 @@ test('validations reflect a pending validate and skip a kind not modelled', () =
         '</dataValidations>',
     }),
   ).sheets[0]
-  // A textLength, a range-backed list, an unknown operator and non-numeric bounds
+  // A date, a range-backed list, an unknown operator and non-numeric bounds
   // are all left out.
   assert.deepEqual(sheet?.validations, [])
   sheet?.validate('F1', { whole: { equal: 7 } })
   assert.deepEqual(sheet?.validations, [
     { range: 'F1', rule: { allowBlank: true, whole: { equal: 7 } } },
+  ])
+})
+
+test('validations round-trip textLength and custom rules', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  const sheet = workbook.sheets[0]
+  sheet?.validate('A1', { textLength: { lessThanOrEqual: 10 } })
+  sheet?.validate('B1', { custom: 'LEN(B1)>3', allowBlank: false })
+  const back = readWorkbook(workbook.toBytes()).sheets[0]
+  assert.deepEqual(back?.validations, [
+    { range: 'A1', rule: { allowBlank: true, textLength: { lessThanOrEqual: 10 } } },
+    { range: 'B1', rule: { allowBlank: false, custom: 'LEN(B1)>3' } }, // formula's > survives escaping
   ])
 })
 
