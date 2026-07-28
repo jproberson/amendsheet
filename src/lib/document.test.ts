@@ -1194,6 +1194,22 @@ test('a comment on a cell the sheet never gave a value is still read', () => {
   assert.ok([...(sheet?.cells() ?? [])].some((c) => c.reference === 'D4'))
 })
 
+test('mergedRanges reports the sheet merges and any added this session', () => {
+  const sheet = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      after: '<mergeCells count="1"><mergeCell ref="A1:B2"/></mergeCells>',
+    }),
+  ).sheets[0]
+  assert.deepEqual(sheet?.mergedRanges, ['A1:B2'])
+  sheet?.merge('d4:e5')
+  assert.deepEqual(sheet?.mergedRanges, ['A1:B2', 'D4:E5'])
+})
+
+test('mergedRanges is empty for a sheet with no merges', () => {
+  const sheet = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>')).sheets[0]
+  assert.deepEqual(sheet?.mergedRanges, [])
+})
+
 test('comment writes a comments part, wires it to the sheet and declares its type', () => {
   const contentTypes =
     '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +

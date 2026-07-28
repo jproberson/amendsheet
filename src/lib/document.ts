@@ -198,6 +198,12 @@ export interface Worksheet {
   /** Removes worksheet protection, if the sheet had any. */
   unprotect(): void
   /**
+   * The ranges the sheet merges, each as `A1:B2`, the file's own plus any added
+   * this session with `merge`. Reflects the file as read; a shift from inserting
+   * or deleting lines is applied on write, not here.
+   */
+  readonly mergedRanges: readonly string[]
+  /**
    * Merges a rectangular range like `A1:B2`, joining any merges the sheet
    * already has. Excel shows only the top-left cell's value; the others keep
    * whatever they hold, since a merge does not clear them. Refuses a range that
@@ -1093,6 +1099,13 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         if (pending === 'remove') return undefined
         if (pending !== undefined) return pending
         return sheetBytes === undefined ? undefined : readSheetProtection(sheetBytes)
+      },
+      get mergedRanges(): readonly string[] {
+        const fromFile = (indexed()?.merges ?? []).map(
+          (merge) =>
+            `${merge.anchor}:${formatReference({ row: merge.maxRow, column: merge.maxColumn })}`,
+        )
+        return [...new Set([...fromFile, ...(sheetMerges.get(reference.path) ?? [])])]
       },
       cells: () => readCells(),
       cell(cellReference: string): Cell | undefined {
