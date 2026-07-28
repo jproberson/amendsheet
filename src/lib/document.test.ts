@@ -1210,6 +1210,28 @@ test('mergedRanges is empty for a sheet with no merges', () => {
   assert.deepEqual(sheet?.mergedRanges, [])
 })
 
+test('rowHeight and columnWidth read the file', () => {
+  const sheet = readWorkbook(
+    build('<row r="1" ht="30" customHeight="1"><c r="A1"><v>1</v></c></row>', {
+      views: '<cols><col min="1" max="2" width="12.5" customWidth="1"/></cols>',
+    }),
+  ).sheets[0]
+  assert.equal(sheet?.rowHeight(1), 30)
+  assert.equal(sheet?.columnWidth('A'), 12.5)
+  assert.equal(sheet?.columnWidth('B'), 12.5) // the same col range covers B
+  assert.equal(sheet?.rowHeight(2), undefined)
+  assert.equal(sheet?.columnWidth('C'), undefined)
+})
+
+test('rowHeight and columnWidth reflect a pending set before it is written', () => {
+  const sheet = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>')).sheets[0]
+  assert.equal(sheet?.rowHeight(1), undefined)
+  sheet?.setRowHeight(1, 42)
+  sheet?.setColumnWidth('A', 8)
+  assert.equal(sheet?.rowHeight(1), 42)
+  assert.equal(sheet?.columnWidth('A'), 8)
+})
+
 test('link round-trips: an external url is read back on the cell', () => {
   const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
   workbook.sheets[0]?.link('A1', { url: 'https://example.com/a', tooltip: 'go' })
@@ -2669,6 +2691,8 @@ test('refuses a write to a sheet whose part is not in the package', () => {
   )
   assert.equal(workbook.sheets[0]?.cell('A1'), undefined)
   assert.deepEqual(workbook.sheets[0]?.mergedRanges, []) // no bytes to read merges from
+  assert.equal(workbook.sheets[0]?.rowHeight(1), undefined)
+  assert.equal(workbook.sheets[0]?.columnWidth('A'), undefined)
   assert.throws(
     () => workbook.sheets[0]?.protect(),
     (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',

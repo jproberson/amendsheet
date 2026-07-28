@@ -8,6 +8,8 @@ import {
   indexSheet,
   mergeRangeReference,
   patchSheet as patchSheetBytes,
+  readColumnWidths,
+  readRowHeights,
   readSheetProtection,
 } from './patch.js'
 import { XlsxError } from './errors.js'
@@ -858,4 +860,25 @@ test('checkProtection refuses an argument that is not an options object', () => 
   refuses(7)
   checkProtection({}) // a valid empty options object does not throw
   checkProtection({ formatCells: true })
+})
+
+test('readRowHeights reads ht and skips a row without one or with a bad value', () => {
+  const bytes = encode(
+    '<worksheet><sheetData>' +
+      '<row r="1" ht="30" customHeight="1"/><row r="2"/><row r="3" ht="x"/>' +
+      '</sheetData></worksheet>',
+  )
+  const heights = readRowHeights(bytes)
+  assert.equal(heights.get(1), 30)
+  assert.equal(heights.has(2), false)
+  assert.equal(heights.has(3), false)
+})
+
+test('readColumnWidths reads width ranges and skips a col without a width or with a bad one', () => {
+  const bytes = encode(
+    '<worksheet><cols>' +
+      '<col min="1" max="3" width="10" customWidth="1"/><col min="5" max="5"/><col min="7" max="x" width="9"/>' +
+      '</cols><sheetData/></worksheet>',
+  )
+  assert.deepEqual(readColumnWidths(bytes), [{ min: 1, max: 3, width: 10 }])
 })

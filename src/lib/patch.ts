@@ -114,6 +114,45 @@ export function readSheetProtection(bytes: Uint8Array): SheetProtection | undefi
 
 const isProtected = (value: string | undefined): boolean => value === '1' || value === 'true'
 
+/** A row's stored height in points, keyed by its one-based number. */
+export function readRowHeights(bytes: Uint8Array): ReadonlyMap<number, number> {
+  const heights = new Map<number, number>()
+  for (const event of readXmlBytes(bytes)) {
+    if (event.kind !== 'open' || event.localName !== 'row') continue
+    const stored = event.attributes.get('ht')
+    if (stored === undefined) continue
+    const number = Number(event.attributes.get('r'))
+    const height = Number(stored)
+    if (Number.isInteger(number) && number >= 1 && Number.isFinite(height)) {
+      heights.set(number, height)
+    }
+  }
+  return heights
+}
+
+/**
+ * The column-width ranges a sheet stores, each width covering columns `min` to
+ * `max`. Kept as ranges rather than expanded per column, since one `<col>` may
+ * span the whole sheet.
+ */
+export function readColumnWidths(
+  bytes: Uint8Array,
+): readonly { min: number; max: number; width: number }[] {
+  const ranges: { min: number; max: number; width: number }[] = []
+  for (const event of readXmlBytes(bytes)) {
+    if (event.kind !== 'open' || event.localName !== 'col') continue
+    const stored = event.attributes.get('width')
+    if (stored === undefined) continue
+    const min = Number(event.attributes.get('min'))
+    const max = Number(event.attributes.get('max'))
+    const width = Number(stored)
+    if (Number.isInteger(min) && Number.isInteger(max) && Number.isFinite(width)) {
+      ranges.push({ min, max, width })
+    }
+  }
+  return ranges
+}
+
 /** Element content only. Quotes need no escaping there, and Excel leaves them. */
 const escapeXml = (text: string) =>
   text

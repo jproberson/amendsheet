@@ -33,6 +33,8 @@ import {
   mergeRefusal,
   patchSheet,
   indexSheet,
+  readColumnWidths,
+  readRowHeights,
   readSheetProtection,
   sharedFormulaRefusal,
   type SheetIndex,
@@ -263,6 +265,17 @@ export interface Worksheet {
    * when the sheet is scrolled. `freeze('B2')` freezes row 1 and column A.
    */
   freeze(cell: string): void
+  /**
+   * A row's height in points, the file's or one set this session, or undefined
+   * when the row carries no height of its own. The row is one-based.
+   */
+  rowHeight(row: number): number | undefined
+  /**
+   * A column's width in the units Excel shows, the file's or one set this
+   * session, or undefined when no `<col>` covering it carries a width. The column
+   * is a letter like `A`.
+   */
+  columnWidth(column: string): number | undefined
   /**
    * Sets a row's height in points, marking it a custom height so a reader keeps
    * it. Refuses a row number below 1 or a height that is not a finite number at
@@ -804,6 +817,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     // Read on first use from the same bytes the cells stream from, and memoised;
     // unlike comments this parses the whole sheet, so a workbook whose cells are
     // never read does not pay for it.
+    let rowHeightsCache: ReadonlyMap<number, number> | undefined
+    let columnWidthsCache: readonly { min: number; max: number; width: number }[] | undefined
     let hyperlinksCache: ReadonlyMap<string, Hyperlink> | undefined
     const hyperlinksFor = (bytes: Uint8Array): ReadonlyMap<string, Hyperlink> => {
       if (hyperlinksCache === undefined) {
@@ -1139,6 +1154,21 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             `${merge.anchor}:${formatReference({ row: merge.maxRow, column: merge.maxColumn })}`,
         )
         return [...new Set([...fromFile, ...(sheetMerges.get(reference.path) ?? [])])]
+      },
+      rowHeight(row: number): number | undefined {
+        const pending = sheetRowHeights.get(reference.path)?.get(row)
+        if (pending !== undefined) return pending
+        if (sheetBytes === undefined) return undefined
+        rowHeightsCache ??= readRowHeights(sheetBytes)
+        return rowHeightsCache.get(row)
+      },
+      columnWidth(column: string): number | undefined {
+        const index = columnToIndex(column)
+        const pending = sheetColumnWidths.get(reference.path)?.get(index)
+        if (pending !== undefined) return pending
+        if (sheetBytes === undefined) return undefined
+        columnWidthsCache ??= readColumnWidths(sheetBytes)
+        return columnWidthsCache.find((range) => index >= range.min && index <= range.max)?.width
       },
       cells: () => readCells(),
       cell(cellReference: string): Cell | undefined {
