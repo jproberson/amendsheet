@@ -86,6 +86,27 @@ export function withSheetRenamed(workbookXml: string, oldName: string, newName: 
   return workbookXml.replace(pattern, (_match, lead) => `${lead}${escapeSheetName(newName)}"`)
 }
 
+/**
+ * Sets a sheet's visibility on its `<sheet>` element, matched by name. `visible`
+ * is the default, so it is written by dropping the `state` attribute rather than
+ * spelling it out.
+ */
+export function withSheetState(
+  workbookXml: string,
+  name: string,
+  state: 'visible' | 'hidden' | 'veryHidden',
+): string {
+  const tag = new RegExp(
+    `<([a-z0-9]*:)?sheet\\b[^>]*\\bname="${escapeRegExp(escapeSheetName(name))}"[^>]*?/?>`,
+    'i',
+  )
+  return workbookXml.replace(tag, (match) => {
+    const withoutState = match.replace(/\s+state="[^"]*"/i, '')
+    if (state === 'visible') return withoutState
+    return withoutState.replace(/(\bname="[^"]*")/, `$1 state="${state}"`)
+  })
+}
+
 /** Removes the `<sheet>` carrying `name` from the workbook's `<sheets>`. */
 export function withSheetRemoved(workbookXml: string, name: string): string {
   const pattern = new RegExp(

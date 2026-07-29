@@ -42,6 +42,46 @@ function build(
   return writeContainer({ parts: new Map(Object.entries(parts)) })
 }
 
+test('setState hides a sheet, reads it back, and refuses the last visible one', () => {
+  const created = createWorkbook('First')
+  created.addSheet('Second')
+  const workbook = readWorkbook(created.toBytes()) // a real two-sheet file
+
+  workbook.sheet('First')?.setState('hidden')
+  assert.equal(workbook.sheet('First')?.state, 'hidden') // live before the write
+
+  const back = readWorkbook(workbook.toBytes())
+  assert.equal(back.sheet('First')?.state, 'hidden')
+  assert.equal(back.sheet('Second')?.state, 'visible')
+
+  // Second is now the only visible sheet, so hiding it is refused.
+  assert.throws(
+    () => back.sheet('Second')?.setState('hidden'),
+    (error: unknown) => error instanceof XlsxError && error.code === 'unsupported-edit',
+  )
+})
+
+test('setState hides a sheet added this session', () => {
+  const workbook = createWorkbook('Main')
+  workbook.addSheet('Extra').setState('hidden')
+  const back = readWorkbook(workbook.toBytes())
+  assert.equal(back.sheet('Extra')?.state, 'hidden')
+  assert.equal(back.sheet('Main')?.state, 'visible')
+})
+
+test('setState round-trips veryHidden and back to visible', () => {
+  const created = createWorkbook('A')
+  created.addSheet('B')
+  const workbook = readWorkbook(created.toBytes())
+
+  workbook.sheet('B')?.setState('veryHidden')
+  const back = readWorkbook(workbook.toBytes())
+  assert.equal(back.sheet('B')?.state, 'veryHidden')
+
+  back.sheet('B')?.setState('visible')
+  assert.equal(readWorkbook(back.toBytes()).sheet('B')?.state, 'visible')
+})
+
 test('setProperties creates a core properties part, wired and declared, and reads back', () => {
   const contentTypes =
     '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +

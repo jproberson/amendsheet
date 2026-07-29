@@ -252,6 +252,8 @@ workbook.sheets // readonly Worksheet[]
 workbook.sheet('Data') // by name, undefined if none
 const added = workbook.addSheet('New')
 added.rename('Renamed')
+added.setState('hidden') // 'visible' | 'hidden' | 'veryHidden'; refuses the last visible sheet
+added.state // reads it back, reflecting a pending setState
 added.remove() // a workbook must keep at least one sheet
 
 workbook.definedNames // ReadonlyMap<name, formula>

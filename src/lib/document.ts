@@ -6,6 +6,7 @@ import {
   withSheetRelationships,
   withSheetRemoved,
   withSheetRenamed,
+  withSheetState,
   withSheetsAdded,
 } from './add-sheet.js'
 import { blankWorkbookBytes } from './blank.js'
@@ -170,7 +171,14 @@ export interface Worksheet {
   rename(name: string): void
   /** Removes the sheet from the workbook. A workbook must keep at least one. */
   remove(): void
+  /** Visible, hidden, or very hidden (hidden and not offered in Excel's unhide
+   * list). Reflects a pending `setState`. */
   readonly state: SheetState
+  /**
+   * Sets the sheet's visibility. Refused when it would hide the workbook's only
+   * visible sheet, which Excel will not open.
+   */
+  setState(state: SheetState): void
   /**
    * As the workbook part spells it, so a defined name or a part this library
    * does not interpret can be matched against the sheet it refers to.
@@ -981,6 +989,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   const sheetColumnWidths = new Map<string, Map<number, number>>()
   const sheetAutoFilters = new Map<string, string>()
   const sheetFreezes = new Map<string, string>()
+  const sheetStates = new Map<string, SheetState>()
   const sheetHiddenRows = new Map<string, Set<number>>()
   const sheetHiddenColumns = new Map<string, Set<number>>()
   const sheetTabColors = new Map<string, string>()
@@ -1425,7 +1434,24 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           if (addedIndex !== -1) addedRefs.splice(addedIndex, 1)
         }
       },
-      state: reference.state,
+      get state(): SheetState {
+        return sheetStates.get(reference.path) ?? reference.state
+      },
+      setState(state: SheetState): void {
+        if (state !== 'visible') {
+          const currentlyVisible =
+            (sheetStates.get(reference.path) ?? reference.state) === 'visible'
+          const visible = sheets.filter((candidate) => candidate.state === 'visible').length
+          if (currentlyVisible && visible <= 1) {
+            throw new XlsxError(
+              'unsupported-edit',
+              `Sheet ${reference.name} is the only visible sheet, so it cannot be hidden`,
+              { ...at },
+            )
+          }
+        }
+        sheetStates.set(reference.path, state)
+      },
       sheetId: reference.sheetId,
       get protection(): SheetProtection | undefined {
         const pending = sheetProtections.get(reference.path)
@@ -2127,7 +2153,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       removed.size === 0 &&
       pendingNames.size === 0 &&
       lineOps.length === 0 &&
-      Object.keys(pendingProperties).length === 0
+      Object.keys(pendingProperties).length === 0 &&
+      sheetStates.size === 0
     ) {
       return container.write(changes)
     }
@@ -2394,6 +2421,16 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         }
       }
       updated = withSheetsAdded(updated, renamedAdded)
+      // Visibility lands by the sheet's current name — after a rename, and once an
+      // added sheet's element exists to carry it.
+      for (const [path, state] of sheetStates) {
+        if (removed.has(path)) continue
+        const name =
+          renames.get(path) ??
+          originalName(path) ??
+          renamedAdded.find((added) => added.reference.path === path)?.reference.name
+        if (name !== undefined) updated = withSheetState(updated, name, state)
+      }
       for (const path of removedExisting) {
         const original = originalName(path)
         if (original !== undefined) updated = withSheetRemoved(updated, original)

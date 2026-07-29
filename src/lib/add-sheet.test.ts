@@ -7,6 +7,7 @@ import {
   withSheetRelationships,
   withSheetRemoved,
   withSheetRenamed,
+  withSheetState,
   withSheetsAdded,
 } from './add-sheet.js'
 import { XlsxError } from './errors.js'
@@ -125,4 +126,18 @@ test('checkSheetName accepts a valid name and refuses the rest', () => {
   refuses('a'.repeat(32)) // longer than 31
   refuses('a:b') // a character Excel forbids
   refuses('Same', ['same']) // a name already taken, in another case
+})
+
+test('withSheetState sets, replaces and clears the state attribute by name', () => {
+  const xml =
+    '<sheets><sheet name="A" sheetId="1" r:id="rId1"/>' +
+    '<sheet name="B" sheetId="2" r:id="rId2" state="hidden"/></sheets>'
+  assert.match(withSheetState(xml, 'A', 'hidden'), /<sheet name="A" state="hidden" sheetId="1"/)
+  assert.match(
+    withSheetState(xml, 'B', 'veryHidden'),
+    /<sheet name="B" state="veryHidden" sheetId="2"/,
+  )
+  const shown = withSheetState(xml, 'B', 'visible')
+  assert.match(shown, /<sheet name="B" sheetId="2" r:id="rId2"\/>/) // state dropped
+  assert.equal((shown.match(/state=/g) ?? []).length, 0)
 })
