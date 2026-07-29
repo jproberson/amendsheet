@@ -42,6 +42,31 @@ function build(
   return writeContainer({ parts: new Map(Object.entries(parts)) })
 }
 
+test('unlink removes a hyperlink on write, keeping the rest', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row><row r="2"><c r="B2"><v>2</v></c></row>', {
+      after:
+        '<hyperlinks><hyperlink ref="A1" location="Sheet1!Z9"/>' +
+        '<hyperlink ref="B2" location="Sheet1!Y8"/></hyperlinks>',
+    }),
+  )
+  const sheet = workbook.sheets[0]
+  assert.deepEqual(sheet?.cell('A1')?.hyperlink, { location: 'Sheet1!Z9' })
+  sheet?.unlink('A1')
+
+  const back = readWorkbook(workbook.toBytes()).sheets[0]
+  assert.equal(back?.cell('A1')?.hyperlink, undefined)
+  assert.deepEqual(back?.cell('B2')?.hyperlink, { location: 'Sheet1!Y8' }) // kept
+})
+
+test('a cell linked then unlinked this session has no link', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  const sheet = workbook.sheets[0]
+  sheet?.link('A1', { url: 'https://x.test/' })
+  sheet?.unlink('A1')
+  assert.equal(readWorkbook(workbook.toBytes()).sheets[0]?.cell('A1')?.hyperlink, undefined)
+})
+
 test('unmerge removes a merge, live and on write, keeping the rest', () => {
   const workbook = readWorkbook(
     build('<row r="1"><c r="A1"><v>1</v></c></row>', {
@@ -3120,6 +3145,14 @@ test('refuses a write to a sheet whose part is not in the package', () => {
   )
   assert.throws(
     () => workbook.sheets[0]?.autoFilter('A1:B2'),
+    (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
+  )
+  assert.throws(
+    () => workbook.sheets[0]?.unmerge('A1:B2'),
+    (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
+  )
+  assert.throws(
+    () => workbook.sheets[0]?.unlink('A1'),
     (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
   )
   assert.throws(

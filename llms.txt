@@ -216,6 +216,7 @@ sheet?.cell('A1')?.comment // the text, when read back
 
 sheet?.link('B2', { url: 'https://example.com', tooltip: 'Open' })
 sheet?.link('B3', { location: 'Sheet2!A1' }) // a place in the workbook
+sheet?.unlink('B2') // removes the link; a cell without one is ignored
 sheet?.cell('B2')?.hyperlink // { url } or { location }
 ```
 

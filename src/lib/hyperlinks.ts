@@ -187,6 +187,56 @@ export function writeSheetHyperlinks(
 }
 
 /**
+ * Removes the `<hyperlink>` elements anchored at a cell in `refs` — the top-left
+ * of the ref, matching how they read — and drops the `<hyperlinks>` element when
+ * none is left. A cell without a link is ignored. Any external relationship the
+ * link used is left in the rels as a harmless dangling entry.
+ */
+/** The cell a hyperlink's `ref` anchors at: the canonical top-left of the range,
+ * or the ref itself when no column can name it. */
+function anchorReference(ref: string): string {
+  const colon = ref.indexOf(':')
+  const anchor = colon === -1 ? ref : ref.slice(0, colon)
+  return canonicalReference(parseReference(anchor)) ?? anchor
+}
+
+export function withoutHyperlinks(sheetXml: string, refs: ReadonlySet<string>): string {
+  if (refs.size === 0) return sheetXml
+  const spans: { start: number; end: number }[] = []
+  let container: { openStart: number; openEnd: number } | undefined
+  let closeStart = -1
+  let total = 0
+  let inside = false
+  for (const event of readXml(sheetXml)) {
+    if (event.kind === 'open' && event.localName === 'hyperlinks') {
+      container = { openStart: event.start, openEnd: event.end }
+      inside = !event.selfClosing
+    } else if (event.kind === 'close' && event.localName === 'hyperlinks') {
+      closeStart = event.start
+      inside = false
+    } else if (inside && event.kind === 'open' && event.localName === 'hyperlink') {
+      total += 1
+      const ref = event.attributes.get('ref')
+      if (ref !== undefined) {
+        if (refs.has(anchorReference(ref))) {
+          spans.push({ start: event.start, end: event.end })
+        }
+      }
+    }
+  }
+  if (container === undefined || spans.length === 0) return sheetXml
+  if (total - spans.length <= 0) {
+    const closeEnd = sheetXml.indexOf('>', closeStart) + 1
+    return sheetXml.slice(0, container.openStart) + sheetXml.slice(closeEnd)
+  }
+  let xml = sheetXml
+  for (const span of spans.sort((a, b) => b.start - a.start)) {
+    xml = xml.slice(0, span.start) + xml.slice(span.end)
+  }
+  return xml
+}
+
+/**
  * Reads a sheet's hyperlinks, keyed by the cell each anchors at — the top-left of
  * the ref, so a range link lands on the cell a reader clicks first. An `r:id`
  * link resolves to its external URL through the sheet's rels; a `location` link is
@@ -214,9 +264,7 @@ export function readSheetHyperlinks(
     if (!inside || event.localName !== 'hyperlink') continue
     const ref = event.attributes.get('ref')
     if (ref === undefined) continue
-    const colon = ref.indexOf(':')
-    const anchor = colon === -1 ? ref : ref.slice(0, colon)
-    const key = canonicalReference(parseReference(anchor)) ?? anchor
+    const key = anchorReference(ref)
     const tooltip = event.attributes.get('tooltip')
     const relationshipId = event.attributes.get('r:id')
     if (relationshipId !== undefined) {

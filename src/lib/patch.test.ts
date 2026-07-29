@@ -1045,6 +1045,7 @@ test('withoutMergeCells removes matching merges, updates the count, and drops an
   assert.doesNotMatch(gone, /mergeCells/) // whole element dropped
 
   assert.equal(withoutMergeCells(two, new Set(['Z9:Z10'])), two) // no match, unchanged
+  assert.equal(withoutMergeCells(two, new Set()), two) // nothing to remove
 
   // Removing two of three leaves the element, exercising the span sort.
   const three =

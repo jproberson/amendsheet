@@ -3,6 +3,7 @@ import { test } from 'node:test'
 
 import {
   readSheetHyperlinks,
+  withoutHyperlinks,
   withHyperlinkRelationships,
   withHyperlinks,
   writeSheetHyperlinks,
@@ -162,4 +163,30 @@ test('readSheetHyperlinks handles a self-closing element and drops a missing rel
   )
   const sheet = worksheet('<sheetData/><hyperlinks><hyperlink ref="A1" r:id="rId9"/></hyperlinks>')
   assert.equal(readSheetHyperlinks(sheet, undefined, 'rels').size, 0)
+})
+
+test('withoutHyperlinks removes anchored links and drops an emptied element', () => {
+  const sheet = worksheet(
+    '<sheetData/><hyperlinks><hyperlink ref="A1" r:id="rId1"/>' +
+      '<hyperlink ref="B2:C3" location="X"/><hyperlink ref="D4" location="Y"/></hyperlinks>',
+  )
+  const some = withoutHyperlinks(sheet, new Set(['A1', 'B2'])) // B2 anchors the B2:C3 range
+  assert.doesNotMatch(some, /ref="A1"/)
+  assert.doesNotMatch(some, /ref="B2:C3"/)
+  assert.match(some, /<hyperlink ref="D4" location="Y"\/>/)
+
+  const gone = withoutHyperlinks(sheet, new Set(['A1', 'B2', 'D4']))
+  assert.doesNotMatch(gone, /hyperlinks/) // whole element dropped
+
+  assert.equal(withoutHyperlinks(sheet, new Set(['Z9'])), sheet) // no match
+  assert.equal(withoutHyperlinks(sheet, new Set()), sheet) // nothing to remove
+})
+
+test('withoutHyperlinks leaves a ref-less hyperlink alone', () => {
+  const sheet = worksheet(
+    '<sheetData/><hyperlinks><hyperlink location="orphan"/><hyperlink ref="A1" location="y"/></hyperlinks>',
+  )
+  const kept = withoutHyperlinks(sheet, new Set(['A1']))
+  assert.match(kept, /<hyperlink location="orphan"\/>/)
+  assert.doesNotMatch(kept, /ref="A1"/)
 })

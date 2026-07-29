@@ -24,7 +24,12 @@ import {
   writeCoreProperties,
 } from './document-properties.js'
 import { readRelationships, resolveTarget } from './relationships.js'
-import { type Hyperlink, readSheetHyperlinks, writeSheetHyperlinks } from './hyperlinks.js'
+import {
+  type Hyperlink,
+  readSheetHyperlinks,
+  withoutHyperlinks,
+  writeSheetHyperlinks,
+} from './hyperlinks.js'
 import { type Container, decodeXmlPart } from './container.js'
 import { XlsxError } from './errors.js'
 import { LAST_SERIAL, dateToSerial, parseIsoDate, serialToDate } from './date.js'
@@ -407,6 +412,9 @@ export interface Worksheet {
    * `location` is written inline. Visible in the file after `toBytes()`.
    */
   link(reference: string, target: Hyperlink): void
+  /** Removes the link anchored at a cell. A cell without one is ignored; the
+   * external relationship a URL used is left as a harmless dangling entry. */
+  unlink(reference: string): void
 }
 
 /** A comparison keyed by operator: a range for `between`/`notBetween`, a single
@@ -1040,6 +1048,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   const removedNames = new Set<string>()
   let pendingProperties: DocumentProperties = {}
   const sheetHyperlinks = new Map<string, Map<string, Hyperlink>>()
+  const sheetUnlinks = new Map<string, Set<string>>()
   // Row and column inserts and deletes, in call order. Each names the sheet it
   // was called on; toBytes applies them after the per-sheet patch so an edit made
   // this session lands in the old grid and then moves with the shift.
@@ -2124,9 +2133,24 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             reference: canonical,
           })
         }
+        sheetUnlinks.get(reference.path)?.delete(canonical)
         const links = sheetHyperlinks.get(reference.path) ?? new Map<string, Hyperlink>()
         links.set(canonical, target)
         sheetHyperlinks.set(reference.path, links)
+      },
+      unlink(cell: string): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so ${cell} cannot be unlinked`,
+            { ...at, reference: cell },
+          )
+        }
+        const canonical = formatReference(parseWritableReference(cell))
+        sheetHyperlinks.get(reference.path)?.delete(canonical)
+        const unlinks = sheetUnlinks.get(reference.path) ?? new Set<string>()
+        unlinks.add(canonical)
+        sheetUnlinks.set(reference.path, unlinks)
       },
     }
   }
@@ -2179,6 +2203,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     if (
       patchInputs.every((map) => map.size === 0) &&
       sheetHyperlinks.size === 0 &&
+      sheetUnlinks.size === 0 &&
       sheetComments.size === 0 &&
       addedRefs.length === 0 &&
       renames.size === 0 &&
@@ -2308,16 +2333,28 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     // line shifts their `ref` along with every other reference. An external link
     // takes a fresh relationship id in the sheet's rels part; an internal one is
     // written inline and needs none.
-    for (const [path, links] of sheetHyperlinks) {
+    for (const path of new Set([...sheetHyperlinks.keys(), ...sheetUnlinks.keys()])) {
       if (removed.has(path)) continue
-      const sheetXml = sheetTextNow(path)
+      let sheetXml = sheetTextNow(path)
       if (sheetXml === undefined) continue
-      const relationshipsPath = relationshipsPathFor(path)
-      const written = writeSheetHyperlinks(sheetXml, partText(container, relationshipsPath), links)
-      changes.set(path, encoder.encode(written.sheetXml))
-      if (written.relsXml !== undefined) {
-        changes.set(relationshipsPath, encoder.encode(written.relsXml))
+      const links = sheetHyperlinks.get(path)
+      if (links !== undefined) {
+        const relationshipsPath = relationshipsPathFor(path)
+        const written = writeSheetHyperlinks(
+          sheetXml,
+          partText(container, relationshipsPath),
+          links,
+        )
+        sheetXml = written.sheetXml
+        if (written.relsXml !== undefined) {
+          changes.set(relationshipsPath, encoder.encode(written.relsXml))
+        }
       }
+      // Removal runs after the write, on the same sheet, so a cell linked then
+      // unlinked this session ends with no link.
+      const unlinks = sheetUnlinks.get(path)
+      if (unlinks !== undefined) sheetXml = withoutHyperlinks(sheetXml, unlinks)
+      changes.set(path, encoder.encode(sheetXml))
     }
 
     // Comments go in two parts, wired to the sheet and declared in the content
