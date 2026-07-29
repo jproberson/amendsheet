@@ -77,7 +77,13 @@ import {
 } from './reference.js'
 import { type RawCell, readSheet } from './sheet.js'
 import { appendSharedStrings, readSharedStrings } from './shared-strings.js'
-import { extendTables } from './tables.js'
+import {
+  type TableSpec,
+  buildTablePart,
+  extendTables,
+  readTables,
+  withTableParts,
+} from './tables.js'
 import {
   type Alignment,
   type BorderFormat,
@@ -271,6 +277,30 @@ export interface Worksheet {
   unmerge(range: string): void
   /** Sets the sheet's auto-filter over a range, replacing any it already has. */
   autoFilter(range: string): void
+  /**
+   * The tables the sheet carries, the file's own plus any added this session, each
+   * with its range and column names.
+   */
+  readonly tables: readonly {
+    readonly name: string
+    readonly range: string
+    readonly columns: readonly string[]
+  }[]
+  /**
+   * Turns a range into a table with a banded style and a filter. The top row is the
+   * header; its cells are set to the column names, taken from `options.columns`, the
+   * header cells already there, or `Column1`, `Column2`… in order. Refuses a range
+   * that is not two references, an empty or duplicate column name, a table name the
+   * workbook already uses, or a range that overlaps a table the sheet already has.
+   */
+  addTable(
+    range: string,
+    options?: {
+      readonly name?: string
+      readonly columns?: readonly string[]
+      readonly style?: string
+    },
+  ): void
   /**
    * Adds a data validation over a cell or range. `{ list }` offers inline values as
    * a dropdown (no value may hold a comma, the inline list's separator) and
@@ -614,6 +644,9 @@ const COMMENTS_CONTENT_TYPE =
 const VML_DRAWING_RELATIONSHIP =
   'http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing'
 const VML_DRAWING_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.vmlDrawing'
+const TABLE_RELATIONSHIP =
+  'http://schemas.openxmlformats.org/officeDocument/2006/relationships/table'
+const TABLE_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml'
 
 function partText(container: Container, path: string): string | undefined {
   const bytes = container.parts.get(path)
@@ -1034,6 +1067,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   // comments part is refused at the call rather than rebuilt.
   const sheetComments = new Map<string, Map<string, string>>()
   const sheetRemovedComments = new Map<string, Set<string>>()
+  const sheetTables = new Map<string, TableSpec[]>()
   // The per-sheet maps patchSheet applies in one rewrite. Both the "anything
   // pending?" check and the set of sheets to rewrite read this list, so a new
   // kind of sheet edit is registered in one place rather than two enumerations
@@ -1315,6 +1349,40 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         }
       }
       return byReference.get(canonical)
+    }
+
+    // Writes a table's header text into a cell, the same way `set` records a plain
+    // string, so the header row Excel requires matches the columns declared.
+    const writeHeaderCell = (canonical: string, name: string): void => {
+      checkWritable(canonical, name, date1904, at)
+      const pending = edits.get(reference.path) ?? new Map<string, CellInput>()
+      pending.set(canonical, name)
+      edits.set(reference.path, pending)
+      overlay.set(canonical, predict(canonical, name, styleAt(canonical)))
+    }
+
+    const headerTextOf = (cell: Cell | undefined): string | undefined => {
+      if (cell === undefined) return undefined
+      if (cell.value.kind === 'text') return cell.value.value === '' ? undefined : cell.value.value
+      if (cell.value.kind === 'number') return String(cell.value.value)
+      return undefined
+    }
+
+    // Table names are unique across the workbook, so a fresh one and a collision
+    // check both need every name already taken — the file's and this session's.
+    const takenTableNames = (): Set<string> => {
+      const names = new Set<string>()
+      for (const sheet of part.sheets) {
+        const bytes = container.parts.get(sheet.path)
+        if (bytes !== undefined) {
+          for (const table of readTables(bytes, sheet.path, container))
+            names.add(table.name.toLowerCase())
+        }
+      }
+      for (const specs of sheetTables.values()) {
+        for (const spec of specs) names.add(spec.name.toLowerCase())
+      }
+      return names
     }
 
     // A restyled cell keeps its value and formula; only its number format is
@@ -1712,6 +1780,141 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           )
         }
         sheetAutoFilters.set(reference.path, mergeRangeReference(range, at))
+      },
+      get tables(): readonly {
+        readonly name: string
+        readonly range: string
+        readonly columns: readonly string[]
+      }[] {
+        const fromFile =
+          sheetBytes === undefined ? [] : readTables(sheetBytes, reference.path, container)
+        const pending = (sheetTables.get(reference.path) ?? []).map((spec) => ({
+          name: spec.name,
+          range: spec.ref,
+          columns: spec.columns,
+        }))
+        return [...fromFile, ...pending]
+      },
+      addTable(
+        range: string,
+        options?: {
+          readonly name?: string
+          readonly columns?: readonly string[]
+          readonly style?: string
+        },
+      ): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so ${range} cannot be made a table`,
+            { ...at, reference: range },
+          )
+        }
+        const colon = range.indexOf(':')
+        if (colon === -1) {
+          throw new XlsxError('bad-reference', `A table needs a range like A1:C5, not "${range}"`, {
+            ...at,
+            reference: range,
+          })
+        }
+        const start = parseWritableReference(range.slice(0, colon))
+        const end = parseWritableReference(range.slice(colon + 1))
+        const minRow = Math.min(start.row, end.row)
+        const maxRow = Math.max(start.row, end.row)
+        const minColumn = Math.min(start.column, end.column)
+        const maxColumn = Math.max(start.column, end.column)
+        const width = maxColumn - minColumn + 1
+        const ref = `${formatReference({ row: minRow, column: minColumn })}:${formatReference({ row: maxRow, column: maxColumn })}`
+
+        if (options?.columns !== undefined && options.columns.length !== width) {
+          throw new XlsxError(
+            'unwritable-value',
+            `The range is ${width} column(s) wide but ${options.columns.length} name(s) were given`,
+            { ...at, reference: ref },
+          )
+        }
+        const columns: string[] = []
+        const seen = new Set<string>()
+        for (let index = 0; index < width; index++) {
+          const headerRef = formatReference({ row: minRow, column: minColumn + index })
+          const name =
+            options?.columns?.[index] ?? headerTextOf(findCell(headerRef)) ?? `Column${index + 1}`
+          if (name === '') {
+            throw new XlsxError('unwritable-value', 'A table column name cannot be empty', {
+              ...at,
+              reference: headerRef,
+            })
+          }
+          if (seen.has(name.toLowerCase())) {
+            throw new XlsxError('unwritable-value', `Two table columns are both named "${name}"`, {
+              ...at,
+              reference: ref,
+            })
+          }
+          seen.add(name.toLowerCase())
+          columns.push(name)
+          writeHeaderCell(headerRef, name)
+        }
+
+        const boundsOf = (other: string) => {
+          const mid = other.indexOf(':')
+          const a = parseWritableReference(other.slice(0, mid))
+          const b = parseWritableReference(other.slice(mid + 1))
+          return {
+            minRow: Math.min(a.row, b.row),
+            maxRow: Math.max(a.row, b.row),
+            minColumn: Math.min(a.column, b.column),
+            maxColumn: Math.max(a.column, b.column),
+          }
+        }
+        const existing = [
+          ...(sheetBytes === undefined
+            ? []
+            : readTables(sheetBytes, reference.path, container).map((table) => table.range)),
+          ...(sheetTables.get(reference.path) ?? []).map((spec) => spec.ref),
+        ]
+        for (const other of existing) {
+          const b = boundsOf(other)
+          if (
+            minRow <= b.maxRow &&
+            maxRow >= b.minRow &&
+            minColumn <= b.maxColumn &&
+            maxColumn >= b.minColumn
+          ) {
+            throw new XlsxError(
+              'unsupported-edit',
+              `A table over ${ref} overlaps one the sheet already has at ${other}`,
+              { ...at, reference: ref },
+            )
+          }
+        }
+
+        const taken = takenTableNames()
+        let name = options?.name
+        if (name !== undefined) {
+          // A letter, underscore or backslash, then up to 254 more of the same or
+          // digits and dots — Excel's rule, length bound folded in.
+          if (!/^[A-Za-z_\\][A-Za-z0-9_.\\]{0,254}$/.test(name)) {
+            throw new XlsxError('unwritable-value', `"${name}" is not a valid table name`, {
+              ...at,
+              reference: ref,
+            })
+          }
+          if (taken.has(name.toLowerCase())) {
+            throw new XlsxError('unwritable-value', `A table is already named "${name}"`, {
+              ...at,
+              reference: ref,
+            })
+          }
+        } else {
+          let n = 1
+          while (taken.has(`table${n}`)) n++
+          name = `Table${n}`
+        }
+
+        const specs = sheetTables.get(reference.path) ?? []
+        specs.push({ name, ref, columns, style: options?.style ?? 'TableStyleMedium2' })
+        sheetTables.set(reference.path, specs)
       },
       validate(range: string, rule: DataValidation): void {
         if (sheetBytes === undefined) {
@@ -2249,6 +2452,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       sheetUnlinks.size === 0 &&
       sheetComments.size === 0 &&
       sheetRemovedComments.size === 0 &&
+      sheetTables.size === 0 &&
       addedRefs.length === 0 &&
       renames.size === 0 &&
       removed.size === 0 &&
@@ -2528,6 +2732,39 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       }
     }
 
+    // Tables get their own part, wired to the sheet by a relationship, listed in a
+    // <tableParts> element and declared in the content types. The header cells were
+    // written through the edit machinery above, so the sheet already carries them.
+    const tableParts: string[] = []
+    let tableNumber = 0
+    for (const [path, specs] of sheetTables) {
+      if (removed.has(path)) continue
+      let sheetXml = sheetTextNow(path)
+      if (sheetXml === undefined) continue
+      const relationshipsPath = relationshipsPathFor(path)
+      let relsXml = sheetTextNow(relationshipsPath)
+      for (const spec of specs) {
+        do {
+          tableNumber += 1
+        } while (
+          container.parts.has(`xl/tables/table${tableNumber}.xml`) ||
+          changes.has(`xl/tables/table${tableNumber}.xml`)
+        )
+        const tablePath = `xl/tables/table${tableNumber}.xml`
+        changes.set(tablePath, encoder.encode(buildTablePart(tableNumber, spec)))
+        tableParts.push(tablePath)
+        const wired = withRelationship(
+          relsXml,
+          TABLE_RELATIONSHIP,
+          `../${tablePath.slice('xl/'.length)}`,
+        )
+        relsXml = wired.xml
+        sheetXml = withTableParts(sheetXml, wired.id)
+      }
+      changes.set(relationshipsPath, encoder.encode(relsXml ?? ''))
+      changes.set(path, encoder.encode(sheetXml))
+    }
+
     // Inserting or deleting a line moves references across the whole workbook. The
     // per-sheet patch above has already landed this session's edits in the old
     // grid, so each sheet's current text is shifted here: the edited sheet's own
@@ -2638,6 +2875,9 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       }
       for (const vmlDrawingPath of vmlDrawingParts) {
         updated = withContentTypeOverride(updated, vmlDrawingPath, VML_DRAWING_CONTENT_TYPE)
+      }
+      for (const tablePath of tableParts) {
+        updated = withContentTypeOverride(updated, tablePath, TABLE_CONTENT_TYPE)
       }
       if (createdCoreProperties) {
         updated = withContentTypeOverride(

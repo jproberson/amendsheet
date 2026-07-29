@@ -1,7 +1,138 @@
+import { escapeSheetName } from './add-sheet.js'
 import { type Container, decodeXmlPart } from './container.js'
 import { formatReference, parseReference } from './reference.js'
 import { readRelationships, resolveTarget } from './relationships.js'
 import { readXml, readXmlBytes, withAttribute } from './xml.js'
+
+const SPREADSHEET_NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
+const RELATIONSHIPS_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+
+/** A table to author: its name, the range it covers, its column headers and the
+ * built-in style to draw it with. `name` is Excel's table name and display name. */
+export interface TableSpec {
+  readonly name: string
+  readonly ref: string
+  readonly columns: readonly string[]
+  readonly style: string
+}
+
+/** Builds a table part. Columns are numbered from one; the auto-filter starts out
+ * equal to the table's own range, the way Excel writes a fresh table. */
+export function buildTablePart(id: number, spec: TableSpec): string {
+  const columns = spec.columns
+    .map((name, index) => `<tableColumn id="${index + 1}" name="${escapeSheetName(name)}"/>`)
+    .join('')
+  const name = escapeSheetName(spec.name)
+  return (
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+    `<table xmlns="${SPREADSHEET_NS}" id="${id}" name="${name}" displayName="${name}" ` +
+    `ref="${spec.ref}" totalsRowShown="0"><autoFilter ref="${spec.ref}"/>` +
+    `<tableColumns count="${spec.columns.length}">${columns}</tableColumns>` +
+    `<tableStyleInfo name="${escapeSheetName(spec.style)}" showFirstColumn="0" ` +
+    'showLastColumn="0" showRowStripes="1" showColumnStripes="0"/></table>'
+  )
+}
+
+/**
+ * Wires a table into a sheet through a `<tableParts>` element, joining one the
+ * sheet already has. Placed before a worksheet-level `extLst` or the closing tag,
+ * where the schema puts it. Declares `xmlns:r` on the worksheet when the sheet —
+ * a blank one this library created, say — does not already carry it.
+ */
+export function withTableParts(sheetXml: string, relationshipId: string): string {
+  let prefix = ''
+  let worksheet: { start: number; end: number } | undefined
+  let container: { openStart: number; openEnd: number; insertAt: number; count: number } | undefined
+  let selfClosing = false
+  let worksheetClose = -1
+  let extLst = -1
+  for (const event of readXml(sheetXml)) {
+    if (event.kind === 'open' && event.localName === 'worksheet') {
+      const colon = event.name.indexOf(':')
+      prefix = colon === -1 ? '' : event.name.slice(0, colon + 1)
+      worksheet = { start: event.start, end: event.end }
+    } else if (event.kind === 'open' && event.localName === 'tableParts') {
+      selfClosing = event.selfClosing
+      container = {
+        openStart: event.start,
+        openEnd: event.end,
+        insertAt: event.end,
+        count: Number(event.attributes.get('count')) || 0,
+      }
+    } else if (
+      event.kind === 'close' &&
+      event.localName === 'tableParts' &&
+      container !== undefined
+    ) {
+      container = { ...container, insertAt: event.start }
+    } else if (event.kind === 'open' && event.localName === 'extLst' && extLst === -1) {
+      extLst = event.start
+    } else if (event.kind === 'close' && event.localName === 'worksheet') {
+      worksheetClose = event.start
+    }
+  }
+
+  const child = `<${prefix}tablePart r:id="${relationshipId}"/>`
+  const splices: { start: number; end: number; text: string }[] = []
+  if (
+    worksheet !== undefined &&
+    !sheetXml.slice(worksheet.start, worksheet.end).includes('xmlns:r=')
+  ) {
+    const tag = sheetXml.slice(worksheet.start, worksheet.end)
+    splices.push({
+      start: worksheet.start,
+      end: worksheet.end,
+      text: tag.replace(/^<([^\s/>]+)/, `<$1 xmlns:r="${RELATIONSHIPS_NS}"`),
+    })
+  }
+
+  if (container === undefined) {
+    const anchor = extLst !== -1 ? extLst : worksheetClose !== -1 ? worksheetClose : sheetXml.length
+    splices.push({
+      start: anchor,
+      end: anchor,
+      text: `<${prefix}tableParts count="1">${child}</${prefix}tableParts>`,
+    })
+  } else {
+    const counted = withAttribute(
+      sheetXml.slice(container.openStart, container.openEnd),
+      'count',
+      container.count + 1,
+    )
+    if (selfClosing) {
+      splices.push({
+        start: container.openStart,
+        end: container.openEnd,
+        text: `${counted.slice(0, -2)}>${child}</${prefix}tableParts>`,
+      })
+    } else {
+      splices.push({ start: container.openStart, end: container.openEnd, text: counted })
+      splices.push({ start: container.insertAt, end: container.insertAt, text: child })
+    }
+  }
+
+  let xml = sheetXml
+  for (const splice of splices.sort((a, b) => b.start - a.start)) {
+    xml = xml.slice(0, splice.start) + splice.text + xml.slice(splice.end)
+  }
+  return xml
+}
+
+/** The tables a sheet carries, each with its range and column names. */
+export function readTables(
+  sheetBytes: Uint8Array,
+  sheetPath: string,
+  container: Container,
+): { name: string; range: string; columns: string[] }[] {
+  const tables: { name: string; range: string; columns: string[] }[] = []
+  for (const path of tablePartPaths(sheetBytes, sheetPath, container)) {
+    const table = decodeTable(container, path)
+    if (table !== undefined && table.name !== undefined) {
+      tables.push({ name: table.name, range: refOf(table.range), columns: table.columnNames })
+    }
+  }
+  return tables
+}
 
 /** A rewritten table part, ready to replace the one that was read. */
 export interface TableExtension {
@@ -47,6 +178,7 @@ export function extendTables(
 interface DecodedTable {
   readonly path: string
   readonly xml: string
+  readonly name: string | undefined
   readonly range: Range
   /** A totals row sits below the data, so the row below the table is not free. */
   readonly hasTotalsRow: boolean
@@ -90,6 +222,7 @@ function decodeTable(container: Container, path: string): DecodedTable | undefin
   }
 
   let range: Range | undefined
+  let name: string | undefined
   let hasTotalsRow = false
   const columnNames: string[] = []
   const columnIds: number[] = []
@@ -97,6 +230,7 @@ function decodeTable(container: Container, path: string): DecodedTable | undefin
   for (const event of readXml(xml)) {
     if (event.kind !== 'open') continue
     if (event.localName === 'table') {
+      name = event.attributes.get('displayName') ?? event.attributes.get('name')
       const ref = event.attributes.get('ref')
       range = ref === undefined ? undefined : parseRange(ref)
       if (range === undefined) return undefined
@@ -114,7 +248,7 @@ function decodeTable(container: Container, path: string): DecodedTable | undefin
   }
 
   if (range === undefined) return undefined
-  return { path, xml, range, hasTotalsRow, columnNames, columnIds }
+  return { path, xml, name, range, hasTotalsRow, columnNames, columnIds }
 }
 
 function parseRange(ref: string): Range | undefined {

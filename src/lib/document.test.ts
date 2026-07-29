@@ -42,6 +42,126 @@ function build(
   return writeContainer({ parts: new Map(Object.entries(parts)) })
 }
 
+test('addTable creates a table, writes its headers, wires it, and reads back', () => {
+  const workbook = createWorkbook('Data')
+  const sheet = workbook.sheet('Data')
+  sheet?.set('A1', 'Name')
+  sheet?.set('B1', 'Qty')
+  sheet?.set('A2', 'Ada')
+  sheet?.set('B2', 5)
+  sheet?.addTable('A1:B2', { name: 'People' })
+  assert.deepEqual(sheet?.tables, [{ name: 'People', range: 'A1:B2', columns: ['Name', 'Qty'] }])
+
+  const parts = readContainer(workbook.toBytes()).parts
+  const table = decode(parts.get('xl/tables/table1.xml'))
+  assert.match(table, /name="People" displayName="People" ref="A1:B2"/)
+  assert.match(table, /<tableColumn id="1" name="Name"\/><tableColumn id="2" name="Qty"\/>/)
+  assert.match(
+    decode(parts.get('xl/worksheets/sheet1.xml')),
+    /<tableParts count="1"><tablePart r:id="/,
+  )
+  assert.match(
+    decode(parts.get('xl/worksheets/_rels/sheet1.xml.rels')),
+    /relationships\/table[^>]*Target="\.\.\/tables\/table1\.xml"/,
+  )
+  assert.match(decode(parts.get('[Content_Types].xml')), /PartName="\/xl\/tables\/table1\.xml"/)
+
+  const back = readWorkbook(workbook.toBytes()).sheet('Data')
+  assert.deepEqual(back?.tables, [{ name: 'People', range: 'A1:B2', columns: ['Name', 'Qty'] }])
+})
+
+test('addTable infers column names from the header row and generates missing ones', () => {
+  const workbook = createWorkbook('Data')
+  const sheet = workbook.sheet('Data')
+  sheet?.set('A1', 'Given') // B1 left empty
+  sheet?.addTable('A1:B3')
+  const back = readWorkbook(workbook.toBytes()).sheet('Data')
+  assert.deepEqual(back?.tables[0]?.columns, ['Given', 'Column2'])
+  const b1 = back?.cell('B1')?.value
+  assert.equal(b1?.kind === 'text' ? b1.value : undefined, 'Column2') // header cell filled in
+})
+
+test('addTable on a sheet that already has a table names and places the new one', () => {
+  const first = createWorkbook('Data')
+  const one = first.sheet('Data')
+  one?.set('A1', 'A')
+  one?.set('B1', 'B')
+  one?.addTable('A1:B2', { name: 'One' })
+  const workbook = readWorkbook(first.toBytes()) // a file that already has a table
+
+  const sheet = workbook.sheet('Data')
+  assert.deepEqual(
+    sheet?.tables.map((table) => table.name),
+    ['One'],
+  ) // reads the file's table
+  sheet?.set('D1', 'C')
+  sheet?.set('E1', 'D')
+  sheet?.addTable('D1:E2', { name: 'Two' }) // named uniquely against the file's tables
+
+  const back = readWorkbook(workbook.toBytes()).sheet('Data')
+  assert.deepEqual(
+    back?.tables.map((table) => table.name),
+    ['One', 'Two'],
+  )
+})
+
+test('addTable takes explicit columns, infers a numeric header, and checks the count', () => {
+  const workbook = createWorkbook('Data')
+  const sheet = workbook.sheet('Data')
+  sheet?.set('A1', 2024) // a numeric header
+  sheet?.addTable('A1:A2') // no names given, so inferred from the number
+  assert.deepEqual(readWorkbook(workbook.toBytes()).sheet('Data')?.tables[0]?.columns, ['2024'])
+
+  const explicit = createWorkbook('D')
+  const other = explicit.sheet('D')
+  other?.addTable('A1:B2', { columns: ['Region', 'Sales'] })
+  assert.deepEqual(other?.tables[0]?.columns, ['Region', 'Sales'])
+  assert.throws(
+    () => other?.addTable('D1:E2', { columns: ['Only'] }), // one name for two columns
+    (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+  )
+  assert.throws(
+    () => other?.addTable('G1:H2', { columns: ['', 'x'] }), // an empty name
+    (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+  )
+  assert.throws(
+    () => other?.addTable('J1:K2', { columns: ['Dup', 'Dup'] }), // two columns, one name
+    (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+  )
+})
+
+test('addTable refuses a bad range, a duplicate name and an overlapping table', () => {
+  const workbook = createWorkbook('Data')
+  const sheet = workbook.sheet('Data')
+  sheet?.set('A1', 'X')
+  sheet?.set('B1', 'Y')
+  assert.throws(
+    () => sheet?.addTable('A1'),
+    (error: unknown) => error instanceof XlsxError && error.code === 'bad-reference',
+  )
+  sheet?.addTable('A1:B3', { name: 'T1' })
+  assert.throws(
+    () => sheet?.addTable('D1:E3', { name: 'T1' }),
+    (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+  )
+  assert.throws(
+    () => sheet?.addTable('D1:E3', { name: 'has spaces' }), // not a valid table name
+    (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+  )
+  assert.throws(
+    () => sheet?.addTable('B2:C4'),
+    (error: unknown) => error instanceof XlsxError && error.code === 'unsupported-edit',
+  )
+})
+
+test('addTable over a date-headed range generates a column name', () => {
+  const workbook = createWorkbook('Data')
+  const sheet = workbook.sheet('Data')
+  sheet?.set('A1', new Date('2024-01-01')) // a date is no use as a column name
+  sheet?.addTable('A1:A2')
+  assert.deepEqual(readWorkbook(workbook.toBytes()).sheet('Data')?.tables[0]?.columns, ['Column1'])
+})
+
 test('removeComment removes a note and its box, keeping other notes', () => {
   const built = createWorkbook('Notes')
   const filled = built.sheet('Notes')
@@ -3220,6 +3340,11 @@ test('refuses a write to a sheet whose part is not in the package', () => {
     () => workbook.sheets[0]?.removeComment('A1'),
     (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
   )
+  assert.throws(
+    () => workbook.sheets[0]?.addTable('A1:B2'),
+    (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
+  )
+  assert.deepEqual(workbook.sheets[0]?.tables, []) // no bytes to read tables from
   assert.throws(
     () => workbook.sheets[0]?.freeze('B2'),
     (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',

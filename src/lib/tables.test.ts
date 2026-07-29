@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { Container } from './container.js'
 import { XlsxError } from './errors.js'
-import { extendTables } from './tables.js'
+import { buildTablePart, extendTables, withTableParts } from './tables.js'
 
 const encode = (text: string) => new TextEncoder().encode(text)
 
@@ -259,4 +259,71 @@ test('skips a table whose ref is a single cell rather than a range', () => {
     'xl/tables/table1.xml': table('A1'),
   })
   assert.deepEqual(extend(parts, ['A2']), [])
+})
+
+test('buildTablePart writes the ref, columns and style', () => {
+  const xml = buildTablePart(1, {
+    name: 'Sales',
+    ref: 'A1:C5',
+    columns: ['Name', 'Qty', 'Total'],
+    style: 'TableStyleMedium2',
+  })
+  assert.match(xml, /<table [^>]*id="1" name="Sales" displayName="Sales" ref="A1:C5"/)
+  assert.match(xml, /<autoFilter ref="A1:C5"\/>/)
+  assert.match(
+    xml,
+    /<tableColumns count="3"><tableColumn id="1" name="Name"\/><tableColumn id="2" name="Qty"\/><tableColumn id="3" name="Total"\/>/,
+  )
+  assert.match(xml, /<tableStyleInfo name="TableStyleMedium2"/)
+})
+
+test('withTableParts opens a tableParts element and declares xmlns:r when missing', () => {
+  const fresh = withTableParts(
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>',
+    'rId1',
+  )
+  assert.match(
+    fresh,
+    /<worksheet [^>]*xmlns:r="http:\/\/schemas.openxmlformats.org\/officeDocument\/2006\/relationships"/,
+  )
+  assert.match(fresh, /<tableParts count="1"><tablePart r:id="rId1"\/><\/tableParts><\/worksheet>/)
+})
+
+test('withTableParts joins an existing tableParts and bumps the count', () => {
+  const joined = withTableParts(
+    '<worksheet xmlns:r="r"><sheetData/><tableParts count="1"><tablePart r:id="rId1"/></tableParts></worksheet>',
+    'rId2',
+  )
+  assert.match(joined, /<tableParts count="2"><tablePart r:id="rId1"\/><tablePart r:id="rId2"\/>/)
+})
+
+test('withTableParts places a fresh element before a worksheet extLst', () => {
+  const out = withTableParts(
+    '<worksheet xmlns:r="r"><sheetData/><extLst><ext/></extLst></worksheet>',
+    'rId1',
+  )
+  assert.match(out, /<tableParts count="1"><tablePart r:id="rId1"\/><\/tableParts><extLst>/)
+})
+
+test('withTableParts fills a self-closing tableParts element', () => {
+  const out = withTableParts(
+    '<worksheet xmlns:r="r"><sheetData/><tableParts count="1"/></worksheet>',
+    'rId5',
+  )
+  assert.match(out, /<tableParts count="2"><tablePart r:id="rId5"\/><\/tableParts>/)
+})
+
+test('withTableParts appends to a rootless fragment without declaring xmlns:r', () => {
+  assert.equal(
+    withTableParts('<sheetData/>', 'rId1'),
+    '<sheetData/><tableParts count="1"><tablePart r:id="rId1"/></tableParts>',
+  )
+})
+
+test('withTableParts joins a tableParts element that has no count attribute', () => {
+  const out = withTableParts(
+    '<worksheet xmlns:r="r"><sheetData/><tableParts><tablePart r:id="rId1"/></tableParts></worksheet>',
+    'rId2',
+  )
+  assert.match(out, /<tableParts count="1"><tablePart r:id="rId1"\/><tablePart r:id="rId2"\/>/)
 })

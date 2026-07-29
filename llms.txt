@@ -320,6 +320,24 @@ from a quirk of the input.
 
 ## Recipes
 
+Turn a range into a banded, filterable table (the header row must have values, or
+pass `columns`):
+
+```ts
+const workbook = createWorkbook('Report')
+const sheet = workbook.sheets[0]
+sheet?.set('A1', 'Name')
+sheet?.set('B1', 'Total')
+sheet?.set('A2', 'Ada')
+sheet?.set('B2', 42)
+sheet?.addTable('A1:B2', { name: 'People', style: 'TableStyleMedium2' })
+sheet?.tables // readonly [{ name, range, columns }]
+```
+
+`addTable` sets the header cells to the column names — from `columns`, the header
+cells already there, or `Column1`, `Column2`… It refuses a bad range, a duplicate
+or empty column name, a table name the workbook uses, or an overlap.
+
 Fill a fresh sheet from rows of data:
 
 ```ts
