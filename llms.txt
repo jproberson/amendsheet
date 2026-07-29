@@ -260,6 +260,19 @@ workbook.defineName('Tax', 'Sheet1!$B$1')
 workbook.epoch // 1900 | 1904 — the date system
 ```
 
+Document properties (`docProps/core.xml`):
+
+```ts
+const workbook = readWorkbook(bytes)
+
+workbook.properties // { title?, subject?, creator?, keywords?, description?, lastModifiedBy?, created?, modified? }
+workbook.setProperties({ title: 'Q3 Report', creator: 'Ada', created: new Date() })
+```
+
+`setProperties` merges — each field replaces the one the file had and leaves the
+rest (including properties this does not model) untouched, creating the part when
+the file has none. `created` and `modified` are `Date`s.
+
 ## Sheet protection
 
 ```ts

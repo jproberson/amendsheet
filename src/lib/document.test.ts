@@ -42,6 +42,50 @@ function build(
   return writeContainer({ parts: new Map(Object.entries(parts)) })
 }
 
+test('setProperties creates a core properties part, wired and declared, and reads back', () => {
+  const contentTypes =
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+    '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+    '<Default Extension="xml" ContentType="application/xml"/>' +
+    '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/></Types>'
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      extra: { '[Content_Types].xml': contentTypes },
+    }),
+  )
+  workbook.setProperties({
+    title: 'Q3 Report',
+    creator: 'amendsheet',
+    created: new Date('2024-03-01T00:00:00Z'),
+  })
+  assert.equal(workbook.properties.title, 'Q3 Report') // live before the write
+
+  const parts = readContainer(workbook.toBytes()).parts
+  assert.match(decode(parts.get('docProps/core.xml')), /<dc:title>Q3 Report<\/dc:title>/)
+  assert.match(decode(parts.get('[Content_Types].xml')), /PartName="\/docProps\/core\.xml"/)
+  assert.match(decode(parts.get('_rels/.rels')), /metadata\/core-properties/)
+
+  const back = readWorkbook(workbook.toBytes())
+  assert.equal(back.properties.title, 'Q3 Report')
+  assert.equal(back.properties.creator, 'amendsheet')
+  assert.deepEqual(back.properties.created, new Date('2024-03-01T00:00:00Z'))
+})
+
+test('setProperties updates an existing core part, keeping the other fields', () => {
+  const core =
+    '<?xml version="1.0"?><cp:coreProperties xmlns:cp="c" xmlns:dc="d">' +
+    '<dc:title>Old</dc:title><dc:creator>Ada</dc:creator></cp:coreProperties>'
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', { extra: { 'docProps/core.xml': core } }),
+  )
+  assert.equal(workbook.properties.title, 'Old') // read from the file
+  workbook.setProperties({ title: 'New' })
+
+  const back = readWorkbook(workbook.toBytes())
+  assert.equal(back.properties.title, 'New')
+  assert.equal(back.properties.creator, 'Ada') // untouched field preserved
+})
+
 test('createWorkbook makes an empty one-sheet workbook that fills and writes back', () => {
   const workbook = createWorkbook()
 

@@ -32,6 +32,7 @@ export type {
   DataBar,
   DataValidation,
   DateConstraint,
+  DocumentProperties,
   FillRule,
   FormulaRule,
   Hyperlink,

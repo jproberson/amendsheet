@@ -17,6 +17,11 @@ import {
   readComments,
 } from './comments.js'
 import { checkDefinedName, readDefinedNames, withDefinedNames } from './defined-names.js'
+import {
+  type DocumentProperties,
+  readCoreProperties,
+  writeCoreProperties,
+} from './document-properties.js'
 import { readRelationships, resolveTarget } from './relationships.js'
 import { type Hyperlink, readSheetHyperlinks, writeSheetHyperlinks } from './hyperlinks.js'
 import { type Container, decodeXmlPart } from './container.js'
@@ -157,6 +162,7 @@ export interface Cell {
 }
 
 export type { Hyperlink }
+export type { DocumentProperties }
 
 export interface Worksheet {
   readonly name: string
@@ -530,6 +536,17 @@ export interface Workbook {
    * digits, periods or underscores, no spaces. `refersTo` is a formula.
    */
   defineName(name: string, refersTo: string): void
+  /**
+   * The document's core properties (title, creator, dates and the rest), the
+   * file's own plus any set this session. Empty fields are absent, not blank.
+   */
+  readonly properties: DocumentProperties
+  /**
+   * Sets core properties, each replacing the one the file had and leaving the
+   * others — and any property this does not model — as they were. Written by
+   * `toBytes()`, into a fresh `docProps/core.xml` when the file has none.
+   */
+  setProperties(properties: DocumentProperties): void
   /** Which year serials count from. A 1904 workbook is 1462 days behind. */
   readonly epoch: 1900 | 1904
   /**
@@ -550,6 +567,11 @@ const EMPTY_EDITS: ReadonlyMap<string, CellInput> = new Map()
 
 const CALCULATION_CHAIN = 'xl/calcChain.xml'
 const CONTENT_TYPES = '[Content_Types].xml'
+const ROOT_RELATIONSHIPS = '_rels/.rels'
+const CORE_PROPERTIES_PART = 'docProps/core.xml'
+const CORE_PROPERTIES_RELATIONSHIP =
+  'http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties'
+const CORE_PROPERTIES_CONTENT_TYPE = 'application/vnd.openxmlformats-package.core-properties+xml'
 const COMMENTS_RELATIONSHIP =
   'http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments'
 const COMMENTS_CONTENT_TYPE =
@@ -998,6 +1020,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   ]
   const fileNames = readDefinedNames(partText(container, part.path) ?? '')
   const pendingNames = new Map<string, string>()
+  let pendingProperties: DocumentProperties = {}
   const sheetHyperlinks = new Map<string, Map<string, Hyperlink>>()
   // Row and column inserts and deletes, in call order. Each names the sheet it
   // was called on; toBytes applies them after the per-sheet patch so an edit made
@@ -2103,7 +2126,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       renames.size === 0 &&
       removed.size === 0 &&
       pendingNames.size === 0 &&
-      lineOps.length === 0
+      lineOps.length === 0 &&
+      Object.keys(pendingProperties).length === 0
     ) {
       return container.write(changes)
     }
@@ -2390,6 +2414,25 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       return updated
     })
 
+    // Core properties splice into their part, or open one wired to the package
+    // root and declared in the content types when the file carries none.
+    let createdCoreProperties = false
+    if (Object.keys(pendingProperties).length > 0) {
+      const existing = partText(container, CORE_PROPERTIES_PART)
+      changes.set(
+        CORE_PROPERTIES_PART,
+        encoder.encode(writeCoreProperties(existing, pendingProperties)),
+      )
+      if (existing === undefined) {
+        createdCoreProperties = true
+        rewritePart(
+          ROOT_RELATIONSHIPS,
+          (relsXml) =>
+            withRelationship(relsXml, CORE_PROPERTIES_RELATIONSHIP, CORE_PROPERTIES_PART).xml,
+        )
+      }
+    }
+
     rewritePart(CONTENT_TYPES, (contentTypesXml) => {
       let updated = withSheetContentTypes(
         hadCalcChain ? withoutOverride(contentTypesXml, CALCULATION_CHAIN) : contentTypesXml,
@@ -2401,6 +2444,13 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       }
       for (const vmlDrawingPath of vmlDrawingParts) {
         updated = withContentTypeOverride(updated, vmlDrawingPath, VML_DRAWING_CONTENT_TYPE)
+      }
+      if (createdCoreProperties) {
+        updated = withContentTypeOverride(
+          updated,
+          CORE_PROPERTIES_PART,
+          CORE_PROPERTIES_CONTENT_TYPE,
+        )
       }
       return updated
     })
@@ -2418,6 +2468,14 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     defineName(name: string, refersTo: string): void {
       checkDefinedName(name, refersTo)
       pendingNames.set(name, refersTo)
+    },
+    get properties(): DocumentProperties {
+      const fileXml = partText(container, CORE_PROPERTIES_PART)
+      const file = fileXml === undefined ? {} : readCoreProperties(fileXml)
+      return { ...file, ...pendingProperties }
+    },
+    setProperties(properties: DocumentProperties): void {
+      pendingProperties = { ...pendingProperties, ...properties }
     },
     epoch: date1904 ? 1904 : 1900,
     resolveColor: (color: Color) => resolveColor(color, themePalette),
