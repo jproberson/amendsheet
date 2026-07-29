@@ -10,6 +10,8 @@ import {
   patchSheet as patchSheetBytes,
   readColumnGroupLevels,
   withoutMergeCells,
+  withoutDataValidations,
+  withoutConditionalFormatting,
   readColumnWidths,
   readConditionalFormats,
   readDataValidations,
@@ -1053,4 +1055,20 @@ test('withoutMergeCells removes matching merges, updates the count, and drops an
     '<mergeCell ref="B1:B2"/><mergeCell ref="C1:C2"/></mergeCells></worksheet>'
   const left = withoutMergeCells(three, new Set(['A1:A2', 'C1:C2']))
   assert.match(left, /<mergeCells count="1"><mergeCell ref="B1:B2"\/><\/mergeCells>/)
+})
+
+test('withoutDataValidations and withoutConditionalFormatting drop their elements', () => {
+  const sheet =
+    '<worksheet><sheetData/>' +
+    '<dataValidations count="1"><dataValidation type="list" sqref="A1"><formula1>"a"</formula1></dataValidation></dataValidations>' +
+    '<conditionalFormatting sqref="A1"><cfRule type="duplicateValues" dxfId="0" priority="1"/></conditionalFormatting>' +
+    '<conditionalFormatting sqref="B1"><cfRule type="uniqueValues" dxfId="1" priority="2"/></conditionalFormatting>' +
+    '<pageMargins left="0.7"/></worksheet>'
+  const noValidations = withoutDataValidations(sheet)
+  assert.doesNotMatch(noValidations, /dataValidation/)
+  assert.match(noValidations, /conditionalFormatting/) // untouched
+  const noFormats = withoutConditionalFormatting(sheet)
+  assert.doesNotMatch(noFormats, /conditionalFormatting/) // both removed
+  assert.match(noFormats, /dataValidations/) // untouched
+  assert.match(noFormats, /<pageMargins/) // siblings kept
 })

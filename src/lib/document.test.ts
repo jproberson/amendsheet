@@ -42,6 +42,33 @@ function build(
   return writeContainer({ parts: new Map(Object.entries(parts)) })
 }
 
+test('clearValidations removes the file rules, and clear-then-validate keeps only the new one', () => {
+  const built = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  built.sheets[0]?.validate('A1', { list: ['old'] })
+  built.sheets[0]?.validate('B1', { whole: { equal: 5 } })
+  const workbook = readWorkbook(built.toBytes()) // a file that already has two validations
+  assert.equal(workbook.sheets[0]?.validations.length, 2)
+
+  workbook.sheets[0]?.clearValidations()
+  assert.deepEqual(workbook.sheets[0]?.validations, []) // live
+  workbook.sheets[0]?.validate('C1', { list: ['new'] })
+
+  const back = readWorkbook(workbook.toBytes()).sheets[0]
+  assert.deepEqual(back?.validations, [{ range: 'C1', rule: { allowBlank: true, list: ['new'] } }])
+})
+
+test('clearConditionalFormats removes the file rules', () => {
+  const built = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  built.sheets[0]?.conditionalFormat('A1:A9', { dataBar: { color: '638EC6' } })
+  built.sheets[0]?.conditionalFormat('B1:B9', { duplicates: { fill: 'FF0000' } })
+  const workbook = readWorkbook(built.toBytes())
+  assert.equal(workbook.sheets[0]?.conditionalFormats.length, 2)
+
+  workbook.sheets[0]?.clearConditionalFormats()
+  assert.deepEqual(workbook.sheets[0]?.conditionalFormats, [])
+  assert.deepEqual(readWorkbook(workbook.toBytes()).sheets[0]?.conditionalFormats, [])
+})
+
 test('unlink removes a hyperlink on write, keeping the rest', () => {
   const workbook = readWorkbook(
     build('<row r="1"><c r="A1"><v>1</v></c></row><row r="2"><c r="B2"><v>2</v></c></row>', {

@@ -177,6 +177,7 @@ sheet?.validate('F1', { date: { between: [new Date('2024-01-01'), new Date('2024
 sheet?.validate('G1', { custom: 'ISNUMBER(G1)' }, )
 
 sheet?.validations // readonly [{ range, rule }] — reads the file plus pending
+sheet?.clearValidations() // removes all; a validate() after still applies
 ```
 
 A comparison (`whole`/`decimal`/`textLength`/`date`) is keyed by operator:
@@ -199,6 +200,7 @@ sheet?.conditionalFormat('G1:G20', { top: { count: 5, fill: 'C6EFCE' } })
 sheet?.conditionalFormat('H1:H20', { bottom: { count: 10, fill: 'FFC7CE', percent: true } })
 
 sheet?.conditionalFormats // readonly [{ range, rule }]
+sheet?.clearConditionalFormats() // removes all; a conditionalFormat() after still applies
 ```
 
 A `colorScale` grades between two hex stops, or three with `mid`. The `cellIs`,

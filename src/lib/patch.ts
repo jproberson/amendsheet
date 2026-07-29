@@ -1028,6 +1028,37 @@ export interface DataValidationSpec {
   readonly formula2?: string
 }
 
+/** Removes every top-level element of the given name from a sheet, children and
+ * all — the whole `dataValidations` or each `conditionalFormatting`. */
+function withoutElements(sheetXml: string, localName: string): string {
+  const spans: { start: number; end: number }[] = []
+  let openStart = -1
+  for (const event of readXml(sheetXml)) {
+    if (event.kind === 'open' && event.localName === localName) {
+      if (event.selfClosing) spans.push({ start: event.start, end: event.end })
+      else openStart = event.start
+    } else if (event.kind === 'close' && event.localName === localName && openStart !== -1) {
+      spans.push({ start: openStart, end: sheetXml.indexOf('>', event.start) + 1 })
+      openStart = -1
+    }
+  }
+  let xml = sheetXml
+  for (const span of spans.sort((a, b) => b.start - a.start)) {
+    xml = xml.slice(0, span.start) + xml.slice(span.end)
+  }
+  return xml
+}
+
+/** Drops the sheet's `dataValidations` element, clearing every validation. */
+export function withoutDataValidations(sheetXml: string): string {
+  return withoutElements(sheetXml, 'dataValidations')
+}
+
+/** Drops every `conditionalFormatting` element, clearing all conditional formats. */
+export function withoutConditionalFormatting(sheetXml: string): string {
+  return withoutElements(sheetXml, 'conditionalFormatting')
+}
+
 /**
  * Reads a sheet's data-validation rules into the same spec they are written from,
  * so the caller translates them the way it translates a pending one. `sqref` and

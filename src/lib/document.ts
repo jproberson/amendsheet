@@ -42,6 +42,8 @@ import {
   mergeAnchorFor,
   mergeRangeReference,
   mergeRefusal,
+  withoutConditionalFormatting,
+  withoutDataValidations,
   withoutMergeCells,
   patchSheet,
   indexSheet,
@@ -282,6 +284,9 @@ export interface Worksheet {
    * model — a time — is left out.
    */
   readonly validations: readonly { readonly range: string; readonly rule: DataValidation }[]
+  /** Removes every data validation on the sheet. A `validate` in the same session
+   * still applies, so clear-then-validate leaves only the new rule. */
+  clearValidations(): void
   /**
    * Adds a conditional format over a cell or range. `{ colorScale }` grades cells
    * between two colours, or three with a `mid`; `{ cellIs }` fills cells matching a
@@ -301,6 +306,9 @@ export interface Worksheet {
     readonly range: string
     readonly rule: ConditionalFormat
   }[]
+  /** Removes every conditional format on the sheet. A `conditionalFormat` in the
+   * same session still applies, so clear-then-add leaves only the new rule. */
+  clearConditionalFormats(): void
   /**
    * Attaches a comment to a cell, written by `toBytes()`. A sheet that already
    * has comments is added to in place, its existing rich text kept. Refused with
@@ -1015,6 +1023,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   const sheetColGroups = new Map<string, Map<number, number>>()
   const sheetValidations = new Map<string, DataValidationSpec[]>()
   const sheetConditionalFormats = new Map<string, ConditionalFormatSpec[]>()
+  const sheetClearValidations = new Set<string>()
+  const sheetClearConditionalFormats = new Set<string>()
   // Comments to add, per sheet, only for sheets that had none — an existing
   // comments part is refused at the call rather than rebuilt.
   const sheetComments = new Map<string, Map<string, string>>()
@@ -1508,8 +1518,9 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         if (validationsCache === undefined) {
           validationsCache = sheetBytes === undefined ? [] : readDataValidations(sheetBytes)
         }
+        const fromFile = sheetClearValidations.has(reference.path) ? [] : validationsCache
         const applied: { range: string; rule: DataValidation }[] = []
-        for (const spec of [...validationsCache, ...(sheetValidations.get(reference.path) ?? [])]) {
+        for (const spec of [...fromFile, ...(sheetValidations.get(reference.path) ?? [])]) {
           const rule = validationFromSpec(spec, date1904)
           if (rule !== undefined) applied.push({ range: spec.sqref, rule })
         }
@@ -1525,7 +1536,10 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         }
         const applied: { range: string; rule: ConditionalFormat }[] = []
         const pending = sheetConditionalFormats.get(reference.path) ?? []
-        for (const spec of [...conditionalFormatsCache, ...pending]) {
+        const fromFile = sheetClearConditionalFormats.has(reference.path)
+          ? []
+          : conditionalFormatsCache
+        for (const spec of [...fromFile, ...pending]) {
           const rule = conditionalFormatFromSpec(spec, workingStyles)
           if (rule !== undefined) applied.push({ range: spec.sqref, rule })
         }
@@ -1707,6 +1721,10 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         specs.push(spec)
         sheetValidations.set(reference.path, specs)
       },
+      clearValidations(): void {
+        sheetValidations.delete(reference.path)
+        sheetClearValidations.add(reference.path)
+      },
       conditionalFormat(range: string, rule: ConditionalFormat): void {
         if (sheetBytes === undefined) {
           throw new XlsxError(
@@ -1801,6 +1819,10 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           }
         }
         sheetConditionalFormats.set(reference.path, specs)
+      },
+      clearConditionalFormats(): void {
+        sheetConditionalFormats.delete(reference.path)
+        sheetClearConditionalFormats.add(reference.path)
       },
       comment(cellReference: string, text: string): void {
         if (sheetBytes === undefined) {
@@ -2212,7 +2234,9 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       removedNames.size === 0 &&
       lineOps.length === 0 &&
       Object.keys(pendingProperties).length === 0 &&
-      sheetStates.size === 0
+      sheetStates.size === 0 &&
+      sheetClearValidations.size === 0 &&
+      sheetClearConditionalFormats.size === 0
     ) {
       return container.write(changes)
     }
@@ -2251,11 +2275,21 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     // or a setRowHeight() is rewritten once.
     for (const path of new Set([
       ...patchInputs.flatMap((map) => [...map.keys()]),
+      ...sheetClearValidations,
+      ...sheetClearConditionalFormats,
       ...addedSheets.keys(),
     ])) {
       if (removed.has(path)) continue
-      const bytes = container.parts.get(path) ?? addedSheets.get(path)
+      let bytes = container.parts.get(path) ?? addedSheets.get(path)
       if (bytes === undefined) continue
+      // Clears drop the file's elements before the patch adds this session's, so a
+      // clear-then-add ends with only the added rules.
+      if (sheetClearValidations.has(path)) {
+        bytes = encoder.encode(withoutDataValidations(decodeXmlPart(bytes, path)))
+      }
+      if (sheetClearConditionalFormats.has(path)) {
+        bytes = encoder.encode(withoutConditionalFormatting(decodeXmlPart(bytes, path)))
+      }
       const pending = edits.get(path) ?? EMPTY_EDITS
       const at: SheetLocation = {
         sheet:
