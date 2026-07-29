@@ -187,12 +187,19 @@ const UNSHIFTABLE_PARTS: ReadonlyArray<readonly [string, string]> = [
   ['relationships/comments', 'a comment'],
 ]
 
-/** The kind of unshiftable part a sheet owns, named for the refusal, or undefined. */
-export function unshiftablePart(relationshipsXml: string): string | undefined {
+/**
+ * The kind of unshiftable part a sheet owns, named for the refusal, or undefined.
+ * A noun in `allow` is one a caller can now adjust, so it no longer refuses — a
+ * table shifts on a row edit, though the other pinned parts still block one.
+ */
+export function unshiftablePart(
+  relationshipsXml: string,
+  allow: ReadonlySet<string> = new Set(),
+): string | undefined {
   for (const event of readXml(relationshipsXml)) {
     if (event.kind !== 'open' || event.localName !== 'Relationship') continue
     for (const [suffix, noun] of UNSHIFTABLE_PARTS) {
-      if (event.attributes.get('Type')?.endsWith(suffix) === true) return noun
+      if (event.attributes.get('Type')?.endsWith(suffix) === true && !allow.has(noun)) return noun
     }
   }
   return undefined

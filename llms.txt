@@ -159,9 +159,11 @@ sheet?.deleteColumns('C')
 
 Insert/delete shift every reference that points into the moved lines — formulas
 across the whole workbook, merges, filters, conditional formats, defined names.
-They refuse a sheet carrying a table, drawing, pivot table or comment, whose
-pinned positions are not yet adjusted, and refuse a delete that would strand a
-`#REF!` a merge or shared formula cannot survive.
+A row insert or delete also moves a table's own range (shrinking it where a
+delete cuts in, refusing one that takes its header row). A column edit on a table
+sheet, and any edit on a sheet carrying a drawing, pivot table or comment, is
+still refused — those pinned positions are not yet adjusted. A delete that would
+strand a `#REF!` a merge or shared formula cannot survive is refused too.
 
 ## Data validation
 

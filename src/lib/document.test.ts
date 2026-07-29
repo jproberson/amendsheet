@@ -227,6 +227,57 @@ test('addTable over a date-headed range generates a column name', () => {
   assert.deepEqual(readWorkbook(workbook.toBytes()).sheet('Data')?.tables[0]?.columns, ['Column1'])
 })
 
+test('insertRows shifts a table it sits below and round-trips the range', () => {
+  const built = createWorkbook('Data')
+  const sheet = built.sheet('Data')
+  sheet?.set('A2', 'H1')
+  sheet?.set('B2', 'H2')
+  sheet?.set('A3', 1)
+  sheet?.set('B3', 2)
+  sheet?.addTable('A2:B4', { name: 'T1' })
+  const workbook = readWorkbook(built.toBytes()) // the table is now wired into the file
+
+  workbook.sheet('Data')?.insertRows(1) // a row above the table pushes it down one
+
+  assert.deepEqual(readWorkbook(workbook.toBytes()).sheet('Data')?.tables, [
+    { name: 'T1', range: 'A3:B5', columns: ['H1', 'H2'] },
+  ])
+})
+
+test('insertRows below a table leaves its range where it is', () => {
+  const built = createWorkbook('Data')
+  const sheet = built.sheet('Data')
+  sheet?.set('A1', 'H1')
+  sheet?.set('B1', 'H2')
+  sheet?.addTable('A1:B3', { name: 'T1' })
+  const workbook = readWorkbook(built.toBytes())
+
+  workbook.sheet('Data')?.insertRows(5) // well below the table
+
+  assert.deepEqual(readWorkbook(workbook.toBytes()).sheet('Data')?.tables, [
+    { name: 'T1', range: 'A1:B3', columns: ['H1', 'H2'] },
+  ])
+})
+
+test('a table grown then shifted in one session composes both edits', () => {
+  const built = createWorkbook('Data')
+  const sheet = built.sheet('Data')
+  sheet?.set('A2', 'H1')
+  sheet?.set('B2', 'H2')
+  sheet?.set('A3', 1)
+  sheet?.set('B3', 2)
+  sheet?.addTable('A2:B3', { name: 'T1' })
+  const workbook = readWorkbook(built.toBytes())
+
+  const grown = workbook.sheet('Data')
+  grown?.set('A4', 3) // grows the table down to row 4
+  grown?.insertRows(1) // then a row above pushes the grown table down one
+
+  assert.deepEqual(readWorkbook(workbook.toBytes()).sheet('Data')?.tables, [
+    { name: 'T1', range: 'A3:B5', columns: ['H1', 'H2'] },
+  ])
+})
+
 test('removeComment removes a note and its box, keeping other notes', () => {
   const built = createWorkbook('Notes')
   const filled = built.sheet('Notes')
@@ -3787,12 +3838,14 @@ test('insertRows refuses a bad row, a bad count and an overflow', () => {
   )
 })
 
-test('insertRows refuses a sheet that carries a table', () => {
+test('insertRows still refuses a table sheet that also carries a drawing', () => {
   const workbook = readWorkbook(
     build('<row r="1"><c r="A1"><v>1</v></c></row>', {
       extra: {
         'xl/worksheets/_rels/sheet1.xml.rels':
-          '<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/></Relationships>',
+          '<Relationships>' +
+          '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/>' +
+          '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/></Relationships>',
         'xl/tables/table1.xml': '<table ref="A1:B2"/>',
       },
     }),
@@ -3802,7 +3855,7 @@ test('insertRows refuses a sheet that carries a table', () => {
     (error: unknown) =>
       error instanceof XlsxError &&
       error.code === 'unsupported-edit' &&
-      error.message.includes('a table'),
+      error.message.includes('drawing'),
   )
 })
 
@@ -3981,7 +4034,7 @@ test('deleteRows refuses a bad row, a bad count and a collapsing merge', () => {
   )
 })
 
-test('deleteRows refuses destroying a shared formula master and a sheet with a table', () => {
+test('deleteRows refuses destroying a shared formula master', () => {
   const master = readWorkbook(
     build('<row r="2"><c r="B2"><f t="shared" ref="B2:B9" si="0">A2</f></c></row>'),
   )
@@ -3989,19 +4042,33 @@ test('deleteRows refuses destroying a shared formula master and a sheet with a t
     () => master.sheets[0]?.deleteRows(2),
     (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
   )
-  const tabled = readWorkbook(
-    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
-      extra: {
-        'xl/worksheets/_rels/sheet1.xml.rels':
-          '<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/></Relationships>',
-        'xl/tables/table1.xml': '<table ref="A1:B2"/>',
-      },
-    }),
-  )
+})
+
+test('deleteRows shrinks a table it cuts into and refuses one that takes its header', () => {
+  const built = createWorkbook('Data')
+  const sheet = built.sheet('Data')
+  sheet?.set('A2', 'H1')
+  sheet?.set('B2', 'H2')
+  sheet?.set('A3', 1)
+  sheet?.set('B3', 2)
+  sheet?.set('A4', 3)
+  sheet?.set('B4', 4)
+  sheet?.addTable('A2:B4', { name: 'T1' })
+  const workbook = readWorkbook(built.toBytes())
+
+  // Deleting the header row would leave no table to shrink to.
   assert.throws(
-    () => tabled.sheets[0]?.deleteRows(1),
-    (error: unknown) => error instanceof XlsxError && error.code === 'unsupported-edit',
+    () => workbook.sheet('Data')?.deleteRows(2),
+    (error: unknown) =>
+      error instanceof XlsxError &&
+      error.code === 'unwritable-value' &&
+      error.message.includes('table T1'),
   )
+  // Deleting a data row shrinks the range instead.
+  workbook.sheet('Data')?.deleteRows(3)
+  assert.deepEqual(readWorkbook(workbook.toBytes()).sheet('Data')?.tables, [
+    { name: 'T1', range: 'A2:B3', columns: ['H1', 'H2'] },
+  ])
 })
 
 test('deleteRows keeps a merge it only clips and a master above the deletion', () => {

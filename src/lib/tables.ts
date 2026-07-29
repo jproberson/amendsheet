@@ -2,6 +2,7 @@ import { escapeSheetName } from './add-sheet.js'
 import { type Container, decodeXmlPart } from './container.js'
 import { formatReference, parseReference } from './reference.js'
 import { readRelationships, resolveTarget } from './relationships.js'
+import type { ShiftSpec } from './shift.js'
 import { readXml, readXmlBytes, withAttribute } from './xml.js'
 
 const SPREADSHEET_NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
@@ -175,6 +176,72 @@ export function extendTables(
   return extensions
 }
 
+// A line at or past the insert/delete point moves; a deletion clamps a line that
+// falls inside the removed band to the surviving edge — the low end up to the row
+// after it, the high end down to the row before — so the range only shrinks.
+const shiftLow = (value: number, spec: ShiftSpec): number => {
+  if (value < spec.at) return value
+  if (spec.delta > 0) return value + spec.delta
+  return value < spec.at - spec.delta ? spec.at : value + spec.delta
+}
+const shiftHigh = (value: number, spec: ShiftSpec): number => {
+  if (value < spec.at) return value
+  if (spec.delta > 0) return value + spec.delta
+  return value < spec.at - spec.delta ? spec.at - 1 : value + spec.delta
+}
+
+/**
+ * The rewritten table parts for a sheet whose rows an insert or delete moved.
+ * Only the row axis adjusts a table so far; a column edit does not reach here.
+ * `currentPart` gives the latest bytes for a table already rewritten this
+ * session — a grow before an insert — so a chain of edits composes.
+ */
+export function shiftTables(
+  currentPart: (path: string) => Uint8Array | undefined,
+  sheetBytes: Uint8Array,
+  sheetPath: string,
+  container: Container,
+  spec: ShiftSpec,
+): TableExtension[] {
+  if (spec.axis !== 'row') return []
+  const extensions: TableExtension[] = []
+  for (const path of tablePartPaths(sheetBytes, sheetPath, container)) {
+    const bytes = currentPart(path) ?? container.parts.get(path)
+    const table = bytes === undefined ? undefined : decodeTableBytes(bytes, path)
+    if (table === undefined) continue
+    const shifted = {
+      ...table.range,
+      minRow: shiftLow(table.range.minRow, spec),
+      maxRow: shiftHigh(table.range.maxRow, spec),
+    }
+    if (shifted.minRow === table.range.minRow && shifted.maxRow === table.range.maxRow) continue
+    extensions.push({ path, xml: rewriteRefs(table.xml, refOf(table.range), refOf(shifted)) })
+  }
+  return extensions
+}
+
+/**
+ * The name of a table a row deletion would destroy by taking its header row —
+ * its band covers the row the table starts on, so there is nothing to shrink to.
+ * Only reached from `deleteRows`, so the spec is always a row removal.
+ */
+export function tableRowDamage(
+  sheetBytes: Uint8Array,
+  sheetPath: string,
+  container: Container,
+  spec: ShiftSpec,
+): string | undefined {
+  for (const path of tablePartPaths(sheetBytes, sheetPath, container)) {
+    const table = decodeTable(container, path)
+    if (table === undefined) continue
+    const header = table.range.minRow
+    if (spec.at <= header && header < spec.at - spec.delta) {
+      return table.name === undefined ? 'a table' : `table ${table.name}`
+    }
+  }
+  return undefined
+}
+
 interface DecodedTable {
   readonly path: string
   readonly xml: string
@@ -213,7 +280,10 @@ const decode = (bytes: Uint8Array) => new TextDecoder('utf-8', { fatal: true }).
 
 function decodeTable(container: Container, path: string): DecodedTable | undefined {
   const bytes = container.parts.get(path)
-  if (bytes === undefined) return undefined
+  return bytes === undefined ? undefined : decodeTableBytes(bytes, path)
+}
+
+function decodeTableBytes(bytes: Uint8Array, path: string): DecodedTable | undefined {
   let xml: string
   try {
     xml = decode(bytes)

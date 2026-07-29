@@ -82,6 +82,8 @@ import {
   buildTablePart,
   extendTables,
   readTables,
+  shiftTables,
+  tableRowDamage,
   withTableParts,
 } from './tables.js'
 import {
@@ -667,6 +669,10 @@ const VML_DRAWING_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.
 const TABLE_RELATIONSHIP =
   'http://schemas.openxmlformats.org/officeDocument/2006/relationships/table'
 const TABLE_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml'
+
+// A table's own range shifts with a row insert or delete, so it no longer blocks
+// one; a column edit does not adjust its columns yet, so it still refuses there.
+const ROW_SHIFTABLE: ReadonlySet<string> = new Set(['a table'])
 
 function partText(container: Container, path: string): string | undefined {
   const bytes = container.parts.get(path)
@@ -1499,10 +1505,14 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
 
     // A part with pinned positions is preserved untouched, so an insert or delete
     // that would move the cells under it is refused until it too can be adjusted.
-    const refuseUnshiftable = (action: string, where?: string): void => {
+    const refuseUnshiftable = (
+      action: string,
+      where: string | undefined,
+      allow?: ReadonlySet<string>,
+    ): void => {
       const relationships = partText(container, relationshipsPathFor(reference.path))
       if (relationships === undefined) return
-      const owns = unshiftablePart(relationships)
+      const owns = unshiftablePart(relationships, allow)
       if (owns === undefined) return
       throw new XlsxError(
         'unsupported-edit',
@@ -2356,7 +2366,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             { ...at },
           )
         }
-        refuseUnshiftable('its rows cannot be inserted into yet')
+        refuseUnshiftable('its rows cannot be inserted into yet', undefined, ROW_SHIFTABLE)
         lineOps.push({ path: reference.path, spec: lineSpec('row', before, count) })
       },
       insertColumns(before: string, count = 1): void {
@@ -2399,9 +2409,11 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           })
         }
         checkCount(count, 'rows to delete')
-        refuseUnshiftable('its rows cannot be deleted yet')
+        refuseUnshiftable('its rows cannot be deleted yet', undefined, ROW_SHIFTABLE)
         const spec = lineSpec('row', from, -count)
-        const damage = deletionDamage(sheetBytes, spec)
+        const damage =
+          deletionDamage(sheetBytes, spec) ??
+          tableRowDamage(sheetBytes, reference.path, container, spec)
         if (damage !== undefined) {
           throw new XlsxError(
             'unwritable-value',
@@ -2882,6 +2894,25 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
               : shiftForeignFormulas(xml, { ...op.spec, onCurrentSheet: false })
         }
         if (xml !== before) changes.set(path, encoder.encode(xml))
+
+        // The sheet's cells have moved; each table part it owns carries a range
+        // that must move with them. A grow earlier this session may already sit in
+        // `changes`, so shift from there when present.
+        const sheetOriginal = container.parts.get(path)
+        if (sheetOriginal !== undefined) {
+          for (const op of lineOps) {
+            if (op.path !== path) continue
+            for (const extension of shiftTables(
+              (tablePath) => changes.get(tablePath) ?? undefined,
+              sheetOriginal,
+              path,
+              container,
+              op.spec,
+            )) {
+              changes.set(extension.path, encoder.encode(extension.xml))
+            }
+          }
+        }
       }
 
       namesToWrite = shiftDefinedNames(
