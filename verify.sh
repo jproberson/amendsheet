@@ -87,17 +87,17 @@ step "tests and coverage"
 # blank line is blamed moves as files change, so 100 is not reachable. A real
 # gap costs far more than half a percent, so the gate still bites.
 #
-# Branches sit below 100 because a few are unreachable by construction, and
-# because tsx's transpiled output misattributes branch coverage — the same cause
-# as the line exception above. lcov shows branches that ARE exercised reported
-# with zero hits: patch.ts readSheetView's self-closing arm, hyperlinks.ts's
-# non-self-closing append, the alignment arm of resolveStyle (tested six times) —
-# plus phantom branches on comment and declaration lines. Adding page.ts, a small
-# and fully-tested module, shifted this noise floor from 98.02 to 97.99 without a
-# line of untested code. So the floor is 97; a real gap costs far more than the
-# fractions this drifts by, so the gate still bites. The functions=100 and
-# lines=99 gates and the 0-lossy harness carry what the branch metric cannot.
-# Raise this back toward 98 if the measurement stops misattributing.
+# Branches are a FIXED BACKSTOP at 97, not a ratchet — because this metric is too
+# noisy to ratchet. The count is measured through tsx's transpiled output and
+# misattributes branch hits: lcov shows arms that ARE exercised reported with zero
+# hits (patch.ts readSheetView's self-closing arm, hyperlinks.ts's append, the
+# alignment arm of resolveStyle tested six times). The proof it is noise, not gaps:
+# adding page.ts — a small module with zero untested lines — moved the aggregate
+# 98.02 -> 97.99. Fully-tested code cannot lower real coverage, so the wobble is the
+# measurement, and ratcheting a number that drifts down from noise would eventually
+# make the gate unmeetable on its own. 97 gives headroom for that drift while still
+# catching a gross regression. The rigor lives in functions=100, lines=99, and the
+# 0-lossy harness, which are reliable and responsive; branch is a floor, nothing more.
 if find src -name '*.test.ts' -print -quit | grep -q .; then
   node --import tsx --test \
     --experimental-test-coverage \
