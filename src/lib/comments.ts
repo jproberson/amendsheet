@@ -61,6 +61,63 @@ export function buildCommentsPart(entries: ReadonlyMap<string, string>): string 
   )
 }
 
+/** Removes the `<comment>` for a cell from a comments part, leaving the rest — and
+ * the (now perhaps empty) part — as it was. A ref the part lacks is ignored. A cell
+ * carries at most one comment, so the first match is the only one. */
+export function withoutComment(commentsXml: string, reference: string): string {
+  let start = -1
+  let matching = false
+  for (const event of readXml(commentsXml)) {
+    if (event.kind === 'open' && event.localName === 'comment') {
+      start = event.start
+      matching = event.attributes.get('ref') === reference
+    } else if (event.kind === 'close' && event.localName === 'comment' && matching) {
+      const end = commentsXml.indexOf('>', event.start) + 1
+      return commentsXml.slice(0, start) + commentsXml.slice(end)
+    }
+  }
+  return commentsXml
+}
+
+/** Removes the note `<v:shape>` anchored at a cell's zero-based row and column from
+ * a legacy drawing, leaving shapes that are not notes, or note other cells, alone.
+ * A cell has at most one note shape, so the first match is the only one. */
+export function withoutNoteShape(vmlXml: string, cellRow: number, cellColumn: number): string {
+  let start = -1
+  let row: number | undefined
+  let column: number | undefined
+  let capture: 'row' | 'column' | undefined
+  let text = ''
+  for (const event of readXml(vmlXml)) {
+    if (event.kind === 'open' && event.localName === 'shape') {
+      start = event.start
+      row = undefined
+      column = undefined
+    } else if (event.kind === 'open' && event.localName === 'Row') {
+      capture = 'row'
+      text = ''
+    } else if (event.kind === 'open' && event.localName === 'Column') {
+      capture = 'column'
+      text = ''
+    } else if (event.kind === 'text' && capture !== undefined) {
+      text += event.text
+    } else if (event.kind === 'close' && event.localName === 'Row') {
+      row = Number(text)
+      capture = undefined
+    } else if (event.kind === 'close' && event.localName === 'Column') {
+      column = Number(text)
+      capture = undefined
+    } else if (event.kind === 'close' && event.localName === 'shape' && start !== -1) {
+      if (row === cellRow && column === cellColumn) {
+        const end = vmlXml.indexOf('>', event.start) + 1
+        return vmlXml.slice(0, start) + vmlXml.slice(end)
+      }
+      start = -1
+    }
+  }
+  return vmlXml
+}
+
 const VML_HEADER =
   '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
   '<xml xmlns:v="urn:schemas-microsoft-com:vml" ' +

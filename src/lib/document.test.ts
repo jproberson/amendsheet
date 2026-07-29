@@ -42,6 +42,40 @@ function build(
   return writeContainer({ parts: new Map(Object.entries(parts)) })
 }
 
+test('removeComment removes a note and its box, keeping other notes', () => {
+  const built = createWorkbook('Notes')
+  const filled = built.sheet('Notes')
+  filled?.set('A1', 'x')
+  filled?.set('C3', 'y')
+  filled?.comment('A1', 'note one')
+  filled?.comment('C3', 'note two')
+  const workbook = readWorkbook(built.toBytes()) // a file with two notes + their VML
+  const sheet = workbook.sheet('Notes')
+  assert.equal(sheet?.cell('A1')?.comment, 'note one')
+
+  sheet?.removeComment('A1')
+  const parts = readContainer(workbook.toBytes()).parts
+  const comments = decode(parts.get('xl/comments1.xml'))
+  assert.doesNotMatch(comments, /ref="A1"/)
+  assert.match(comments, /ref="C3"/)
+  const vml = decode(parts.get('xl/drawings/vmlDrawing1.vml'))
+  assert.doesNotMatch(vml, /<x:Row>0<\/x:Row>/) // A1's shape gone
+  assert.match(vml, /<x:Row>2<\/x:Row>/) // C3's shape stays
+
+  const back = readWorkbook(workbook.toBytes()).sheet('Notes')
+  assert.equal(back?.cell('A1')?.comment, undefined)
+  assert.equal(back?.cell('C3')?.comment, 'note two')
+})
+
+test('a note added then removed this session leaves nothing', () => {
+  const workbook = createWorkbook('Notes')
+  const sheet = workbook.sheet('Notes')
+  sheet?.set('A1', 'x')
+  sheet?.comment('A1', 'temp')
+  sheet?.removeComment('A1')
+  assert.equal(readWorkbook(workbook.toBytes()).sheet('Notes')?.cell('A1')?.comment, undefined)
+})
+
 test('clearValidations removes the file rules, and clear-then-validate keeps only the new one', () => {
   const built = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
   built.sheets[0]?.validate('A1', { list: ['old'] })
@@ -3180,6 +3214,10 @@ test('refuses a write to a sheet whose part is not in the package', () => {
   )
   assert.throws(
     () => workbook.sheets[0]?.unlink('A1'),
+    (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
+  )
+  assert.throws(
+    () => workbook.sheets[0]?.removeComment('A1'),
     (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
   )
   assert.throws(

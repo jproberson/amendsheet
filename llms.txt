@@ -214,6 +214,7 @@ the count as a percentage.
 const sheet = readWorkbook(bytes).sheets[0]
 
 sheet?.comment('A1', 'A note that shows on hover.')
+sheet?.removeComment('A1') // removes the note and its box; a cell without one is ignored
 sheet?.cell('A1')?.comment // the text, when read back
 
 sheet?.link('B2', { url: 'https://example.com', tooltip: 'Open' })

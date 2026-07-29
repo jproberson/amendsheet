@@ -5,6 +5,8 @@ import {
   appendVmlShapes,
   buildCommentsPart,
   buildVmlDrawing,
+  withoutComment,
+  withoutNoteShape,
   readComments,
 } from './comments.js'
 import { XlsxError } from './errors.js'
@@ -95,4 +97,26 @@ test('a built comments part reads back to the same text', () => {
   const read = readComments(built)
   assert.equal(read.get('A1'), 'hello')
   assert.equal(read.get('Z9'), 'world')
+})
+
+test('withoutComment removes the comment for a cell and keeps the rest', () => {
+  const xml = buildCommentsPart(
+    new Map([
+      ['A1', 'first'],
+      ['C3', 'second'],
+    ]),
+  )
+  const out = withoutComment(xml, 'A1')
+  assert.doesNotMatch(out, /ref="A1"/)
+  assert.match(out, /<comment ref="C3"/)
+  assert.equal(withoutComment(xml, 'Z9'), xml) // absent ref, unchanged
+})
+
+test('withoutNoteShape removes the shape anchored at a cell, keeping others', () => {
+  const vml = buildVmlDrawing(['A1', 'C3']) // shapes at (row0,col0) 0,0 and 2,2
+  const out = withoutNoteShape(vml, 0, 0) // A1
+  assert.doesNotMatch(out, /<x:Row>0<\/x:Row>/)
+  assert.match(out, /<x:Row>2<\/x:Row><x:Column>2<\/x:Column>/) // C3 stays
+  assert.equal(out.match(/<v:shape /g)?.length, 1)
+  assert.equal(withoutNoteShape(vml, 9, 9), vml) // no shape there, unchanged
 })

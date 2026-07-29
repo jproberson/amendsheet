@@ -16,6 +16,8 @@ import {
   buildCommentsPart,
   buildVmlDrawing,
   readComments,
+  withoutComment,
+  withoutNoteShape,
 } from './comments.js'
 import { checkDefinedName, readDefinedNames, withDefinedNames } from './defined-names.js'
 import {
@@ -316,6 +318,9 @@ export interface Worksheet {
    * not replace.
    */
   comment(reference: string, text: string): void
+  /** Removes a cell's comment, its note box included. A cell without one is
+   * ignored; the comments part is left in place even when it empties. */
+  removeComment(reference: string): void
   /**
    * Sets the sheet tab's colour, into `sheetPr`, replacing any it already has.
    * The colour is a 6- or 8-digit hex string; a 6-digit one gains an opaque
@@ -1028,6 +1033,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   // Comments to add, per sheet, only for sheets that had none — an existing
   // comments part is refused at the call rather than rebuilt.
   const sheetComments = new Map<string, Map<string, string>>()
+  const sheetRemovedComments = new Map<string, Set<string>>()
   // The per-sheet maps patchSheet applies in one rewrite. Both the "anything
   // pending?" check and the set of sheets to rewrite read this list, so a new
   // kind of sheet edit is registered in one place rather than two enumerations
@@ -1840,9 +1846,24 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             { ...at, reference: canonical },
           )
         }
+        sheetRemovedComments.get(reference.path)?.delete(canonical)
         const notes = sheetComments.get(reference.path) ?? new Map<string, string>()
         notes.set(canonical, text)
         sheetComments.set(reference.path, notes)
+      },
+      removeComment(cellReference: string): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so ${cellReference} cannot be uncommented`,
+            { ...at, reference: cellReference },
+          )
+        }
+        const canonical = formatReference(parseWritableReference(cellReference))
+        sheetComments.get(reference.path)?.delete(canonical)
+        const removals = sheetRemovedComments.get(reference.path) ?? new Set<string>()
+        removals.add(canonical)
+        sheetRemovedComments.set(reference.path, removals)
       },
       freeze(cell: string): void {
         if (sheetBytes === undefined) {
@@ -2227,6 +2248,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       sheetHyperlinks.size === 0 &&
       sheetUnlinks.size === 0 &&
       sheetComments.size === 0 &&
+      sheetRemovedComments.size === 0 &&
       addedRefs.length === 0 &&
       renames.size === 0 &&
       removed.size === 0 &&
@@ -2479,6 +2501,31 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       }
 
       if (relsXml !== currentRels) changes.set(relationshipsPath, encoder.encode(relsXml ?? ''))
+    }
+
+    // Comment removal runs after the add above, on whatever the add just wrote, so a
+    // note added then removed this session is gone. The comment leaves its part, and
+    // the note box leaves the legacy drawing; both are found through the sheet rels.
+    for (const [path, refs] of sheetRemovedComments) {
+      if (removed.has(path)) continue
+      const relsXml = sheetTextNow(relationshipsPathFor(path))
+      const commentsPath = relationshipTarget(relsXml, path, COMMENTS_RELATIONSHIP)
+      const commentsXml = commentsPath === undefined ? undefined : sheetTextNow(commentsPath)
+      if (commentsPath !== undefined && commentsXml !== undefined) {
+        let updated = commentsXml
+        for (const ref of refs) updated = withoutComment(updated, ref)
+        if (updated !== commentsXml) changes.set(commentsPath, encoder.encode(updated))
+      }
+      const vmlPath = relationshipTarget(relsXml, path, VML_DRAWING_RELATIONSHIP)
+      const vmlXml = vmlPath === undefined ? undefined : sheetTextNow(vmlPath)
+      if (vmlPath !== undefined && vmlXml !== undefined) {
+        let updated = vmlXml
+        for (const ref of refs) {
+          const { row, column } = parseReference(ref)
+          updated = withoutNoteShape(updated, row - 1, column - 1)
+        }
+        if (updated !== vmlXml) changes.set(vmlPath, encoder.encode(updated))
+      }
     }
 
     // Inserting or deleting a line moves references across the whole workbook. The
