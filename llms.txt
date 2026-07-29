@@ -133,6 +133,7 @@ sheet?.format('B2', { font: { bold: true } })
 const sheet = readWorkbook(bytes).sheets[0]
 
 sheet?.merge('A1:B2') // top-left value shows; joins existing merges
+sheet?.unmerge('A1:B2') // removes exactly that merge; a range it lacks is ignored
 sheet?.mergedRanges // readonly string[], e.g. ['A1:B2']
 
 sheet?.setRowHeight(1, 30) // points

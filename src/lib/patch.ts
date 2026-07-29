@@ -8,7 +8,7 @@ import {
   parseFileReference,
   parseReference,
 } from './reference.js'
-import { findUnwritableCharacter, readXmlBytes, withAttribute } from './xml.js'
+import { findUnwritableCharacter, readXml, readXmlBytes, withAttribute } from './xml.js'
 
 /**
  * Where a write-path error points, past the cell reference the throw site
@@ -390,6 +390,50 @@ function parseMergeRange(ref: string): MergeRange | undefined {
 
 const canonicalMerge = (merge: MergeRange): string =>
   `${merge.anchor}:${formatReference({ row: merge.maxRow, column: merge.maxColumn })}`
+
+/**
+ * Removes the `<mergeCell>` elements whose canonical range is in `refs`, updating
+ * the `count`, and drops the whole `<mergeCells>` when none is left. A range the
+ * sheet does not merge is ignored.
+ */
+export function withoutMergeCells(sheetXml: string, refs: ReadonlySet<string>): string {
+  if (refs.size === 0) return sheetXml
+  const spans: { start: number; end: number }[] = []
+  let container: { openStart: number; openEnd: number } | undefined
+  let closeStart = -1
+  let total = 0
+  let inside = false
+  for (const event of readXml(sheetXml)) {
+    if (event.kind === 'open' && event.localName === 'mergeCells') {
+      container = { openStart: event.start, openEnd: event.end }
+      inside = !event.selfClosing
+    } else if (event.kind === 'close' && event.localName === 'mergeCells') {
+      closeStart = event.start
+      inside = false
+    } else if (inside && event.kind === 'open' && event.localName === 'mergeCell') {
+      total += 1
+      const ref = event.attributes.get('ref')
+      const parsed = ref === undefined ? undefined : parseMergeRange(ref)
+      if (parsed !== undefined && refs.has(canonicalMerge(parsed))) {
+        spans.push({ start: event.start, end: event.end })
+      }
+    }
+  }
+  if (container === undefined || spans.length === 0) return sheetXml
+
+  if (total - spans.length <= 0) {
+    const closeEnd = sheetXml.indexOf('>', closeStart) + 1
+    return sheetXml.slice(0, container.openStart) + sheetXml.slice(closeEnd)
+  }
+
+  let xml = sheetXml
+  for (const span of spans.sort((a, b) => b.start - a.start)) {
+    xml = xml.slice(0, span.start) + xml.slice(span.end)
+  }
+  const openTag = xml.slice(container.openStart, container.openEnd)
+  const counted = withAttribute(openTag, 'count', total - spans.length)
+  return xml.slice(0, container.openStart) + counted + xml.slice(container.openEnd)
+}
 
 /**
  * The canonical `A1:B2` form of a range to merge, so `b2:a1` and `A1:B2` are the

@@ -42,6 +42,40 @@ function build(
   return writeContainer({ parts: new Map(Object.entries(parts)) })
 }
 
+test('unmerge removes a merge, live and on write, keeping the rest', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      after: '<mergeCells count="2"><mergeCell ref="A1:B2"/><mergeCell ref="C1:D1"/></mergeCells>',
+    }),
+  )
+  const sheet = workbook.sheets[0]
+  sheet?.unmerge('a1:b2') // canonicalises
+  assert.deepEqual(sheet?.mergedRanges, ['C1:D1']) // live
+  assert.deepEqual(readWorkbook(workbook.toBytes()).sheets[0]?.mergedRanges, ['C1:D1'])
+})
+
+test('unmerging the only merge drops the mergeCells element', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      after: '<mergeCells count="1"><mergeCell ref="A1:B2"/></mergeCells>',
+    }),
+  )
+  workbook.sheets[0]?.unmerge('A1:B2')
+  assert.doesNotMatch(
+    decode(readContainer(workbook.toBytes()).parts.get('xl/worksheets/sheet1.xml')),
+    /mergeCells/,
+  )
+})
+
+test('a range merged then unmerged this session ends up gone', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  const sheet = workbook.sheets[0]
+  sheet?.merge('A1:B2')
+  sheet?.unmerge('A1:B2')
+  assert.deepEqual(sheet?.mergedRanges, [])
+  assert.deepEqual(readWorkbook(workbook.toBytes()).sheets[0]?.mergedRanges, [])
+})
+
 test('removeDefinedName drops a name and reads back without it', () => {
   const workbook = readWorkbook(
     build('<row r="1"><c r="A1"><v>1</v></c></row>', {

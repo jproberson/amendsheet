@@ -9,6 +9,7 @@ import {
   mergeRangeReference,
   patchSheet as patchSheetBytes,
   readColumnGroupLevels,
+  withoutMergeCells,
   readColumnWidths,
   readConditionalFormats,
   readDataValidations,
@@ -1030,4 +1031,25 @@ test('readConditionalFormats reads top10 rank, bottom and percent', () => {
     { kind: 'top10', sqref: 'A1:A9', rank: 3, bottom: false, percent: false, dxfId: 1 },
     { kind: 'top10', sqref: 'B1:B9', rank: 10, bottom: true, percent: true, dxfId: 2 },
   ])
+})
+
+test('withoutMergeCells removes matching merges, updates the count, and drops an emptied element', () => {
+  const two =
+    '<worksheet><sheetData/><mergeCells count="2">' +
+    '<mergeCell ref="A1:B2"/><mergeCell ref="C1:D1"/></mergeCells></worksheet>'
+  const one = withoutMergeCells(two, new Set(['A1:B2']))
+  assert.match(one, /<mergeCells count="1"><mergeCell ref="C1:D1"\/><\/mergeCells>/)
+  assert.doesNotMatch(one, /A1:B2/)
+
+  const gone = withoutMergeCells(two, new Set(['A1:B2', 'C1:D1']))
+  assert.doesNotMatch(gone, /mergeCells/) // whole element dropped
+
+  assert.equal(withoutMergeCells(two, new Set(['Z9:Z10'])), two) // no match, unchanged
+
+  // Removing two of three leaves the element, exercising the span sort.
+  const three =
+    '<worksheet><sheetData/><mergeCells count="3"><mergeCell ref="A1:A2"/>' +
+    '<mergeCell ref="B1:B2"/><mergeCell ref="C1:C2"/></mergeCells></worksheet>'
+  const left = withoutMergeCells(three, new Set(['A1:A2', 'C1:C2']))
+  assert.match(left, /<mergeCells count="1"><mergeCell ref="B1:B2"\/><\/mergeCells>/)
 })

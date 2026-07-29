@@ -37,6 +37,7 @@ import {
   mergeAnchorFor,
   mergeRangeReference,
   mergeRefusal,
+  withoutMergeCells,
   patchSheet,
   indexSheet,
   readColumnGroupLevels,
@@ -256,6 +257,9 @@ export interface Worksheet {
    * is not two references either side of a colon.
    */
   merge(range: string): void
+  /** Removes a merge over exactly `range`, by its `A1:B2` form. A range the sheet
+   * does not merge is ignored; this does not split a merge it overlaps. */
+  unmerge(range: string): void
   /** Sets the sheet's auto-filter over a range, replacing any it already has. */
   autoFilter(range: string): void
   /**
@@ -987,6 +991,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   const styleOverrides = new Map<string, Map<string, number>>()
   const sheetProtections = new Map<string, SheetProtection | 'remove'>()
   const sheetMerges = new Map<string, string[]>()
+  const sheetUnmerges = new Map<string, Set<string>>()
   const sheetRowHeights = new Map<string, Map<number, number>>()
   const sheetColumnWidths = new Map<string, Map<number, number>>()
   const sheetAutoFilters = new Map<string, string>()
@@ -1014,6 +1019,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     styleOverrides,
     sheetProtections,
     sheetMerges,
+    sheetUnmerges,
     sheetRowHeights,
     sheetColumnWidths,
     sheetAutoFilters,
@@ -1467,7 +1473,9 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           (merge) =>
             `${merge.anchor}:${formatReference({ row: merge.maxRow, column: merge.maxColumn })}`,
         )
-        return [...new Set([...fromFile, ...(sheetMerges.get(reference.path) ?? [])])]
+        const unmerged = sheetUnmerges.get(reference.path)
+        const all = [...new Set([...fromFile, ...(sheetMerges.get(reference.path) ?? [])])]
+        return unmerged === undefined ? all : all.filter((range) => !unmerged.has(range))
       },
       get gridlinesVisible(): boolean {
         return sheetGridlines.get(reference.path) ?? viewState().gridlines
@@ -1641,9 +1649,30 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           )
         }
         const canonical = mergeRangeReference(range, at)
+        sheetUnmerges.get(reference.path)?.delete(canonical)
         const pending = sheetMerges.get(reference.path) ?? []
         pending.push(canonical)
         sheetMerges.set(reference.path, pending)
+      },
+      unmerge(range: string): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so ${range} cannot be unmerged`,
+            { ...at, reference: range },
+          )
+        }
+        const canonical = mergeRangeReference(range, at)
+        const pending = sheetMerges.get(reference.path)
+        if (pending !== undefined) {
+          sheetMerges.set(
+            reference.path,
+            pending.filter((existing) => existing !== canonical),
+          )
+        }
+        const unmerged = sheetUnmerges.get(reference.path) ?? new Set<string>()
+        unmerged.add(canonical)
+        sheetUnmerges.set(reference.path, unmerged)
       },
       autoFilter(range: string): void {
         if (sheetBytes === undefined) {
@@ -2209,26 +2238,32 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           addedRefs.find((added) => added.reference.path === path)?.reference.name,
         part: path,
       }
+      const patched = patchSheet(bytes, pending, date1904, indexes, styleOverrides.get(path), at, {
+        protection: sheetProtections.get(path),
+        merges: sheetMerges.get(path),
+        rowHeights: sheetRowHeights.get(path),
+        columnWidths: sheetColumnWidths.get(path),
+        autoFilter: sheetAutoFilters.get(path),
+        freeze: sheetFreezes.get(path),
+        hiddenRows: sheetHiddenRows.get(path),
+        hiddenColumns: sheetHiddenColumns.get(path),
+        tabColor: sheetTabColors.get(path),
+        showGridLines: sheetGridlines.get(path),
+        showRowColHeaders: sheetHeadings.get(path),
+        zoomScale: sheetZoom.get(path),
+        rowOutlineLevels: sheetRowGroups.get(path),
+        colOutlineLevels: sheetColGroups.get(path),
+        dataValidations: sheetValidations.get(path),
+        conditionalFormats: sheetConditionalFormats.get(path),
+      })
+      // Unmerge runs after the merge-add above, on the written sheet, so a range
+      // both merged and unmerged this session ends up gone.
+      const unmerges = sheetUnmerges.get(path)
       changes.set(
         path,
-        patchSheet(bytes, pending, date1904, indexes, styleOverrides.get(path), at, {
-          protection: sheetProtections.get(path),
-          merges: sheetMerges.get(path),
-          rowHeights: sheetRowHeights.get(path),
-          columnWidths: sheetColumnWidths.get(path),
-          autoFilter: sheetAutoFilters.get(path),
-          freeze: sheetFreezes.get(path),
-          hiddenRows: sheetHiddenRows.get(path),
-          hiddenColumns: sheetHiddenColumns.get(path),
-          tabColor: sheetTabColors.get(path),
-          showGridLines: sheetGridlines.get(path),
-          showRowColHeaders: sheetHeadings.get(path),
-          zoomScale: sheetZoom.get(path),
-          rowOutlineLevels: sheetRowGroups.get(path),
-          colOutlineLevels: sheetColGroups.get(path),
-          dataValidations: sheetValidations.get(path),
-          conditionalFormats: sheetConditionalFormats.get(path),
-        }),
+        unmerges === undefined || unmerges.size === 0
+          ? patched
+          : encoder.encode(withoutMergeCells(decodeXmlPart(patched, path), unmerges)),
       )
       // A cell written just past a table grows it, the way Excel would.
       for (const extension of extendTables(bytes, path, container, pending.keys())) {
