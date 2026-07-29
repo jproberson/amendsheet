@@ -379,9 +379,10 @@ What a minor release is allowed to do, so you know which branches are safe:
   anchors follow the edit, one a deletion covers entirely is dropped, and a chart's
   box moves while its series, category and title references shift wherever the chart
   part lives, so a chart plotting the edited sheet from another one is caught. A
-  diagram or other graphic frame, and a pivot table's source, are still not
-  adjusted, so a row or column edit is refused on a sheet whose drawing holds one,
-  or that carries a pivot table.
+  pivot table moves too — its location follows the edit, and its cache's source
+  range shifts when the sheet it reads is the one changed, wherever the pivot sits.
+  A diagram or other graphic frame is still not adjusted, so a row or column edit is
+  refused on a sheet whose drawing holds one.
 - Chartsheets and dialogsheets aren't listed in `sheets`, since they hold no
   cells. They're still written back untouched.
 

@@ -4114,21 +4114,30 @@ test('insertRows refuses a sheet that carries a drawing', () => {
   )
 })
 
-test('insertColumns refuses a sheet that carries a pivot table', () => {
+test('insertRows shifts a pivot table location and its cache source range', () => {
   const workbook = readWorkbook(
     build('<row r="1"><c r="A1"><v>1</v></c></row>', {
       extra: {
         'xl/worksheets/_rels/sheet1.xml.rels':
           '<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable" Target="../pivotTables/pivotTable1.xml"/></Relationships>',
+        'xl/pivotTables/pivotTable1.xml':
+          '<pivotTableDefinition xmlns="http://x">' +
+          '<location ref="A10:D14" firstHeaderRow="1" firstDataRow="2" firstDataCol="1"/>' +
+          '</pivotTableDefinition>',
+        'xl/pivotCache/pivotCacheDefinition1.xml':
+          '<pivotCacheDefinition xmlns="http://x"><cacheSource type="worksheet">' +
+          '<worksheetSource ref="A1:D5" sheet="Data"/></cacheSource></pivotCacheDefinition>',
       },
     }),
   )
-  assert.throws(
-    () => workbook.sheets[0]?.insertColumns('A'),
-    (error: unknown) =>
-      error instanceof XlsxError &&
-      error.code === 'unsupported-edit' &&
-      error.message.includes('pivot table'),
+
+  workbook.sheets[0]?.insertRows(1) // above both the data and the pivot
+
+  const parts = readContainer(workbook.toBytes()).parts
+  assert.match(decode(parts.get('xl/pivotTables/pivotTable1.xml')), /<location ref="A11:D15"/)
+  assert.match(
+    decode(parts.get('xl/pivotCache/pivotCacheDefinition1.xml')),
+    /<worksheetSource ref="A2:D6" sheet="Data"\/>/,
   )
 })
 

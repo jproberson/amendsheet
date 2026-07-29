@@ -167,10 +167,11 @@ the column entries it cut out. Only a deletion that would take every column of a
 table, or a row deletion that takes its header row, is refused with
 `unsupported-edit`. A drawing moves its picture, shape and chart anchors with the
 edit (one a deletion covers entirely is dropped), and a chart's series/category/
-title references shift too, wherever the chart part lives. A drawing that holds a
-diagram or other graphic frame, and a pivot table, are still refused since their
-references are not adjusted. A delete that would strand a `#REF!` a merge or shared
-formula cannot survive is refused too.
+title references shift too, wherever the chart part lives. A pivot table moves its
+location and its cache's source range (when the edit is on the sheet the source
+reads). A drawing that holds a diagram or other graphic frame is still refused
+since its references are not adjusted. A delete that would strand a `#REF!` a merge
+or shared formula cannot survive is refused too.
 
 ## Data validation
 

@@ -11,6 +11,7 @@ import {
 } from './add-sheet.js'
 import { blankWorkbookBytes } from './blank.js'
 import { drawingHasUnshiftableFrame, shiftDrawing } from './drawings.js'
+import { shiftPivotCacheSource, shiftPivotLocation } from './pivots.js'
 import {
   appendCommentsPart,
   appendVmlShapes,
@@ -684,6 +685,7 @@ const SHIFTABLE_PARTS: ReadonlySet<string> = new Set([
   'a comment',
   'a legacy drawing',
   'a drawing',
+  'a pivot table',
 ])
 
 function partText(container: Container, path: string): string | undefined {
@@ -2999,17 +3001,22 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             const shifted = shiftNoteShapes(vmlText, op.spec)
             if (shifted !== vmlText) changes.set(vmlPath, encoder.encode(shifted))
           }
-          // A chart-free drawing (a chart-bearing one is refused at the call) moves
-          // its cell anchors with the edit; a picture fully inside a deletion goes.
+          // A drawing (a diagram-bearing one is refused at the call) moves its cell
+          // anchors with the edit; a picture fully inside a deletion goes. A pivot
+          // table on this sheet moves its location, the range where it is drawn.
           if (relsForComments !== undefined) {
             for (const relationship of readRelationships(relsForComments, path).values()) {
-              if (relationship.external || !relationship.type.endsWith('relationships/drawing'))
-                continue
-              const drawingPath = resolveTarget(path, relationship.target)
-              const drawingText = sheetTextNow(drawingPath)
-              if (drawingText === undefined) continue
-              const shifted = shiftDrawing(drawingText, op.spec)
-              if (shifted !== drawingText) changes.set(drawingPath, encoder.encode(shifted))
+              if (relationship.external) continue
+              const target = resolveTarget(path, relationship.target)
+              const partXml = sheetTextNow(target)
+              if (partXml === undefined) continue
+              if (relationship.type.endsWith('relationships/drawing')) {
+                const shifted = shiftDrawing(partXml, op.spec)
+                if (shifted !== partXml) changes.set(target, encoder.encode(shifted))
+              } else if (relationship.type.endsWith('relationships/pivotTable')) {
+                const shifted = shiftPivotLocation(partXml, op.spec)
+                if (shifted !== partXml) changes.set(target, encoder.encode(shifted))
+              }
             }
           }
         }
@@ -3028,6 +3035,19 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           xml = shiftForeignFormulas(xml, { ...op.spec, onCurrentSheet: false })
         }
         if (xml !== before) changes.set(chartPath, encoder.encode(xml))
+      }
+
+      // A pivot cache's source names its sheet, so its range shifts when that sheet
+      // is edited, wherever the pivot that reads it sits. The location moved above.
+      for (const cachePath of container.parts.keys()) {
+        if (!/^xl\/pivotCache\/pivotCacheDefinition\d+\.xml$/.test(cachePath)) continue
+        let xml = sheetTextNow(cachePath)
+        if (xml === undefined) continue
+        const before = xml
+        for (const op of lineOps) {
+          xml = shiftPivotCacheSource(xml, op.spec)
+        }
+        if (xml !== before) changes.set(cachePath, encoder.encode(xml))
       }
 
       namesToWrite = shiftDefinedNames(
