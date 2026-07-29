@@ -1687,7 +1687,7 @@ test('conditionalFormat refuses a bad colour and a bad range', () => {
   )
 })
 
-test('cell reports a gradient fill, which set itself does not write', () => {
+test('cell reports a gradient fill the file already carries', () => {
   const styles =
     '<styleSheet><fills count="3">' +
     '<fill><patternFill patternType="none"/></fill>' +
@@ -1735,6 +1735,46 @@ test('a gradient with no degree is reported without one', () => {
       { position: 1, color: 'FFFFFFFF' },
     ],
   })
+})
+
+test('set writes a gradient fill that reads back', () => {
+  const workbook = createWorkbook('Data')
+  const sheet = workbook.sheet('Data')
+  sheet?.set('A1', 'x', {
+    fill: {
+      type: 'gradient',
+      degree: 45,
+      stops: [
+        { position: 0, color: 'FFFF0000' },
+        { position: 1, color: 'FF0000FF' },
+      ],
+    },
+  })
+
+  assert.deepEqual(readWorkbook(workbook.toBytes()).sheet('Data')?.cell('A1')?.fill, {
+    type: 'gradient',
+    degree: 45,
+    stops: [
+      { position: 0, color: 'FFFF0000' },
+      { position: 1, color: 'FF0000FF' },
+    ],
+  })
+})
+
+test('set writes a degree-less gradient and refuses one with no stops', () => {
+  const workbook = createWorkbook('Data')
+  const sheet = workbook.sheet('Data')
+  sheet?.set('A1', 'x', {
+    fill: { type: 'gradient', stops: [{ position: 0, color: 'FF000000' }] },
+  })
+  assert.deepEqual(readWorkbook(workbook.toBytes()).sheet('Data')?.cell('A1')?.fill, {
+    type: 'gradient',
+    stops: [{ position: 0, color: 'FF000000' }],
+  })
+  assert.throws(
+    () => sheet?.set('B1', 'y', { fill: { type: 'gradient', stops: [] } }),
+    (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+  )
 })
 
 const COMMENTS_REL = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments'

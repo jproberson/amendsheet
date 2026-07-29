@@ -115,8 +115,10 @@ sheet?.format('B2', { font: { bold: true } })
 - **font**: `bold`, `italic`, `size`, `color`, `name`, `strike`, `underline`
   (`true | 'double' | 'singleAccounting' | 'doubleAccounting'`), `verticalAlign`
   (`'superscript' | 'subscript'`). Merges onto the current font.
-- **fill**: `{ type: 'solid', color }` or `{ type: 'pattern', pattern, color,
-  background }` (`pattern` is an ECMA-376 name like `'lightGrid'`).
+- **fill**: `{ type: 'solid', color }`, `{ type: 'pattern', pattern, color,
+  background }` (`pattern` is an ECMA-376 name like `'lightGrid'`), or
+  `{ type: 'gradient', degree?, stops: [{ position, color }] }` (`position` 0–1;
+  `degree` is the linear angle, omit for a plain linear gradient).
 - **border**: sides by name (`top`/`bottom`/`left`/`right`), `all` for every side,
   or `diagonal` (`{ style, color?, up?, down? }`). `style` is a name like `'thin'`,
   `'medium'`, `'dashed'`.

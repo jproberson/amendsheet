@@ -184,6 +184,12 @@ test('checkStyleOptions refuses an out-of-union style value at the call', () => 
   refuses({ border: { diagonal: { style: 'zigzag' } } })
   refuses({ fill: { type: 'pattern', pattern: 'plaid', color: 'FF0000' } })
   refuses({ fill: { type: 'solid' } }) // no colour
+  refuses({ fill: { type: 'gradient', stops: [] } }) // no stops
+  refuses({
+    fill: { type: 'gradient', degree: Number.NaN, stops: [{ position: 0, color: 'FF0000' }] },
+  })
+  refuses({ fill: { type: 'gradient', stops: [{ position: 2, color: 'FF0000' }] } }) // position past 1
+  refuses({ fill: { type: 'gradient', stops: ['nope'] } }) // stop is not an object
 })
 
 test('checkStyleOptions carries the sheet through into its refusal', () => {
@@ -201,6 +207,10 @@ test('checkStyleOptions passes valid options and a missing one', () => {
   checkStyleOptions({ border: { all: { style: 'thin' } } }, 'A1')
   checkStyleOptions({ border: { diagonal: { style: 'thick', up: true } } }, 'A1')
   checkStyleOptions({ fill: { type: 'solid', color: 'FF0000' } }, 'A1')
+  checkStyleOptions(
+    { fill: { type: 'gradient', degree: 90, stops: [{ position: 0.5, color: 'FF0000' }] } },
+    'A1',
+  )
 })
 
 test('a superscript is written as a vertAlign', () => {

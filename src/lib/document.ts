@@ -177,7 +177,7 @@ export interface Cell {
   readonly numberFormat?: string
   /** Absent when the cell uses the default font, so carries none of its own. */
   readonly font?: FontFormat
-  /** Absent unless the cell has a fill. A gradient is reported but not writable. */
+  /** Absent unless the cell has a fill. Every shape reported here `set` can write. */
   readonly fill?: ReadFill
   /** Absent unless at least one side has a border. */
   readonly border?: BorderFormat
@@ -596,7 +596,7 @@ export interface SetOptions {
   readonly numberFormat?: string
   /** Font to apply, merged onto the font the cell already carries. */
   readonly font?: FontFormat
-  /** Solid fill colour for the cell's background. */
+  /** The cell's background fill: solid, a pattern, or a gradient. */
   readonly fill?: FillFormat
   /** Borders to apply, merged onto the sides the cell already has. */
   readonly border?: BorderFormat

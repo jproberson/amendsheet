@@ -649,8 +649,6 @@ export interface PatternFill {
   readonly background?: Color
 }
 
-export type FillFormat = SolidFill | PatternFill
-
 /** One colour stop of a gradient, at a position from 0 to 1 across it. */
 export interface GradientStop {
   readonly position: number
@@ -658,9 +656,9 @@ export interface GradientStop {
 }
 
 /**
- * A gradient fill, read off a cell but not written by `set` — the file keeps its
- * own gradient byte for byte, and this only reports what is there. `degree` is the
- * angle of a linear gradient; a path gradient has none.
+ * A gradient fill. `degree` is the angle of the linear gradient it writes; a
+ * gradient read from a file may omit it (a path gradient the file wrote has none),
+ * and `set` writes a linear gradient with no `degree` element when it is left out.
  */
 export interface GradientFill {
   readonly type: 'gradient'
@@ -668,8 +666,10 @@ export interface GradientFill {
   readonly stops: readonly GradientStop[]
 }
 
-/** What `cell.fill` may be: a fill `set` can write, or a gradient it only reads. */
-export type ReadFill = FillFormat | GradientFill
+export type FillFormat = SolidFill | PatternFill | GradientFill
+
+/** What `cell.fill` may be. Every fill it reports is one `set` can write back. */
+export type ReadFill = FillFormat
 
 // fillId 0 (none) and 1 (gray125) are reserved, so a real solid fill is the
 // third entry; a file with no fills table has these seeded before ours is added.
@@ -688,6 +688,16 @@ function withReservedFills(stylesXml: string): string {
 }
 
 function buildFillElement(fill: FillFormat, location: XlsxErrorContext = {}): string {
+  if (fill.type === 'gradient') {
+    const degree = fill.degree === undefined ? '' : ` degree="${fill.degree}"`
+    const stops = fill.stops
+      .map(
+        (stop) =>
+          `<stop position="${stop.position}"><color${colorAttributes(stop.color, location)}/></stop>`,
+      )
+      .join('')
+    return `<fill><gradientFill${degree}>${stops}</gradientFill></fill>`
+  }
   const fg = `<fgColor${colorAttributes(fill.color, location)}/>`
   if (fill.type === 'solid') {
     return `<fill><patternFill patternType="solid">${fg}<bgColor indexed="64"/></patternFill></fill>`
@@ -1530,10 +1540,26 @@ export function checkStyleOptions(
 
   if ('fill' in options && typeof options.fill === 'object' && options.fill !== null) {
     const fill = options.fill
-    const color = 'color' in fill ? fill.color : undefined
-    if (color === undefined) refuse('a fill', 'with no colour')
-    if ('type' in fill && fill.type === 'pattern' && 'pattern' in fill) {
-      if (!inUnion(PATTERN_STYLES, fill.pattern)) refuse('a fill pattern', fill.pattern)
+    if ('type' in fill && fill.type === 'gradient') {
+      const rawStops = 'stops' in fill ? fill.stops : undefined
+      const stops: readonly unknown[] = Array.isArray(rawStops) ? rawStops : []
+      if (stops.length === 0) refuse('a gradient fill', 'with no stops')
+      if ('degree' in fill && fill.degree !== undefined && !Number.isFinite(fill.degree))
+        refuse('a gradient degree', fill.degree)
+      for (const stop of stops) {
+        const position =
+          typeof stop === 'object' && stop !== null && 'position' in stop
+            ? stop.position
+            : undefined
+        if (typeof position !== 'number' || position < 0 || position > 1)
+          refuse('a gradient stop position', position)
+      }
+    } else {
+      const color = 'color' in fill ? fill.color : undefined
+      if (color === undefined) refuse('a fill', 'with no colour')
+      if ('type' in fill && fill.type === 'pattern' && 'pattern' in fill) {
+        if (!inUnion(PATTERN_STYLES, fill.pattern)) refuse('a fill pattern', fill.pattern)
+      }
     }
   }
 }
