@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { drawingHasChart, shiftDrawing } from './drawings.js'
+import { drawingHasUnshiftableFrame, shiftDrawing } from './drawings.js'
 import type { ShiftSpec } from './shift.js'
 
 const spec = (axis: 'row' | 'column', at: number, delta: number): ShiftSpec => ({
@@ -20,11 +20,21 @@ const twoCell = (from: [number, number], to: [number, number]) =>
   `<xdr:pic/><xdr:clientData/></xdr:twoCellAnchor>`
 const wsDr = (body: string) => `<xdr:wsDr xmlns:xdr="${XDR}">${body}</xdr:wsDr>`
 
-test('drawingHasChart is true only when a graphic frame is present', () => {
-  assert.equal(drawingHasChart(wsDr(twoCell([0, 0], [3, 3]))), false)
+test('drawingHasUnshiftableFrame is true for a non-chart frame, false for a chart or none', () => {
+  const frame = (uri: string) =>
+    `<xdr:twoCellAnchor><xdr:graphicFrame><a:graphic><a:graphicData uri="${uri}"/></a:graphic></xdr:graphicFrame></xdr:twoCellAnchor>`
+  assert.equal(drawingHasUnshiftableFrame(wsDr(twoCell([0, 0], [3, 3]))), false) // just a picture
   assert.equal(
-    drawingHasChart(wsDr('<xdr:twoCellAnchor><xdr:graphicFrame/></xdr:twoCellAnchor>')),
-    true,
+    drawingHasUnshiftableFrame(
+      wsDr(frame('http://schemas.openxmlformats.org/drawingml/2006/chart')),
+    ),
+    false, // a chart is shiftable now
+  )
+  assert.equal(
+    drawingHasUnshiftableFrame(
+      wsDr(frame('http://schemas.openxmlformats.org/drawingml/2006/diagram')),
+    ),
+    true, // a diagram is not
   )
 })
 

@@ -375,11 +375,13 @@ What a minor release is allowed to do, so you know which branches are safe:
   inside it gains a fresh column and header, and a deletion that clips it shrinks
   it, dropping the column entries it cut out. Only a deletion that would take every
   one of a table's columns, or a row deletion that would take its header row, is
-  refused with `unsupported-edit`. A chart-free drawing moves too — a picture or
-  shape's cell anchors follow the edit, and one a deletion covers entirely is
-  dropped. A chart's or diagram's cell references, and a pivot table's source, are
-  still not adjusted, so a row or column edit is refused on a sheet whose drawing
-  holds a chart, or that carries a pivot table.
+  refused with `unsupported-edit`. A drawing moves too — a picture or shape's cell
+  anchors follow the edit, one a deletion covers entirely is dropped, and a chart's
+  box moves while its series, category and title references shift wherever the chart
+  part lives, so a chart plotting the edited sheet from another one is caught. A
+  diagram or other graphic frame, and a pivot table's source, are still not
+  adjusted, so a row or column edit is refused on a sheet whose drawing holds one,
+  or that carries a pivot table.
 - Chartsheets and dialogsheets aren't listed in `sheets`, since they hold no
   cells. They're still written back untouched.
 

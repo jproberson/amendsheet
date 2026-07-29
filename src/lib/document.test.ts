@@ -4035,19 +4035,54 @@ test('deleteRows drops a drawing fully in the removed rows and shifts one below'
   assert.match(out, /<xdr:to><xdr:col>3<\/xdr:col><xdr:colOff>0<\/xdr:colOff><xdr:row>9<\/xdr:row>/)
 })
 
-test('insertRows refuses a drawing that holds a chart', () => {
-  const chartDrawing =
-    `<xdr:wsDr xmlns:xdr="${XDR}"><xdr:twoCellAnchor>` +
-    '<xdr:from><xdr:col>0</xdr:col><xdr:row>0</xdr:row></xdr:from>' +
-    '<xdr:to><xdr:col>5</xdr:col><xdr:row>10</xdr:row></xdr:to>' +
-    '<xdr:graphicFrame><xdr:nvGraphicFramePr/></xdr:graphicFrame>' +
-    '<xdr:clientData/></xdr:twoCellAnchor></xdr:wsDr>'
+const CHART_URI = 'http://schemas.openxmlformats.org/drawingml/2006/chart'
+const graphicFrame = (uri: string, body: string) =>
+  `<xdr:wsDr xmlns:xdr="${XDR}"><xdr:twoCellAnchor>` +
+  '<xdr:from><xdr:col>0</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>2</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>' +
+  '<xdr:to><xdr:col>5</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>10</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>' +
+  `<xdr:graphicFrame><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">` +
+  `<a:graphicData uri="${uri}">${body}</a:graphicData></a:graphic></xdr:graphicFrame>` +
+  '<xdr:clientData/></xdr:twoCellAnchor></xdr:wsDr>'
+const chartRels =
+  '<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart1.xml"/></Relationships>'
+
+test('insertRows shifts a chart series reference and its anchor', () => {
   const workbook = readWorkbook(
     build('<row r="1"><c r="A1"><v>1</v></c></row>', {
       after: '<drawing r:id="rId1"/>',
       extra: {
         'xl/worksheets/_rels/sheet1.xml.rels': drawingRels,
-        'xl/drawings/drawing1.xml': chartDrawing,
+        'xl/drawings/drawing1.xml': graphicFrame(
+          CHART_URI,
+          '<c:chart xmlns:c="http://x" r:id="rId1"/>',
+        ),
+        'xl/drawings/_rels/drawing1.xml.rels': chartRels,
+        'xl/charts/chart1.xml':
+          '<c:chartSpace xmlns:c="http://x"><c:ser><c:val><c:numRef>' +
+          '<c:f>Data!$A$1:$A$3</c:f></c:numRef></c:val></c:ser></c:chartSpace>',
+      },
+    }),
+  )
+
+  workbook.sheets[0]?.insertRows(1) // above the data and the chart
+
+  const parts = readContainer(workbook.toBytes()).parts
+  const chart = decode(parts.get('xl/charts/chart1.xml'))
+  assert.match(chart, /<c:f>Data!\$A\$2:\$A\$4<\/c:f>/) // the series moved down a row
+  const drawing = decode(parts.get('xl/drawings/drawing1.xml'))
+  assert.match(drawing, /<xdr:from>.*<xdr:row>3<\/xdr:row>/) // the chart box moved too
+})
+
+test('insertRows refuses a drawing that holds a non-chart graphic frame', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      after: '<drawing r:id="rId1"/>',
+      extra: {
+        'xl/worksheets/_rels/sheet1.xml.rels': drawingRels,
+        'xl/drawings/drawing1.xml': graphicFrame(
+          'http://schemas.openxmlformats.org/drawingml/2006/diagram',
+          '<dgm:relIds xmlns:dgm="http://x"/>',
+        ),
       },
     }),
   )
@@ -4057,7 +4092,7 @@ test('insertRows refuses a drawing that holds a chart', () => {
     (error: unknown) =>
       error instanceof XlsxError &&
       error.code === 'unsupported-edit' &&
-      error.message.includes('chart'),
+      error.message.includes('drawing'),
   )
 })
 

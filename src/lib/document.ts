@@ -10,7 +10,7 @@ import {
   withSheetsAdded,
 } from './add-sheet.js'
 import { blankWorkbookBytes } from './blank.js'
-import { drawingHasChart, shiftDrawing } from './drawings.js'
+import { drawingHasUnshiftableFrame, shiftDrawing } from './drawings.js'
 import {
   appendCommentsPart,
   appendVmlShapes,
@@ -1535,16 +1535,16 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       )
     }
 
-    // The noun a drawing on the sheet refuses with, or undefined when every one is
-    // a chart-free drawing whose anchors can move: a chart (or diagram) is refused
-    // because its cell references are not shifted, and a drawing whose part cannot
-    // be read is refused because it cannot be shown to be chart-free.
+    // The noun a drawing on the sheet refuses with, or undefined when each of its
+    // objects can move: a picture or shape by its anchor, a chart by its anchor and
+    // its series formulas. A diagram or other graphic frame is refused because its
+    // references are not shifted, and a drawing whose part cannot be read is refused
+    // because it cannot be shown to hold only shiftable objects.
     const drawingRefusal = (relationshipsXml: string): string | undefined => {
       for (const relationship of readRelationships(relationshipsXml, reference.path).values()) {
         if (relationship.external || !relationship.type.endsWith('relationships/drawing')) continue
         const drawing = partText(container, resolveTarget(reference.path, relationship.target))
-        if (drawing === undefined) return 'a drawing'
-        if (drawingHasChart(drawing)) return 'a chart'
+        if (drawing === undefined || drawingHasUnshiftableFrame(drawing)) return 'a drawing'
       }
       return undefined
     }
@@ -3013,6 +3013,21 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             }
           }
         }
+      }
+
+      // A chart's series, category and title references name a sheet and shift like
+      // any foreign formula when that sheet's rows or columns move — wherever the
+      // chart part lives, so a chart plotting another sheet is caught too. The
+      // drawing anchor moved above; this moves the data the chart plots.
+      for (const chartPath of container.parts.keys()) {
+        if (!/^xl\/charts\/chart\d+\.xml$/.test(chartPath)) continue
+        let xml = sheetTextNow(chartPath)
+        if (xml === undefined) continue
+        const before = xml
+        for (const op of lineOps) {
+          xml = shiftForeignFormulas(xml, { ...op.spec, onCurrentSheet: false })
+        }
+        if (xml !== before) changes.set(chartPath, encoder.encode(xml))
       }
 
       namesToWrite = shiftDefinedNames(
