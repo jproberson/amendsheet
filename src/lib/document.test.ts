@@ -1365,6 +1365,22 @@ test('conditionalFormats round-trip expression, duplicates and unique rules', ()
   ])
 })
 
+test('conditionalFormats round-trip top and bottom rank rules', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  const sheet = workbook.sheets[0]
+  sheet?.conditionalFormat('A1:A9', { top: { count: 3, fill: 'FFFF00' } })
+  sheet?.conditionalFormat('B1:B9', { bottom: { count: 10, fill: 'FF0000', percent: true } })
+  const back = readWorkbook(workbook.toBytes()).sheets[0]
+  assert.deepEqual(back?.conditionalFormats, [
+    { range: 'A1:A9', rule: { top: { count: 3, fill: 'FFFFFF00' } } },
+    { range: 'B1:B9', rule: { bottom: { count: 10, fill: 'FFFF0000', percent: true } } },
+  ])
+  assert.throws(
+    () => sheet?.conditionalFormat('C1', { top: { count: 0, fill: 'FFFFFF' } }),
+    (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+  )
+})
+
 test('conditionalFormats reflect pending and skip kinds not modelled', () => {
   const sheet = readWorkbook(
     build('<row r="1"><c r="A1"><v>1</v></c></row>', {

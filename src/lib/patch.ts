@@ -1080,6 +1080,15 @@ export type ConditionalFormatSpec =
       readonly sqref: string
       readonly dxfId: number
     }
+  | {
+      /** Highlights the top or bottom `rank` cells (or percent) of the range. */
+      readonly kind: 'top10'
+      readonly sqref: string
+      readonly rank: number
+      readonly bottom: boolean
+      readonly percent: boolean
+      readonly dxfId: number
+    }
 
 /**
  * Reads a sheet's conditional formats into the same specs they are written from.
@@ -1096,6 +1105,9 @@ export function readConditionalFormats(bytes: Uint8Array): ConditionalFormatSpec
   let formulas: string[] = []
   let colors: string[] = []
   let barColor: string | undefined
+  let rank = 0
+  let bottom = false
+  let percent = false
   let inColorScale = false
   let inDataBar = false
   let captureFormula = false
@@ -1128,10 +1140,15 @@ export function readConditionalFormats(bytes: Uint8Array): ConditionalFormatSpec
       dxfId !== undefined
     ) {
       specs.push({ kind: type, sqref, dxfId })
+    } else if (sqref !== undefined && type === 'top10' && dxfId !== undefined) {
+      specs.push({ kind: 'top10', sqref, rank, bottom, percent, dxfId })
     }
     type = undefined
     operator = undefined
     dxfId = undefined
+    rank = 0
+    bottom = false
+    percent = false
     formulas = []
     colors = []
     barColor = undefined
@@ -1146,7 +1163,11 @@ export function readConditionalFormats(bytes: Uint8Array): ConditionalFormatSpec
         operator = event.attributes.get('operator')
         const dxf = event.attributes.get('dxfId')
         dxfId = dxf !== undefined && Number.isInteger(Number(dxf)) ? Number(dxf) : undefined
-        // A duplicate/unique rule has no children, so it closes in its open tag.
+        const rankValue = Number(event.attributes.get('rank'))
+        rank = Number.isInteger(rankValue) ? rankValue : 0
+        bottom = event.attributes.get('bottom') === '1'
+        percent = event.attributes.get('percent') === '1'
+        // A duplicate, unique or top10 rule has no children; it closes in its open tag.
         if (event.selfClosing) flush()
       } else if (event.localName === 'colorScale') inColorScale = true
       else if (event.localName === 'dataBar') inDataBar = true
@@ -1211,6 +1232,14 @@ function conditionalFormattingElement(
     return (
       `${open}<${prefix}cfRule type="cellIs" operator="${spec.operator}" dxfId="${spec.dxfId}"` +
       ` priority="${priority}">${formulas}</${prefix}cfRule>${close}`
+    )
+  }
+  if (spec.kind === 'top10') {
+    const bottom = spec.bottom ? ' bottom="1"' : ''
+    const percent = spec.percent ? ' percent="1"' : ''
+    return (
+      `${open}<${prefix}cfRule type="top10" dxfId="${spec.dxfId}" priority="${priority}"` +
+      ` rank="${spec.rank}"${bottom}${percent}/>${close}`
     )
   }
   // Only duplicateValues and uniqueValues remain; the kind is the cfRule type.

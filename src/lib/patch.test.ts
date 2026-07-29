@@ -1018,3 +1018,16 @@ test('readConditionalFormats reads expression, duplicate and unique rules', () =
     { kind: 'uniqueValues', sqref: 'C1:C9', dxfId: 3 },
   ])
 })
+
+test('readConditionalFormats reads top10 rank, bottom and percent', () => {
+  const bytes = encode(
+    '<worksheet><sheetData/>' +
+      '<conditionalFormatting sqref="A1:A9"><cfRule type="top10" dxfId="1" priority="1" rank="3"/></conditionalFormatting>' +
+      '<conditionalFormatting sqref="B1:B9"><cfRule type="top10" dxfId="2" priority="2" rank="10" bottom="1" percent="1"/></conditionalFormatting>' +
+      '</worksheet>',
+  )
+  assert.deepEqual(readConditionalFormats(bytes), [
+    { kind: 'top10', sqref: 'A1:A9', rank: 3, bottom: false, percent: false, dxfId: 1 },
+    { kind: 'top10', sqref: 'B1:B9', rank: 10, bottom: true, percent: true, dxfId: 2 },
+  ])
+})

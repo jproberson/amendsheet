@@ -263,8 +263,9 @@ export interface Worksheet {
    * Adds a conditional format over a cell or range. `{ colorScale }` grades cells
    * between two colours, or three with a `mid`; `{ cellIs }` fills cells matching a
    * comparison, `{ expression }` cells matching a formula, `{ duplicates }` and
-   * `{ unique }` the repeated or one-off values; `{ dataBar }` draws a bar. The
-   * rule outranks any the sheet already has, and is written by `toBytes()`.
+   * `{ unique }` the repeated or one-off values, `{ top }` and `{ bottom }` the
+   * highest or lowest ranked; `{ dataBar }` draws a bar. The rule outranks any the
+   * sheet already has, and is written by `toBytes()`.
    */
   conditionalFormat(range: string, rule: ConditionalFormat): void
   /**
@@ -459,6 +460,14 @@ export interface FillRule {
   readonly fill: string
 }
 
+/** Fills the top or bottom `count` cells of a range. With `percent`, `count` is a
+ * percentage rather than a number of cells. `fill` is hex. */
+export interface RankRule {
+  readonly count: number
+  readonly fill: string
+  readonly percent?: boolean
+}
+
 /** A bar drawn in each cell, its length scaled between the range's min and max. */
 export interface DataBar {
   /** The bar's colour, hex. */
@@ -480,6 +489,10 @@ export type ConditionalFormat =
   | { readonly duplicates: FillRule }
   /** Fills the cells whose value is unique within the range. */
   | { readonly unique: FillRule }
+  /** Fills the highest-valued cells of the range. */
+  | { readonly top: RankRule }
+  /** Fills the lowest-valued cells of the range. */
+  | { readonly bottom: RankRule }
 
 export interface SetOptions {
   /** A number format code, applied to the cell being written. */
@@ -832,6 +845,12 @@ function conditionalFormatFromSpec(
   if (spec.kind === 'cellIs') {
     const when = comparisonToConstraint(spec.operator, spec.formulas[0] ?? '', spec.formulas[1])
     return when === undefined ? undefined : { cellIs: { when, fill } }
+  }
+  if (spec.kind === 'top10') {
+    const rank: RankRule = spec.percent
+      ? { count: spec.rank, fill, percent: true }
+      : { count: spec.rank, fill }
+    return spec.bottom ? { bottom: rank } : { top: rank }
   }
   // Only duplicateValues and uniqueValues remain.
   return spec.kind === 'duplicateValues' ? { duplicates: { fill } } : { unique: { fill } }
@@ -1633,11 +1652,35 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
                 ? rule.expression.fill
                 : 'duplicates' in rule
                   ? rule.duplicates.fill
-                  : rule.unique.fill
+                  : 'unique' in rule
+                    ? rule.unique.fill
+                    : 'top' in rule
+                      ? rule.top.fill
+                      : rule.bottom.fill
           const dxf = ensureDxf(workingStyles, normalizeColor(highlight, at))
           workingStyles = dxf.xml
           const dxfId = dxf.index
-          if ('cellIs' in rule) {
+          if ('top' in rule || 'bottom' in rule) {
+            const rank = 'top' in rule ? rule.top : rule.bottom
+            if (!Number.isInteger(rank.count) || rank.count < 1) {
+              throw new XlsxError(
+                'unwritable-value',
+                `Rank ${rank.count} is not a positive whole number`,
+                {
+                  ...at,
+                  reference: sqref,
+                },
+              )
+            }
+            specs.push({
+              kind: 'top10',
+              sqref,
+              rank: rank.count,
+              bottom: 'bottom' in rule,
+              percent: rank.percent ?? false,
+              dxfId,
+            })
+          } else if ('cellIs' in rule) {
             const comparison = numberComparison(rule.cellIs.when)
             const formulas =
               comparison.formula2 === undefined

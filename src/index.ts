@@ -36,6 +36,7 @@ export type {
   FormulaRule,
   Hyperlink,
   NumberConstraint,
+  RankRule,
   SetOptions,
   Workbook,
   Worksheet,
