@@ -278,6 +278,53 @@ test('a table grown then shifted in one session composes both edits', () => {
   ])
 })
 
+test('insertColumns left of a table shifts it right and round-trips the range', () => {
+  const built = createWorkbook('Data')
+  const sheet = built.sheet('Data')
+  sheet?.set('B1', 'H1')
+  sheet?.set('C1', 'H2')
+  sheet?.addTable('B1:C3', { name: 'T1' })
+  const workbook = readWorkbook(built.toBytes())
+
+  workbook.sheet('Data')?.insertColumns('A') // a column before the table pushes it right
+
+  assert.deepEqual(readWorkbook(workbook.toBytes()).sheet('Data')?.tables, [
+    { name: 'T1', range: 'C1:D3', columns: ['H1', 'H2'] },
+  ])
+})
+
+test('deleteColumns left of a table shifts it left, keeping its columns', () => {
+  const built = createWorkbook('Data')
+  const sheet = built.sheet('Data')
+  sheet?.set('C1', 'H1')
+  sheet?.set('D1', 'H2')
+  sheet?.addTable('C1:D3', { name: 'T1' })
+  const workbook = readWorkbook(built.toBytes())
+
+  workbook.sheet('Data')?.deleteColumns('A') // a column before the table pulls it left
+
+  assert.deepEqual(readWorkbook(workbook.toBytes()).sheet('Data')?.tables, [
+    { name: 'T1', range: 'B1:C3', columns: ['H1', 'H2'] },
+  ])
+})
+
+test('insertColumns inside a table is still refused, its columns unadjusted', () => {
+  const built = createWorkbook('Data')
+  const sheet = built.sheet('Data')
+  sheet?.set('A1', 'H1')
+  sheet?.set('B1', 'H2')
+  sheet?.addTable('A1:B3', { name: 'T1' })
+  const workbook = readWorkbook(built.toBytes())
+
+  assert.throws(
+    () => workbook.sheet('Data')?.insertColumns('B'), // between the table's two columns
+    (error: unknown) =>
+      error instanceof XlsxError &&
+      error.code === 'unsupported-edit' &&
+      error.message.includes('table T1'),
+  )
+})
+
 test('removeComment removes a note and its box, keeping other notes', () => {
   const built = createWorkbook('Notes')
   const filled = built.sheet('Notes')
@@ -3964,7 +4011,7 @@ test('insertColumns takes a cols width entry and an implicit cell in its stride'
   })
 })
 
-test('insertColumns refuses a bad count, an off-sheet column and a table', () => {
+test('insertColumns refuses a bad count and an off-sheet column', () => {
   const workbook = readWorkbook(build('<row r="1"><c r="XFD1"><v>1</v></c></row>'))
   const sheet = workbook.sheets[0]
   assert.throws(
@@ -3978,19 +4025,6 @@ test('insertColumns refuses a bad count, an off-sheet column and a table', () =>
   assert.throws(
     () => sheet?.insertColumns('XFE'),
     (error: unknown) => error instanceof XlsxError && error.code === 'bad-reference',
-  )
-  const tabled = readWorkbook(
-    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
-      extra: {
-        'xl/worksheets/_rels/sheet1.xml.rels':
-          '<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/table" Target="../tables/table1.xml"/></Relationships>',
-        'xl/tables/table1.xml': '<table ref="A1:B2"/>',
-      },
-    }),
-  )
-  assert.throws(
-    () => tabled.sheets[0]?.insertColumns('A'),
-    (error: unknown) => error instanceof XlsxError && error.code === 'unsupported-edit',
   )
 })
 

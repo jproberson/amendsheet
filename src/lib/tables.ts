@@ -177,8 +177,8 @@ export function extendTables(
 }
 
 // A line at or past the insert/delete point moves; a deletion clamps a line that
-// falls inside the removed band to the surviving edge — the low end up to the row
-// after it, the high end down to the row before — so the range only shrinks.
+// falls inside the removed band to the surviving edge — the low end up to the line
+// after it, the high end down to the line before — so the range only shrinks.
 const shiftLow = (value: number, spec: ShiftSpec): number => {
   if (value < spec.at) return value
   if (spec.delta > 0) return value + spec.delta
@@ -190,11 +190,28 @@ const shiftHigh = (value: number, spec: ShiftSpec): number => {
   return value < spec.at - spec.delta ? spec.at - 1 : value + spec.delta
 }
 
+// The two edges of a table's range on the axis an edit moves.
+const shiftRange = (range: Range, spec: ShiftSpec): Range =>
+  spec.axis === 'row'
+    ? { ...range, minRow: shiftLow(range.minRow, spec), maxRow: shiftHigh(range.maxRow, spec) }
+    : {
+        ...range,
+        minColumn: shiftLow(range.minColumn, spec),
+        maxColumn: shiftHigh(range.maxColumn, spec),
+      }
+
+const sameRange = (a: Range, b: Range): boolean =>
+  a.minRow === b.minRow &&
+  a.maxRow === b.maxRow &&
+  a.minColumn === b.minColumn &&
+  a.maxColumn === b.maxColumn
+
 /**
- * The rewritten table parts for a sheet whose rows an insert or delete moved.
- * Only the row axis adjusts a table so far; a column edit does not reach here.
- * `currentPart` gives the latest bytes for a table already rewritten this
- * session — a grow before an insert — so a chain of edits composes.
+ * The rewritten table parts for a sheet whose rows or columns an insert or delete
+ * moved. A column edit that changed a table's width would need columns added or
+ * dropped, which `tableColumnDamage` refuses at the call, so only shifts that keep
+ * the width reach here. `currentPart` gives the latest bytes for a table already
+ * rewritten this session — a grow before an insert — so a chain of edits composes.
  */
 export function shiftTables(
   currentPart: (path: string) => Uint8Array | undefined,
@@ -203,21 +220,39 @@ export function shiftTables(
   container: Container,
   spec: ShiftSpec,
 ): TableExtension[] {
-  if (spec.axis !== 'row') return []
   const extensions: TableExtension[] = []
   for (const path of tablePartPaths(sheetBytes, sheetPath, container)) {
     const bytes = currentPart(path) ?? container.parts.get(path)
     const table = bytes === undefined ? undefined : decodeTableBytes(bytes, path)
     if (table === undefined) continue
-    const shifted = {
-      ...table.range,
-      minRow: shiftLow(table.range.minRow, spec),
-      maxRow: shiftHigh(table.range.maxRow, spec),
-    }
-    if (shifted.minRow === table.range.minRow && shifted.maxRow === table.range.maxRow) continue
+    const shifted = shiftRange(table.range, spec)
+    if (sameRange(shifted, table.range)) continue
     extensions.push({ path, xml: rewriteRefs(table.xml, refOf(table.range), refOf(shifted)) })
   }
   return extensions
+}
+
+/**
+ * The name of a table a column insert or delete would resize — landing inside its
+ * span so a column must be added, or cutting a column out — neither of which the
+ * table's own column list is adjusted for yet. Only reached from a column edit.
+ */
+export function tableColumnDamage(
+  sheetBytes: Uint8Array,
+  sheetPath: string,
+  container: Container,
+  spec: ShiftSpec,
+): string | undefined {
+  for (const path of tablePartPaths(sheetBytes, sheetPath, container)) {
+    const table = decodeTable(container, path)
+    if (table === undefined) continue
+    const width = table.range.maxColumn - table.range.minColumn
+    const shifted = shiftRange(table.range, spec)
+    if (shifted.maxColumn - shifted.minColumn !== width) {
+      return table.name === undefined ? 'a table' : `table ${table.name}`
+    }
+  }
+  return undefined
 }
 
 /**

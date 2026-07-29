@@ -83,6 +83,7 @@ import {
   extendTables,
   readTables,
   shiftTables,
+  tableColumnDamage,
   tableRowDamage,
   withTableParts,
 } from './tables.js'
@@ -670,9 +671,10 @@ const TABLE_RELATIONSHIP =
   'http://schemas.openxmlformats.org/officeDocument/2006/relationships/table'
 const TABLE_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml'
 
-// A table's own range shifts with a row insert or delete, so it no longer blocks
-// one; a column edit does not adjust its columns yet, so it still refuses there.
-const ROW_SHIFTABLE: ReadonlySet<string> = new Set(['a table'])
+// A table's own range shifts with an insert or delete, so its presence no longer
+// blocks one at the gate; a column edit that would resize it is refused later, by
+// tableColumnDamage, once its position is known.
+const TABLE_SHIFTABLE: ReadonlySet<string> = new Set(['a table'])
 
 function partText(container: Container, path: string): string | undefined {
   const bytes = container.parts.get(path)
@@ -2366,7 +2368,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             { ...at },
           )
         }
-        refuseUnshiftable('its rows cannot be inserted into yet', undefined, ROW_SHIFTABLE)
+        refuseUnshiftable('its rows cannot be inserted into yet', undefined, TABLE_SHIFTABLE)
         lineOps.push({ path: reference.path, spec: lineSpec('row', before, count) })
       },
       insertColumns(before: string, count = 1): void {
@@ -2392,8 +2394,17 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             { ...at, reference: before },
           )
         }
-        refuseUnshiftable('its columns cannot be inserted into yet', before)
-        lineOps.push({ path: reference.path, spec: lineSpec('column', atColumn, count) })
+        refuseUnshiftable('its columns cannot be inserted into yet', before, TABLE_SHIFTABLE)
+        const spec = lineSpec('column', atColumn, count)
+        const resized = tableColumnDamage(sheetBytes, reference.path, container, spec)
+        if (resized !== undefined) {
+          throw new XlsxError(
+            'unsupported-edit',
+            `Sheet ${reference.name} carries ${resized}, whose columns cannot be inserted into yet`,
+            { ...at, reference: before },
+          )
+        }
+        lineOps.push({ path: reference.path, spec })
       },
       deleteRows(from: number, count = 1): void {
         if (sheetBytes === undefined) {
@@ -2409,7 +2420,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           })
         }
         checkCount(count, 'rows to delete')
-        refuseUnshiftable('its rows cannot be deleted yet', undefined, ROW_SHIFTABLE)
+        refuseUnshiftable('its rows cannot be deleted yet', undefined, TABLE_SHIFTABLE)
         const spec = lineSpec('row', from, -count)
         const damage =
           deletionDamage(sheetBytes, spec) ??
@@ -2439,8 +2450,16 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           })
         }
         checkCount(count, 'columns to delete', from)
-        refuseUnshiftable('its columns cannot be deleted yet', from)
+        refuseUnshiftable('its columns cannot be deleted yet', from, TABLE_SHIFTABLE)
         const spec = lineSpec('column', atColumn, -count)
+        const resized = tableColumnDamage(sheetBytes, reference.path, container, spec)
+        if (resized !== undefined) {
+          throw new XlsxError(
+            'unsupported-edit',
+            `Sheet ${reference.name} carries ${resized}, whose columns cannot be deleted from yet`,
+            { ...at, reference: from },
+          )
+        }
         const damage = deletionDamage(sheetBytes, spec)
         if (damage !== undefined) {
           throw new XlsxError(

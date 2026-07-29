@@ -368,14 +368,15 @@ What a minor release is allowed to do, so you know which branches are safe:
 - A table grows to include a cell written directly below or to the right of it,
   the way Excel would, adding a column when it grows sideways. Inserting or
   deleting rows and columns moves the references that name cells — formulas,
-  merges, filters, conditional formats, hyperlinks and defined names. Inserting
-  or deleting rows also moves a table's own stored range: a range below the
-  insert shifts down, a deletion that cuts into the table shrinks it, and a
-  deletion that would take its header row is refused. A drawing's anchors, a
-  chart's ranges and a pivot table's source are still not adjusted, so a row or
-  column edit is refused with `unsupported-edit` on a sheet that carries a
-  drawing, pivot table or comment, as is a column edit on a sheet with a table,
-  whose columns are not shifted yet.
+  merges, filters, conditional formats, hyperlinks and defined names. It also
+  moves a table's own stored range: a table below or beside the edit shifts with
+  it, and a deletion that clips the table shrinks it. An edit that would resize
+  the table's columns — inserting a column inside it or deleting one of its
+  columns — is refused with `unsupported-edit`, since the table's own column list
+  is not adjusted yet, as is a row deletion that would take its header row. A
+  drawing's anchors, a chart's ranges and a pivot table's source are still not
+  adjusted either, so any row or column edit is refused on a sheet that carries a
+  drawing, pivot table or comment.
 - Chartsheets and dialogsheets aren't listed in `sheets`, since they hold no
   cells. They're still written back untouched.
 
