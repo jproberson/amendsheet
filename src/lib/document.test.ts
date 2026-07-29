@@ -325,6 +325,43 @@ test('insertColumns inside a table is still refused, its columns unadjusted', ()
   )
 })
 
+test('insertRows shifts a comment below it and round-trips', () => {
+  const built = createWorkbook('Data')
+  const sheet = built.sheet('Data')
+  sheet?.set('A3', 'x')
+  sheet?.comment('A3', 'note')
+  const workbook = readWorkbook(built.toBytes())
+
+  workbook.sheet('Data')?.insertRows(1) // pushes A3 and its note down to A4
+
+  const bytes = workbook.toBytes()
+  const back = readWorkbook(bytes).sheet('Data')
+  assert.equal(back?.cell('A4')?.comment, 'note')
+  assert.equal(back?.cell('A3')?.comment, undefined)
+  // The box in the legacy drawing moves too, so the note stays on its cell: the
+  // zero-based row anchor goes from 2 to 3, not just the comments-part ref.
+  const vml = decode(readContainer(bytes).parts.get('xl/drawings/vmlDrawing1.vml'))
+  assert.match(vml, /<x:Row>3<\/x:Row>/)
+  assert.doesNotMatch(vml, /<x:Row>2<\/x:Row>/)
+})
+
+test('deleteRows drops a comment whose cell it removes, shifting the rest', () => {
+  const built = createWorkbook('Data')
+  const sheet = built.sheet('Data')
+  sheet?.set('A2', 'gone')
+  sheet?.set('A4', 'kept')
+  sheet?.comment('A2', 'doomed')
+  sheet?.comment('A4', 'survivor')
+  const workbook = readWorkbook(built.toBytes())
+
+  workbook.sheet('Data')?.deleteRows(2) // removes A2, pulls A4 up to A3
+
+  const back = readWorkbook(workbook.toBytes()).sheet('Data')
+  assert.equal(back?.cell('A3')?.comment, 'survivor')
+  assert.equal(back?.cell('A2')?.comment, undefined)
+  assert.equal(back?.cell('A4')?.comment, undefined)
+})
+
 test('removeComment removes a note and its box, keeping other notes', () => {
   const built = createWorkbook('Notes')
   const filled = built.sheet('Notes')
@@ -3942,22 +3979,18 @@ test('insertColumns refuses a sheet that carries a pivot table', () => {
   )
 })
 
-test('deleteColumns refuses a sheet that carries a comment', () => {
-  const workbook = readWorkbook(
-    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
-      extra: {
-        'xl/worksheets/_rels/sheet1.xml.rels':
-          '<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments" Target="../comments1.xml"/></Relationships>',
-      },
-    }),
-  )
-  assert.throws(
-    () => workbook.sheets[0]?.deleteColumns('A'),
-    (error: unknown) =>
-      error instanceof XlsxError &&
-      error.code === 'unsupported-edit' &&
-      error.message.includes('comment'),
-  )
+test('insertColumns shifts a comment right with its cell', () => {
+  const built = createWorkbook('Data')
+  const sheet = built.sheet('Data')
+  sheet?.set('C1', 'x')
+  sheet?.comment('C1', 'note')
+  const workbook = readWorkbook(built.toBytes())
+
+  workbook.sheet('Data')?.insertColumns('A') // pushes C1 and its note over to D1
+
+  const back = readWorkbook(workbook.toBytes()).sheet('Data')
+  assert.equal(back?.cell('D1')?.comment, 'note')
+  assert.equal(back?.cell('C1')?.comment, undefined)
 })
 
 test('insertRows allows a sheet whose relationships pin no cells', () => {

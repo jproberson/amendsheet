@@ -130,6 +130,14 @@ const shiftAxisValue = (
 
 const maxOf = (spec: ShiftSpec): number => (spec.axis === 'row' ? LAST_ROW : LAST_COLUMN)
 
+/**
+ * Where a single one-based line on the edited axis lands after the insert or
+ * delete, or undefined when the edit removes it or pushes it off the sheet. The
+ * caller supplies the value on `spec.axis`; the other axis of a cell is untouched.
+ */
+export const shiftLine = (value: number, spec: ShiftSpec): number | undefined =>
+  shiftAxisValue(value, spec, maxOf(spec), 'cell')
+
 const rawCell = (cell: Cell, spec: ShiftSpec): number =>
   spec.axis === 'row' ? Number(cell.digits) : columnToIndex(cell.letters)
 

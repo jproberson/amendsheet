@@ -1,5 +1,6 @@
 import { XlsxError } from './errors.js'
-import { parseReference } from './reference.js'
+import { formatReference, parseReference } from './reference.js'
+import { type ShiftSpec, shiftLine } from './shift.js'
 import { readXml } from './xml.js'
 
 const escapeXml = (text: string): string =>
@@ -116,6 +117,172 @@ export function withoutNoteShape(vmlXml: string, cellRow: number, cellColumn: nu
     }
   }
   return vmlXml
+}
+
+interface Splice {
+  readonly start: number
+  readonly end: number
+  readonly text: string
+}
+
+const applySplices = (xml: string, splices: Splice[]): string => {
+  let out = xml
+  for (const splice of splices.sort((a, b) => b.start - a.start)) {
+    out = out.slice(0, splice.start) + splice.text + out.slice(splice.end)
+  }
+  return out
+}
+
+const setRefAttribute = (tag: string, reference: string): string =>
+  tag.replace(
+    /(\sref\s*=\s*)("[^"]*"|'[^']*')/,
+    (_, head: string, quoted: string) => `${head}${quoted[0]}${reference}${quoted[0]}`,
+  )
+
+type RefShift = { kind: 'same' } | { kind: 'move'; reference: string } | { kind: 'drop' }
+
+// Where a comment's one cell lands under a row or column edit: unmoved, moved to
+// a new cell, or dropped because the edit removed the cell it sat on.
+const shiftedRef = (reference: string, spec: ShiftSpec): RefShift => {
+  let cell: { row: number; column: number }
+  try {
+    cell = parseReference(reference)
+  } catch {
+    return { kind: 'same' }
+  }
+  const shifted = shiftLine(spec.axis === 'row' ? cell.row : cell.column, spec)
+  if (shifted === undefined) return { kind: 'drop' }
+  const next = formatReference(
+    spec.axis === 'row'
+      ? { row: shifted, column: cell.column }
+      : { row: cell.row, column: shifted },
+  )
+  return next === reference ? { kind: 'same' } : { kind: 'move', reference: next }
+}
+
+/**
+ * Moves each note in a comments part with the row or column its cell sits on, and
+ * drops one whose cell a deletion removed. The text and the rest of the element
+ * are left byte for byte; only the `ref` moves, or the whole `<comment>` goes.
+ */
+export function shiftComments(commentsXml: string, spec: ShiftSpec): string {
+  const splices: Splice[] = []
+  let commentStart = -1
+  let openStart = -1
+  let openEnd = -1
+  let reference: string | undefined
+  for (const event of readXml(commentsXml)) {
+    if (event.kind === 'open' && event.localName === 'comment') {
+      commentStart = event.start
+      openStart = event.start
+      openEnd = event.end
+      reference = event.attributes.get('ref')
+    } else if (event.kind === 'close' && event.localName === 'comment' && reference !== undefined) {
+      const closeEnd = commentsXml.indexOf('>', event.start) + 1
+      const shift = shiftedRef(reference, spec)
+      if (shift.kind === 'drop') {
+        splices.push({ start: commentStart, end: closeEnd, text: '' })
+      } else if (shift.kind === 'move') {
+        const rewritten = setRefAttribute(commentsXml.slice(openStart, openEnd), shift.reference)
+        splices.push({ start: openStart, end: openEnd, text: rewritten })
+      }
+      reference = undefined
+    }
+  }
+  return applySplices(commentsXml, splices)
+}
+
+// Shifts the row (indices 2 and 6) or column (0 and 4) corners of a note box's
+// eight-number anchor by the same amount its cell moved, keeping any spacing. A
+// corner that is not a number, or an anchor that is not eight fields, is left be.
+const shiftAnchor = (anchor: string, axis: 'row' | 'column', delta: number): string => {
+  const parts = anchor.split(',')
+  if (parts.length !== 8) return anchor
+  const corners = axis === 'row' ? new Set([2, 6]) : new Set([0, 4])
+  return parts
+    .map((part, index) => {
+      if (!corners.has(index)) return part
+      const value = Number(part.trim())
+      if (!Number.isFinite(value)) return part
+      const lead = part.slice(0, part.length - part.trimStart().length)
+      return lead + String(value + delta)
+    })
+    .join(',')
+}
+
+interface Field {
+  start: number
+  end: number
+  value: number
+}
+
+/**
+ * Moves each note's box in a legacy drawing with the row or column its cell sits
+ * on — the authoritative `x:Row`/`x:Column` anchor and the box's own corners — and
+ * drops a box whose cell a deletion removed. A shape that names no cell is left be.
+ */
+export function shiftNoteShapes(vmlXml: string, spec: ShiftSpec): string {
+  const splices: Splice[] = []
+  let shapeStart = -1
+  let capture: 'row' | 'column' | 'anchor' | undefined
+  let text = ''
+  let row: Field | undefined
+  let column: Field | undefined
+  let anchor: { start: number; end: number; text: string } | undefined
+  for (const event of readXml(vmlXml)) {
+    if (event.kind === 'open' && event.localName === 'shape') {
+      shapeStart = event.start
+      row = undefined
+      column = undefined
+      anchor = undefined
+    } else if (event.kind === 'open' && event.localName === 'Row') {
+      capture = 'row'
+      text = ''
+      row = { start: event.end, end: -1, value: 0 }
+    } else if (event.kind === 'open' && event.localName === 'Column') {
+      capture = 'column'
+      text = ''
+      column = { start: event.end, end: -1, value: 0 }
+    } else if (event.kind === 'open' && event.localName === 'Anchor') {
+      capture = 'anchor'
+      text = ''
+      anchor = { start: event.end, end: -1, text: '' }
+    } else if (event.kind === 'text' && capture !== undefined) {
+      text += event.text
+    } else if (event.kind === 'close' && event.localName === 'Row' && row !== undefined) {
+      row.end = event.start
+      row.value = Number(text)
+      capture = undefined
+    } else if (event.kind === 'close' && event.localName === 'Column' && column !== undefined) {
+      column.end = event.start
+      column.value = Number(text)
+      capture = undefined
+    } else if (event.kind === 'close' && event.localName === 'Anchor' && anchor !== undefined) {
+      anchor.end = event.start
+      anchor.text = text
+      capture = undefined
+    } else if (event.kind === 'close' && event.localName === 'shape' && shapeStart !== -1) {
+      if (row !== undefined && column !== undefined) {
+        const field = spec.axis === 'row' ? row : column
+        const shifted = shiftLine(field.value + 1, spec)
+        if (shifted === undefined) {
+          const shapeEnd = vmlXml.indexOf('>', event.start) + 1
+          splices.push({ start: shapeStart, end: shapeEnd, text: '' })
+        } else {
+          const delta = shifted - 1 - field.value
+          if (delta !== 0) {
+            splices.push({ start: field.start, end: field.end, text: String(field.value + delta) })
+            if (anchor !== undefined && anchor.end !== -1) {
+              const moved = shiftAnchor(anchor.text, spec.axis, delta)
+              splices.push({ start: anchor.start, end: anchor.end, text: moved })
+            }
+          }
+        }
+      }
+      shapeStart = -1
+    }
+  }
+  return applySplices(vmlXml, splices)
 }
 
 const VML_HEADER =

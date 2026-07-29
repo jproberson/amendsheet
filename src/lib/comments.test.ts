@@ -5,11 +5,22 @@ import {
   appendVmlShapes,
   buildCommentsPart,
   buildVmlDrawing,
+  readComments,
+  shiftComments,
+  shiftNoteShapes,
   withoutComment,
   withoutNoteShape,
-  readComments,
 } from './comments.js'
 import { XlsxError } from './errors.js'
+import type { ShiftSpec } from './shift.js'
+
+const rowSpec = (at: number, delta: number): ShiftSpec => ({
+  axis: 'row',
+  at,
+  delta,
+  editedSheet: 'Sheet1',
+  onCurrentSheet: true,
+})
 
 test('readComments maps each cell to the joined text of its runs', () => {
   const xml =
@@ -119,4 +130,55 @@ test('withoutNoteShape removes the shape anchored at a cell, keeping others', ()
   assert.match(out, /<x:Row>2<\/x:Row><x:Column>2<\/x:Column>/) // C3 stays
   assert.equal(out.match(/<v:shape /g)?.length, 1)
   assert.equal(withoutNoteShape(vml, 9, 9), vml) // no shape there, unchanged
+})
+
+test('shiftComments moves, drops and leaves refs by what the edit does to their cell', () => {
+  const xml =
+    '<comments><authors><author/></authors><commentList>' +
+    '<comment ref="A1" authorId="0"><text><r><t>above</t></r></text></comment>' +
+    '<comment ref="A3" authorId="0"><text><r><t>below</t></r></text></comment>' +
+    '</commentList></comments>'
+  // Insert one row at row 2: A1 is above and unmoved, A3 slides to A4.
+  const inserted = shiftComments(xml, rowSpec(2, 1))
+  assert.match(inserted, /ref="A1"/)
+  assert.match(inserted, /ref="A4"/)
+  // Delete row 3: A3's cell is gone, so its whole comment goes; A1 stays.
+  const deleted = shiftComments(xml, rowSpec(3, -1))
+  assert.match(deleted, /ref="A1"/)
+  assert.doesNotMatch(deleted, /ref="A[34]"/)
+  assert.doesNotMatch(deleted, /below/)
+})
+
+test('shiftComments leaves a ref it cannot parse alone', () => {
+  const xml =
+    '<comments><commentList>' +
+    '<comment ref="not-a-ref" authorId="0"><text><r><t>x</t></r></text></comment>' +
+    '</commentList></comments>'
+  assert.equal(shiftComments(xml, rowSpec(1, 1)), xml)
+})
+
+test('shiftNoteShapes moves a box row anchor and corners, dropping a deleted one', () => {
+  const vml = buildVmlDrawing(['A2', 'A5']) // rows 1 and 4 zero-based
+  // Insert a row at row 2: A2's box moves down one, A5's moves down one too.
+  const inserted = shiftNoteShapes(vml, rowSpec(2, 1))
+  assert.match(inserted, /<x:Row>2<\/x:Row>/) // A2 -> row index 2
+  assert.match(inserted, /<x:Row>5<\/x:Row>/) // A5 -> row index 5
+  const movedAnchor = inserted.match(/<x:Anchor>([^<]*)<\/x:Anchor>/)?.[1]?.split(',') ?? []
+  assert.equal(movedAnchor[2]?.trim(), '2') // top-row corner followed the cell
+  // Delete row 2: A2's cell is removed, so its shape goes; A5 slides up.
+  const deleted = shiftNoteShapes(vml, rowSpec(2, -1))
+  assert.equal(deleted.match(/<v:shape /g)?.length, 1)
+  assert.match(deleted, /<x:Row>3<\/x:Row>/) // A5 -> row index 3
+})
+
+test('shiftNoteShapes leaves a shape with no cell and a malformed anchor be', () => {
+  const noCell = '<xml><v:shape id="_x0000_s1"><v:textbox/></v:shape></xml>'
+  assert.equal(shiftNoteShapes(noCell, rowSpec(1, 1)), noCell)
+  const badAnchor =
+    '<xml><v:shape><x:ClientData ObjectType="Note">' +
+    '<x:Anchor>1, 2, 3</x:Anchor><x:Row>4</x:Row><x:Column>0</x:Column>' +
+    '</x:ClientData></v:shape></xml>'
+  const out = shiftNoteShapes(badAnchor, rowSpec(1, 1))
+  assert.match(out, /<x:Row>5<\/x:Row>/) // the row still moves
+  assert.match(out, /<x:Anchor>1, 2, 3<\/x:Anchor>/) // the three-field anchor is left
 })

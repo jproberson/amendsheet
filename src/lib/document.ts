@@ -16,6 +16,8 @@ import {
   buildCommentsPart,
   buildVmlDrawing,
   readComments,
+  shiftComments,
+  shiftNoteShapes,
   withoutComment,
   withoutNoteShape,
 } from './comments.js'
@@ -671,10 +673,11 @@ const TABLE_RELATIONSHIP =
   'http://schemas.openxmlformats.org/officeDocument/2006/relationships/table'
 const TABLE_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml'
 
-// A table's own range shifts with an insert or delete, so its presence no longer
-// blocks one at the gate; a column edit that would resize it is refused later, by
-// tableColumnDamage, once its position is known.
-const TABLE_SHIFTABLE: ReadonlySet<string> = new Set(['a table'])
+// Pinned parts whose positions this library now moves with an insert or delete,
+// so their presence no longer blocks one at the gate. A table still refuses a
+// column edit that would resize it — that check is tableColumnDamage, once the
+// edit's position is known. A drawing, pivot table or chart is not here yet.
+const SHIFTABLE_PARTS: ReadonlySet<string> = new Set(['a table', 'a comment', 'a legacy drawing'])
 
 function partText(container: Container, path: string): string | undefined {
   const bytes = container.parts.get(path)
@@ -2368,7 +2371,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             { ...at },
           )
         }
-        refuseUnshiftable('its rows cannot be inserted into yet', undefined, TABLE_SHIFTABLE)
+        refuseUnshiftable('its rows cannot be inserted into yet', undefined, SHIFTABLE_PARTS)
         lineOps.push({ path: reference.path, spec: lineSpec('row', before, count) })
       },
       insertColumns(before: string, count = 1): void {
@@ -2394,7 +2397,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             { ...at, reference: before },
           )
         }
-        refuseUnshiftable('its columns cannot be inserted into yet', before, TABLE_SHIFTABLE)
+        refuseUnshiftable('its columns cannot be inserted into yet', before, SHIFTABLE_PARTS)
         const spec = lineSpec('column', atColumn, count)
         const resized = tableColumnDamage(sheetBytes, reference.path, container, spec)
         if (resized !== undefined) {
@@ -2420,7 +2423,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           })
         }
         checkCount(count, 'rows to delete')
-        refuseUnshiftable('its rows cannot be deleted yet', undefined, TABLE_SHIFTABLE)
+        refuseUnshiftable('its rows cannot be deleted yet', undefined, SHIFTABLE_PARTS)
         const spec = lineSpec('row', from, -count)
         const damage =
           deletionDamage(sheetBytes, spec) ??
@@ -2450,7 +2453,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           })
         }
         checkCount(count, 'columns to delete', from)
-        refuseUnshiftable('its columns cannot be deleted yet', from, TABLE_SHIFTABLE)
+        refuseUnshiftable('its columns cannot be deleted yet', from, SHIFTABLE_PARTS)
         const spec = lineSpec('column', atColumn, -count)
         const resized = tableColumnDamage(sheetBytes, reference.path, container, spec)
         if (resized !== undefined) {
@@ -2930,6 +2933,26 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             )) {
               changes.set(extension.path, encoder.encode(extension.xml))
             }
+          }
+        }
+
+        // A comment pins its cell in the comments part and its box in the legacy
+        // drawing; both move with the rows or columns the edit shifts under them,
+        // and a note whose cell a deletion removed is dropped from each.
+        const relsForComments = sheetTextNow(relationshipsPathFor(path))
+        const commentsPath = relationshipTarget(relsForComments, path, COMMENTS_RELATIONSHIP)
+        const vmlPath = relationshipTarget(relsForComments, path, VML_DRAWING_RELATIONSHIP)
+        for (const op of lineOps) {
+          if (op.path !== path) continue
+          const commentsText = commentsPath === undefined ? undefined : sheetTextNow(commentsPath)
+          if (commentsPath !== undefined && commentsText !== undefined) {
+            const shifted = shiftComments(commentsText, op.spec)
+            if (shifted !== commentsText) changes.set(commentsPath, encoder.encode(shifted))
+          }
+          const vmlText = vmlPath === undefined ? undefined : sheetTextNow(vmlPath)
+          if (vmlPath !== undefined && vmlText !== undefined) {
+            const shifted = shiftNoteShapes(vmlText, op.spec)
+            if (shifted !== vmlText) changes.set(vmlPath, encoder.encode(shifted))
           }
         }
       }

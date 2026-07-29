@@ -174,16 +174,17 @@ export function deletionDamage(bytes: Uint8Array, spec: ShiftSpec): string | und
   return undefined
 }
 
-// Parts whose stored positions a line shift does not adjust, so an insert or
-// delete that would move the cells under them is refused rather than leave them
-// pointing at the wrong ones. A drawing pins charts, images and shapes by cell
-// anchor; a comment and a table each pin a range; a pivot pins its source and
-// where it lands. The capital T in pivotTable keeps it from matching table.
+// Parts whose stored positions a line shift may need to move, each named for the
+// refusal it raises while it is not adjusted yet. A DrawingML drawing pins charts,
+// images and shapes by cell anchor; a comment and a table each pin a range; a
+// pivot pins its source and where it lands; a legacy (VML) drawing holds the note
+// boxes that go with comments. The capital T in pivotTable keeps it from matching
+// table. Which of these are actually moved is `SHIFTABLE_PARTS` in document.ts.
 const UNSHIFTABLE_PARTS: ReadonlyArray<readonly [string, string]> = [
   ['relationships/table', 'a table'],
   ['relationships/pivotTable', 'a pivot table'],
+  ['relationships/vmlDrawing', 'a legacy drawing'],
   ['relationships/drawing', 'a drawing'],
-  ['relationships/vmlDrawing', 'a drawing'],
   ['relationships/comments', 'a comment'],
 ]
 
