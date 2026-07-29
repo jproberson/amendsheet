@@ -62,18 +62,19 @@ step "docs"
 # never validly repeated, so there is nothing to whitelist. CHANGELOG.md is a
 # working note, not gated.
 doc_dupes=$(grep -rniE '\b(is is|the the|a a|an an|and and|or or|of of|to to|in in|on on|for for|with with|as as)\b' \
-  --include='*.md' --exclude-dir=node_modules --exclude=CHANGELOG.md . 2>/dev/null || true)
+  --include='*.md' --include='llms.txt' --exclude-dir=node_modules --exclude=CHANGELOG.md . 2>/dev/null || true)
 if [ -n "$doc_dupes" ]; then
   fail "a word is doubled in the docs"
   printf '%s\n' "$doc_dupes" | sed 's/^/    /'
 fi
 
-# Every README ts example is typechecked against the real exports, so a renamed
-# or removed part of the API breaks the docs rather than drifting from them.
+# Every ts example in README.md and llms.txt is typechecked against the real
+# exports, so a renamed or removed part of the API breaks the docs rather than
+# drifting from them.
 examples_output=$(node scripts/doc-examples.mjs 2>&1)
 printf '%s\n' "$examples_output" | head -1
 printf '%s' "$examples_output" | grep -qE '^(PASSED|SKIPPED)' || {
-  fail "a README example is out of step with the exports"
+  fail "a doc example is out of step with the exports"
   printf '%s\n' "$examples_output" | tail -n +2 | sed 's/^/    /'
 }
 

@@ -35,6 +35,11 @@ what that produces when held to normal standards. Tests are written first,
 `./verify.sh` gates every commit, and the test files are real spreadsheets this
 library had no hand in creating.
 
+For an AI writing code against the library, [`llms.txt`](llms.txt) is the whole
+API in one flat, example-dense file — load it and write correct code without
+guessing. Its examples are typechecked against the exports on every `verify.sh`,
+so they cannot drift.
+
 ## Use
 
 ```ts

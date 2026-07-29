@@ -48,7 +48,8 @@
   },
   "files": [
     "dist",
-    "COMPARISON.md"
+    "COMPARISON.md",
+    "llms.txt"
   ],
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",

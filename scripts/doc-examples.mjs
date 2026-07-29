@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url'
 const root = fileURLToPath(new URL('..', import.meta.url))
 
 const usagePrelude = [
-  "import { createWorkbook, readWorkbook } from 'amendsheet'",
+  "import { XlsxError, createWorkbook, readWorkbook } from 'amendsheet'",
   "import type { CellValue } from 'amendsheet'",
   'declare const bytes: Uint8Array',
   'declare const value: CellValue',
@@ -57,27 +57,38 @@ function examplesIn(markdown) {
   return fences.map((fence) => fence[1])
 }
 
-async function main() {
-  const readme = await readFile(join(root, 'README.md'), 'utf8')
-  const examples = examplesIn(readme)
-  if (examples.length === 0) {
-    console.log('SKIPPED: no ts examples in README.md')
-    return
-  }
+// Every doc whose ```ts examples must stay in step with the exports. A file that
+// is absent is skipped, so a doc can be added before or after this list.
+const DOC_FILES = ['README.md', 'llms.txt']
 
+async function main() {
   const dir = await mkdtemp(join(tmpdir(), 'doc-examples-'))
   try {
     const files = []
-    for (const [index, body] of examples.entries()) {
-      const wrapped = isTypeExample(body) ? wrapType(body) : wrapUsage(body)
-      if (wrapped === undefined) {
-        console.log(`FAIL: README example ${index + 1} declares no named type to check`)
-        process.exitCode = 1
-        return
+    for (const doc of DOC_FILES) {
+      let markdown
+      try {
+        markdown = await readFile(join(root, doc), 'utf8')
+      } catch {
+        continue
       }
-      const name = `example-${index + 1}.ts`
-      await writeFile(join(dir, name), wrapped)
-      files.push(name)
+      // A temp filename a tsc error can be traced back to its source doc.
+      const slug = doc.replace(/[^a-z0-9]+/gi, '-').toLowerCase()
+      for (const [index, body] of examplesIn(markdown).entries()) {
+        const wrapped = isTypeExample(body) ? wrapType(body) : wrapUsage(body)
+        if (wrapped === undefined) {
+          console.log(`FAIL: ${doc} example ${index + 1} declares no named type to check`)
+          process.exitCode = 1
+          return
+        }
+        const name = `${slug}-${index + 1}.ts`
+        await writeFile(join(dir, name), wrapped)
+        files.push(name)
+      }
+    }
+    if (files.length === 0) {
+      console.log('SKIPPED: no ts examples in the docs')
+      return
     }
 
     const tsconfig = {
@@ -95,11 +106,11 @@ async function main() {
 
     const result = spawnSync('npx', ['tsc', '-p', dir], { encoding: 'utf8' })
     if (result.status === 0) {
-      console.log(`PASSED: ${files.length} README examples typecheck against the exports`)
+      console.log(`PASSED: ${files.length} doc examples typecheck against the exports`)
       return
     }
 
-    console.log('FAIL: a README example does not match the exports')
+    console.log('FAIL: a doc example does not match the exports')
     process.stdout.write(result.stdout ?? '')
     process.stdout.write(result.stderr ?? '')
     process.exitCode = 1

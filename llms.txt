@@ -1,0 +1,345 @@
+# amendsheet
+
+Read, edit and create `.xlsx` files in Node or the browser. Every part you do not
+touch is written back byte for byte, so charts, pivot tables, drawings and macros
+survive a read and a save. Changing one cell never quietly discards the rest of
+the workbook. One runtime dependency (`fflate`), no transitive tree.
+
+This file is the complete API for an LLM writing code against the library. Every
+example below typechecks against the real exports. Prefer it over guessing.
+
+## Why reach for this
+
+- **It does not lose data.** Parts the library does not interpret are preserved
+  exactly. Editing a cell in a chart-heavy workbook keeps the charts.
+- **It fails loudly, never silently.** A value a cell cannot hold, a bad
+  reference or an unsupported edit throws a located `XlsxError` — it does not
+  guess and write something wrong. You can react to the error and move on.
+- **Types guide you.** Options are discriminated unions, so the shape you need is
+  visible and an invalid one will not compile.
+
+## Install
+
+```
+npm install amendsheet
+```
+
+No Node-only APIs in the core, so it runs in the browser too. Read from a
+`Uint8Array` and write to one; do the file or network IO yourself at the edges.
+
+## The core loop: read, edit, write
+
+```ts
+const workbook = readWorkbook(bytes) // bytes: Uint8Array of an .xlsx
+const sheet = workbook.sheet('Summary') ?? workbook.sheets[0]
+
+sheet?.set('B2', 42)
+
+const out = workbook.toBytes() // synchronous, returns Uint8Array
+await writeFile('out.xlsx', out)
+```
+
+Create a new workbook instead of reading one:
+
+```ts
+const workbook = createWorkbook('Report') // optional sheet name, default 'Sheet1'
+const sheet = workbook.addSheet('Data') // add more sheets
+sheet.set('A1', 'hello')
+const out = workbook.toBytes()
+```
+
+`readWorkbook` and `createWorkbook` are the only two entry points. Both return a
+`Workbook`; everything else hangs off it or off a `Worksheet`.
+
+## Reading cells
+
+```ts
+const sheet = readWorkbook(bytes).sheets[0]
+
+for (const cell of sheet?.cells() ?? []) {
+  // cell.reference ('B2'), cell.value, cell.formula, cell.numberFormat,
+  // cell.font, cell.fill, cell.border, cell.alignment, cell.comment, cell.hyperlink
+  if (cell.value.kind === 'number') cell.value.value
+  if (cell.value.kind === 'text') cell.value.value
+  if (cell.value.kind === 'date') cell.value.value // a Date
+}
+
+const one = sheet?.cell('B2') // undefined if the sheet stores nothing there
+```
+
+`cell.value` is a discriminated union on `kind`: `'number'`, `'text'`, `'date'`,
+`'boolean'`, `'error'`, `'empty'`. A cell that holds only formatting, or that a
+comment sits on with no value of its own, still appears, as `kind: 'empty'`.
+
+## Writing cells
+
+```ts
+const sheet = createWorkbook().sheets[0]
+
+sheet?.set('A1', 42)
+sheet?.set('A2', 'text')
+sheet?.set('A3', true)
+sheet?.set('A4', new Date('2024-01-01')) // gains a date format if it has none
+sheet?.set('A5', { formula: 'SUM(A1:A4)' })
+sheet?.set('A6', null) // clears the value, keeps the formatting
+sheet?.set('A7', 1234.5, { numberFormat: '"$"#,##0.00' })
+```
+
+`set(reference, value, options?)` takes a `number | string | boolean | Date |
+{ formula } | null`. A missing cell, its row, and the sheet dimension are all
+created to cover it. A replaced cell keeps its style. `set` throws
+`unwritable-value` for a value a chosen format cannot hold, and records nothing
+when it does, so the rest of a batch still writes.
+
+## Formatting
+
+Formatting composes through the same `options`, and each part merges onto what the
+cell already has:
+
+```ts
+const sheet = createWorkbook().sheets[0]
+
+sheet?.set('A1', 1234.5, {
+  numberFormat: '"$"#,##0.00',
+  font: { bold: true, italic: false, size: 12, color: 'FF0000', name: 'Calibri' },
+  fill: { type: 'solid', color: 'FFFF00' },
+  border: { all: { style: 'thin' }, bottom: { style: 'medium', color: '000000' } },
+  alignment: { horizontal: 'center', vertical: 'center', wrapText: true },
+  protection: { locked: false },
+})
+
+// format() changes only formatting, so a formula cell keeps its expression.
+sheet?.format('B2', { font: { bold: true } })
+```
+
+- **font**: `bold`, `italic`, `size`, `color`, `name`, `strike`, `underline`
+  (`true | 'double' | 'singleAccounting' | 'doubleAccounting'`), `verticalAlign`
+  (`'superscript' | 'subscript'`). Merges onto the current font.
+- **fill**: `{ type: 'solid', color }` or `{ type: 'pattern', pattern, color,
+  background }` (`pattern` is an ECMA-376 name like `'lightGrid'`).
+- **border**: sides by name (`top`/`bottom`/`left`/`right`), `all` for every side,
+  or `diagonal` (`{ style, color?, up?, down? }`). `style` is a name like `'thin'`,
+  `'medium'`, `'dashed'`.
+- **alignment**: `horizontal`, `vertical`, `wrapText`, `textRotation` (0–180, or
+  255 to stack), `indent`.
+- **protection**: `locked`, `hidden` — bite once the sheet is protected.
+- A **colour** is an `'RRGGBB'` or `'AARRGGBB'` hex, a theme `{ theme, tint }`, or
+  an indexed `{ indexed }`. `workbook.resolveColor(color)` turns a reference into
+  the hex it shows as.
+
+## Structure: merges, rows, columns
+
+```ts
+const sheet = readWorkbook(bytes).sheets[0]
+
+sheet?.merge('A1:B2') // top-left value shows; joins existing merges
+sheet?.mergedRanges // readonly string[], e.g. ['A1:B2']
+
+sheet?.setRowHeight(1, 30) // points
+sheet?.setColumnWidth('A', 18) // Excel width units
+sheet?.rowHeight(1) // number | undefined
+sheet?.columnWidth('A') // number | undefined
+
+sheet?.hideRow(2)
+sheet?.hideColumn('C')
+sheet?.isRowHidden(2) // boolean
+sheet?.isColumnHidden('C') // boolean
+
+sheet?.groupRows(2, 5) // outline level 1..7 (default 1)
+sheet?.groupColumns('B', 'D')
+sheet?.rowGroupLevel(2) // 0 when not grouped
+sheet?.columnGroupLevel('B')
+
+sheet?.insertRows(3, 2) // 2 blank rows before row 3; references shift
+sheet?.insertColumns('C') // 1 blank column before C
+sheet?.deleteRows(3, 2)
+sheet?.deleteColumns('C')
+```
+
+Insert/delete shift every reference that points into the moved lines — formulas
+across the whole workbook, merges, filters, conditional formats, defined names.
+They refuse a sheet carrying a table, drawing, pivot table or comment, whose
+pinned positions are not yet adjusted, and refuse a delete that would strand a
+`#REF!` a merge or shared formula cannot survive.
+
+## Data validation
+
+```ts
+const sheet = readWorkbook(bytes).sheets[0]
+
+sheet?.validate('A1:A10', { list: ['Low', 'Medium', 'High'] }) // inline dropdown
+sheet?.validate('B1', { listRange: 'Sheet1!$A$1:$A$3' }) // dropdown from a range
+sheet?.validate('C1', { whole: { between: [1, 100] } })
+sheet?.validate('D1', { decimal: { greaterThan: 0 } })
+sheet?.validate('E1', { textLength: { lessThanOrEqual: 40 } })
+sheet?.validate('F1', { date: { between: [new Date('2024-01-01'), new Date('2024-12-31')] } })
+sheet?.validate('G1', { custom: 'ISNUMBER(G1)' }, )
+
+sheet?.validations // readonly [{ range, rule }] — reads the file plus pending
+```
+
+A comparison (`whole`/`decimal`/`textLength`/`date`) is keyed by operator:
+`between`/`notBetween` (a `[min, max]` pair), or `equal`/`notEqual`/`greaterThan`/
+`lessThan`/`greaterThanOrEqual`/`lessThanOrEqual` (a single bound). `date` bounds
+are `Date`s. Add `allowBlank: false` to any rule to forbid an empty cell.
+
+## Conditional formatting
+
+```ts
+const sheet = readWorkbook(bytes).sheets[0]
+
+sheet?.conditionalFormat('A1:A20', { colorScale: { min: 'F8696B', mid: 'FFEB84', max: '63BE7B' } })
+sheet?.conditionalFormat('B1:B20', { dataBar: { color: '638EC6' } })
+sheet?.conditionalFormat('C1:C20', { cellIs: { when: { greaterThan: 100 }, fill: 'FFC7CE' } })
+sheet?.conditionalFormat('D1:D20', { expression: { formula: '$D1>AVERAGE($D:$D)', fill: 'FFFF00' } })
+sheet?.conditionalFormat('E1:E20', { duplicates: { fill: 'FFC7CE' } })
+sheet?.conditionalFormat('F1:F20', { unique: { fill: 'C6EFCE' } })
+sheet?.conditionalFormat('G1:G20', { top: { count: 5, fill: 'C6EFCE' } })
+sheet?.conditionalFormat('H1:H20', { bottom: { count: 10, fill: 'FFC7CE', percent: true } })
+
+sheet?.conditionalFormats // readonly [{ range, rule }]
+```
+
+A `colorScale` grades between two hex stops, or three with `mid`. The `cellIs`,
+`expression`, `duplicates`, `unique`, `top` and `bottom` rules each fill matching
+cells with a hex `fill`. `top`/`bottom` take a `count`, and `percent: true` reads
+the count as a percentage.
+
+## Comments and hyperlinks
+
+```ts
+const sheet = readWorkbook(bytes).sheets[0]
+
+sheet?.comment('A1', 'A note that shows on hover.')
+sheet?.cell('A1')?.comment // the text, when read back
+
+sheet?.link('B2', { url: 'https://example.com', tooltip: 'Open' })
+sheet?.link('B3', { location: 'Sheet2!A1' }) // a place in the workbook
+sheet?.cell('B2')?.hyperlink // { url } or { location }
+```
+
+`comment` adds a note (and, on a sheet that already has notes, splices in without
+disturbing the rich text already there); it refuses only a cell that already
+carries one. `link` replaces any link on the cell.
+
+## Sheet view
+
+```ts
+const sheet = readWorkbook(bytes).sheets[0]
+
+sheet?.freeze('B2') // freezes row 1 and column A
+sheet?.tabColor('FF0000')
+sheet?.showGridlines(false)
+sheet?.showHeadings(false)
+sheet?.zoom(150)
+sheet?.autoFilter('A1:D1')
+
+// The matching reads — note the names, since the plain nouns are the setters:
+sheet?.frozenAt // 'B2' | undefined
+sheet?.tabColorHex // 'FFFF0000' | undefined
+sheet?.gridlinesVisible // boolean
+sheet?.headingsVisible // boolean
+sheet?.zoomPercent // number | undefined
+sheet?.autoFilterRange // 'A1:D1' | undefined
+```
+
+## Sheets and the workbook
+
+```ts
+const workbook = readWorkbook(bytes)
+
+workbook.sheets // readonly Worksheet[]
+workbook.sheet('Data') // by name, undefined if none
+const added = workbook.addSheet('New')
+added.rename('Renamed')
+added.remove() // a workbook must keep at least one sheet
+
+workbook.definedNames // ReadonlyMap<name, formula>
+workbook.defineName('Tax', 'Sheet1!$B$1')
+
+workbook.epoch // 1900 | 1904 — the date system
+```
+
+## Sheet protection
+
+```ts
+const sheet = readWorkbook(bytes).sheets[0]
+
+sheet?.protect() // Excel's default: everything locked
+sheet?.protect({ formatCells: true }) // permit specific actions
+sheet?.unprotect()
+sheet?.protection // the SheetProtection in force, or undefined
+```
+
+Cell `locked`/`hidden` flags only bite once the sheet is protected. Passwords are
+not written.
+
+## Errors
+
+Every failure is an `XlsxError` with a `.code` and a message that names what
+failed and where. Switch on the code; it is an open union, so keep a default.
+
+```ts
+import { XlsxError, readWorkbook } from 'amendsheet'
+
+try {
+  const sheet = readWorkbook(bytes).sheets[0]
+  sheet?.set('not a reference', 5) // throws
+} catch (error) {
+  if (error instanceof XlsxError) {
+    error.code // 'bad-reference' | 'unwritable-value' | 'unsupported-edit' | ...
+    error.message // located, human-readable
+  }
+}
+```
+
+`bad-reference` and `unwritable-value` mean the caller passed something wrong;
+every other code means the file did. This split lets you tell a bug in your code
+from a quirk of the input.
+
+## Recipes
+
+Fill a fresh sheet from rows of data:
+
+```ts
+const workbook = createWorkbook('Report')
+const sheet = workbook.sheets[0]
+const rows = [['Name', 'Total'], ['Ada', 42], ['Grace', 37]]
+rows.forEach((row, r) => {
+  row.forEach((value, c) => {
+    const reference = `${String.fromCharCode(65 + c)}${r + 1}`
+    sheet?.set(reference, value, r === 0 ? { font: { bold: true } } : undefined)
+  })
+})
+const out = workbook.toBytes()
+```
+
+Highlight the cells above a threshold, and freeze the header:
+
+```ts
+const sheet = readWorkbook(bytes).sheets[0]
+sheet?.freeze('A2')
+sheet?.conditionalFormat('B2:B100', { cellIs: { when: { greaterThan: 1000 }, fill: 'FFC7CE' } })
+```
+
+Add a dropdown and stamp the author-ish title cell:
+
+```ts
+const sheet = readWorkbook(bytes).sheets[0]
+sheet?.validate('C2:C100', { list: ['Open', 'Closed'] })
+sheet?.set('A1', 'Status Report', { font: { bold: true, size: 14 } })
+```
+
+## Gotchas
+
+- **Read-accessor names.** Where a setter took the plain noun, the getter says
+  what it returns: `tabColor(...)` sets, `tabColorHex` reads; `freeze(...)` /
+  `frozenAt`; `zoom(...)` / `zoomPercent`; `autoFilter(...)` / `autoFilterRange`;
+  `showGridlines(...)` / `gridlinesVisible`.
+- **Immutable by default and synchronous.** Edits are recorded on the workbook and
+  applied by `toBytes()`, which returns a `Uint8Array` — no promises, no streams.
+- **`cells()` re-reads the sheet each call.** Iterate once; do not call it per
+  cell.
+- **The ZIP is rebuilt on write.** An untouched file comes back the same document
+  but not the same bytes (compression and entry order are the writer's own); the
+  parts and values are preserved, which is the guarantee that matters.
