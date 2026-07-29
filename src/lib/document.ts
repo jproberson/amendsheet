@@ -85,6 +85,14 @@ import {
   withTableParts,
 } from './tables.js'
 import {
+  type PageMargins,
+  type PageSetup,
+  readPageMargins,
+  readPageSetup,
+  withPageMargins,
+  withPageSetup,
+} from './page.js'
+import {
   type Alignment,
   type BorderFormat,
   type CellFormatting,
@@ -180,6 +188,7 @@ export interface Cell {
 
 export type { Hyperlink }
 export type { DocumentProperties }
+export type { PageSetup, PageMargins }
 
 export interface Worksheet {
   readonly name: string
@@ -385,6 +394,17 @@ export interface Worksheet {
    * when the sheet is scrolled. `freeze('B2')` freezes row 1 and column A.
    */
   freeze(cell: string): void
+  /** The page setup for printing — orientation and scale — the file's plus any set
+   * this session. */
+  readonly pageSetup: PageSetup
+  /** Sets the page orientation and print scale, merging onto what the sheet has and
+   * keeping any other `pageSetup` attribute. Refuses a scale outside 10 to 400. */
+  setPageSetup(setup: PageSetup): void
+  /** The print margins in inches, the file's own plus any set this session. */
+  readonly pageMargins: PageMargins
+  /** Sets print margins, merging onto the ones the sheet has, so a partial edit
+   * still leaves all six. Refuses a margin that is not a finite number at least zero. */
+  setPageMargins(margins: PageMargins): void
   /**
    * A row's height in points, the file's or one set this session, or undefined
    * when the row carries no height of its own. The row is one-based.
@@ -1068,6 +1088,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   const sheetComments = new Map<string, Map<string, string>>()
   const sheetRemovedComments = new Map<string, Set<string>>()
   const sheetTables = new Map<string, TableSpec[]>()
+  const sheetPageSetup = new Map<string, PageSetup>()
+  const sheetPageMargins = new Map<string, PageMargins>()
   // The per-sheet maps patchSheet applies in one rewrite. Both the "anything
   // pending?" check and the set of sheets to rewrite read this list, so a new
   // kind of sheet edit is registered in one place rather than two enumerations
@@ -2078,6 +2100,66 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         }
         sheetFreezes.set(reference.path, formatReference(parseWritableReference(cell)))
       },
+      get pageSetup(): PageSetup {
+        const file = sheetBytes === undefined ? {} : readPageSetup(sheetBytes)
+        return { ...file, ...sheetPageSetup.get(reference.path) }
+      },
+      setPageSetup(setup: PageSetup): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so its page setup cannot be set`,
+            { ...at },
+          )
+        }
+        if (
+          setup.orientation !== undefined &&
+          setup.orientation !== 'portrait' &&
+          setup.orientation !== 'landscape'
+        ) {
+          throw new XlsxError(
+            'unwritable-value',
+            `Orientation must be "portrait" or "landscape", not "${setup.orientation}"`,
+            { ...at },
+          )
+        }
+        if (
+          setup.scale !== undefined &&
+          (!Number.isInteger(setup.scale) || setup.scale < 10 || setup.scale > 400)
+        ) {
+          throw new XlsxError(
+            'unwritable-value',
+            `Print scale ${setup.scale} is not a whole percentage between 10 and 400`,
+            { ...at },
+          )
+        }
+        sheetPageSetup.set(reference.path, { ...sheetPageSetup.get(reference.path), ...setup })
+      },
+      get pageMargins(): PageMargins {
+        const file = sheetBytes === undefined ? {} : readPageMargins(sheetBytes)
+        return { ...file, ...sheetPageMargins.get(reference.path) }
+      },
+      setPageMargins(margins: PageMargins): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so its margins cannot be set`,
+            { ...at },
+          )
+        }
+        for (const side of ['left', 'right', 'top', 'bottom', 'header', 'footer'] as const) {
+          const value = margins[side]
+          if (value !== undefined && (!Number.isFinite(value) || value < 0)) {
+            throw new XlsxError('unwritable-value', `Margin ${side} ${value} is not zero or more`, {
+              ...at,
+            })
+          }
+        }
+        sheetPageMargins.set(reference.path, {
+          ...sheetPageMargins.get(reference.path),
+          ...margins,
+        })
+      },
       tabColor(color: string): void {
         if (sheetBytes === undefined) {
           throw new XlsxError(
@@ -2453,6 +2535,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       sheetComments.size === 0 &&
       sheetRemovedComments.size === 0 &&
       sheetTables.size === 0 &&
+      sheetPageSetup.size === 0 &&
+      sheetPageMargins.size === 0 &&
       addedRefs.length === 0 &&
       renames.size === 0 &&
       removed.size === 0 &&
@@ -2762,6 +2846,19 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         sheetXml = withTableParts(sheetXml, wired.id)
       }
       changes.set(relationshipsPath, encoder.encode(relsXml ?? ''))
+      changes.set(path, encoder.encode(sheetXml))
+    }
+
+    // Page setup writes two self-closing elements. Margins go first so setup, which
+    // the schema orders after them, lands in the right place either way.
+    for (const path of new Set([...sheetPageMargins.keys(), ...sheetPageSetup.keys()])) {
+      if (removed.has(path)) continue
+      let sheetXml = sheetTextNow(path)
+      if (sheetXml === undefined) continue
+      const margins = sheetPageMargins.get(path)
+      if (margins !== undefined) sheetXml = withPageMargins(sheetXml, margins)
+      const setup = sheetPageSetup.get(path)
+      if (setup !== undefined) sheetXml = withPageSetup(sheetXml, setup)
       changes.set(path, encoder.encode(sheetXml))
     }
 

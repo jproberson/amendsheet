@@ -248,6 +248,22 @@ sheet?.zoomPercent // number | undefined
 sheet?.autoFilterRange // 'A1:D1' | undefined
 ```
 
+## Page setup for printing
+
+```ts
+const sheet = readWorkbook(bytes).sheets[0]
+
+sheet?.setPageSetup({ orientation: 'landscape', scale: 90 }) // scale 10..400
+sheet?.setPageMargins({ left: 1, right: 1 }) // inches; merges onto the rest
+sheet?.pageSetup // { orientation?, scale? }
+sheet?.pageMargins // { left?, right?, top?, bottom?, header?, footer? }
+```
+
+`setPageSetup` keeps any other `pageSetup` attribute the sheet has; `setPageMargins`
+fills the other five from what the sheet had (or Excel's defaults), so a partial
+edit still writes a complete element. Note the read/write split: `pageSetup` reads,
+`setPageSetup` writes.
+
 ## Sheets and the workbook
 
 ```ts

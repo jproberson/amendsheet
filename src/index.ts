@@ -37,6 +37,8 @@ export type {
   FormulaRule,
   Hyperlink,
   NumberConstraint,
+  PageMargins,
+  PageSetup,
   RankRule,
   SetOptions,
   Workbook,

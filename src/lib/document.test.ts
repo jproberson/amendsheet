@@ -42,6 +42,71 @@ function build(
   return writeContainer({ parts: new Map(Object.entries(parts)) })
 }
 
+test('setPageSetup and setPageMargins write and read back, live and on write', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  const sheet = workbook.sheets[0]
+  sheet?.setPageSetup({ orientation: 'landscape', scale: 90 })
+  sheet?.setPageMargins({ left: 1, right: 1 })
+  assert.deepEqual(sheet?.pageSetup, { orientation: 'landscape', scale: 90 }) // live
+
+  const back = readWorkbook(workbook.toBytes()).sheets[0]
+  assert.deepEqual(back?.pageSetup, { orientation: 'landscape', scale: 90 })
+  assert.deepEqual(back?.pageMargins, {
+    left: 1,
+    right: 1,
+    top: 0.75,
+    bottom: 0.75,
+    header: 0.3,
+    footer: 0.3,
+  })
+})
+
+test('setPageMargins replaces the element a sheet already has', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      after: '<pageMargins left="0.5" right="0.5" top="1" bottom="1" header="0.4" footer="0.4"/>',
+    }),
+  )
+  workbook.sheets[0]?.setPageMargins({ left: 2 })
+  assert.deepEqual(readWorkbook(workbook.toBytes()).sheets[0]?.pageMargins, {
+    left: 2,
+    right: 0.5,
+    top: 1,
+    bottom: 1,
+    header: 0.4,
+    footer: 0.4,
+  })
+})
+
+test('setPageSetup merges, keeping other pageSetup attributes', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      after: '<pageSetup paperSize="9" orientation="portrait"/>',
+    }),
+  )
+  workbook.sheets[0]?.setPageSetup({ orientation: 'landscape' })
+  assert.match(
+    decode(readContainer(workbook.toBytes()).parts.get('xl/worksheets/sheet1.xml')),
+    /<pageSetup paperSize="9" orientation="landscape"\/>/,
+  )
+})
+
+test('setPageSetup refuses a bad scale and orientation, setPageMargins a negative margin', () => {
+  const sheet = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>')).sheets[0]
+  for (const scale of [5, 500, 1.5]) {
+    assert.throws(
+      () => sheet?.setPageSetup({ scale }),
+      (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+    )
+  }
+  for (const top of [-1, Number.NaN]) {
+    assert.throws(
+      () => sheet?.setPageMargins({ top }),
+      (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+    )
+  }
+})
+
 test('addTable creates a table, writes its headers, wires it, and reads back', () => {
   const workbook = createWorkbook('Data')
   const sheet = workbook.sheet('Data')
@@ -3345,6 +3410,15 @@ test('refuses a write to a sheet whose part is not in the package', () => {
     (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
   )
   assert.deepEqual(workbook.sheets[0]?.tables, []) // no bytes to read tables from
+  assert.throws(
+    () => workbook.sheets[0]?.setPageSetup({ orientation: 'landscape' }),
+    (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
+  )
+  assert.throws(
+    () => workbook.sheets[0]?.setPageMargins({ left: 1 }),
+    (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
+  )
+  assert.deepEqual(workbook.sheets[0]?.pageSetup, {})
   assert.throws(
     () => workbook.sheets[0]?.freeze('B2'),
     (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
