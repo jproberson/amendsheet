@@ -371,11 +371,11 @@ What a minor release is allowed to do, so you know which branches are safe:
   merges, filters, conditional formats, hyperlinks and defined names. It also
   moves a table's own stored range and a comment's cell — the note's box in the
   legacy drawing moves with it, and a note whose cell a deletion removes is
-  dropped. A table below or beside the edit shifts with it, and a deletion that
-  clips the table shrinks it. An edit that would resize the table's columns —
-  inserting a column inside it or deleting one of its columns — is refused with
-  `unsupported-edit`, since the table's own column list is not adjusted yet, as is
-  a row deletion that would take its header row. A drawing's anchors, a chart's
+  dropped. A table below or beside the edit shifts with it; a deletion that clips
+  the table shrinks it, dropping the column entries it cut out. A column inserted
+  inside a table is still refused with `unsupported-edit`, since a new column
+  entry and header are not authored yet, as is a deletion that would take every
+  one of the table's columns or its header row. A drawing's anchors, a chart's
   ranges and a pivot table's source are still not adjusted, so any row or column
   edit is refused on a sheet that carries a drawing, pivot table or chart.
 - Chartsheets and dialogsheets aren't listed in `sheets`, since they hold no

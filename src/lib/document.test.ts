@@ -325,6 +325,39 @@ test('insertColumns inside a table is still refused, its columns unadjusted', ()
   )
 })
 
+test('deleteColumns removes a table column it cuts out, shrinking the table', () => {
+  const built = createWorkbook('Data')
+  const sheet = built.sheet('Data')
+  sheet?.set('A1', 'H1')
+  sheet?.set('B1', 'H2')
+  sheet?.set('C1', 'H3')
+  sheet?.addTable('A1:C3', { name: 'T1' })
+  const workbook = readWorkbook(built.toBytes())
+
+  workbook.sheet('Data')?.deleteColumns('B') // drops the table's middle column
+
+  assert.deepEqual(readWorkbook(workbook.toBytes()).sheet('Data')?.tables, [
+    { name: 'T1', range: 'A1:B3', columns: ['H1', 'H3'] },
+  ])
+})
+
+test('deleteColumns refuses removing every column of a table', () => {
+  const built = createWorkbook('Data')
+  const sheet = built.sheet('Data')
+  sheet?.set('A1', 'H1')
+  sheet?.set('B1', 'H2')
+  sheet?.addTable('A1:B3', { name: 'T1' })
+  const workbook = readWorkbook(built.toBytes())
+
+  assert.throws(
+    () => workbook.sheet('Data')?.deleteColumns('A', 2), // both of the table's columns
+    (error: unknown) =>
+      error instanceof XlsxError &&
+      error.code === 'unsupported-edit' &&
+      error.message.includes('table T1'),
+  )
+})
+
 test('insertRows shifts a comment below it and round-trips', () => {
   const built = createWorkbook('Data')
   const sheet = built.sheet('Data')

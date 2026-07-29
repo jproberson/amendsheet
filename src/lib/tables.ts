@@ -206,12 +206,60 @@ const sameRange = (a: Range, b: Range): boolean =>
   a.minColumn === b.minColumn &&
   a.maxColumn === b.maxColumn
 
+// Which of a table's columns, zero-based left to right, survive a column deletion:
+// those whose sheet column falls outside the removed band. A column insert never
+// drops one, so this is asked only for a deletion.
+const survivingColumns = (range: Range, spec: ShiftSpec): number[] => {
+  const band = spec.at - spec.delta // deleted columns are [spec.at, band - 1]
+  const kept: number[] = []
+  for (let index = 0; index <= range.maxColumn - range.minColumn; index++) {
+    const column = range.minColumn + index
+    if (column < spec.at || column >= band) kept.push(index)
+  }
+  return kept
+}
+
+// Removes the `<tableColumn>` elements a deletion cut out, keeping the given
+// zero-based indices, and brings the declared `count` down to match.
+function dropTableColumns(xml: string, kept: number[]): string {
+  const keep = new Set(kept)
+  const splices: { start: number; end: number; text: string }[] = []
+  let index = 0
+  let removeFrom = -1
+  let countStart = -1
+  let countEnd = -1
+  for (const event of readXml(xml)) {
+    if (event.kind === 'open' && event.localName === 'tableColumns') {
+      countStart = event.start
+      countEnd = event.end
+    } else if (event.kind === 'open' && event.localName === 'tableColumn') {
+      if (!keep.has(index)) {
+        if (event.selfClosing) splices.push({ start: event.start, end: event.end, text: '' })
+        else removeFrom = event.start
+      }
+      index++
+    } else if (event.kind === 'close' && event.localName === 'tableColumn' && removeFrom !== -1) {
+      splices.push({ start: removeFrom, end: xml.indexOf('>', event.start) + 1, text: '' })
+      removeFrom = -1
+    }
+  }
+  if (countStart !== -1) {
+    const openTag = withAttribute(xml.slice(countStart, countEnd), 'count', kept.length)
+    splices.push({ start: countStart, end: countEnd, text: openTag })
+  }
+  for (const splice of splices.sort((a, b) => b.start - a.start)) {
+    xml = xml.slice(0, splice.start) + splice.text + xml.slice(splice.end)
+  }
+  return xml
+}
+
 /**
  * The rewritten table parts for a sheet whose rows or columns an insert or delete
- * moved. A column edit that changed a table's width would need columns added or
- * dropped, which `tableColumnDamage` refuses at the call, so only shifts that keep
- * the width reach here. `currentPart` gives the latest bytes for a table already
- * rewritten this session — a grow before an insert — so a chain of edits composes.
+ * moved. A row or shift-only column edit rewrites the range; a column deletion that
+ * cut into a table also drops the `<tableColumn>` entries it removed. A column
+ * insert that would resize a table is refused at the call by `tableColumnDamage`,
+ * so it never reaches here. `currentPart` gives the latest bytes for a table
+ * already rewritten this session — a grow before an insert — so edits compose.
  */
 export function shiftTables(
   currentPart: (path: string) => Uint8Array | undefined,
@@ -227,15 +275,23 @@ export function shiftTables(
     if (table === undefined) continue
     const shifted = shiftRange(table.range, spec)
     if (sameRange(shifted, table.range)) continue
-    extensions.push({ path, xml: rewriteRefs(table.xml, refOf(table.range), refOf(shifted)) })
+    let xml = rewriteRefs(table.xml, refOf(table.range), refOf(shifted))
+    if (spec.axis === 'column' && spec.delta < 0) {
+      const kept = survivingColumns(table.range, spec)
+      if (kept.length <= table.range.maxColumn - table.range.minColumn) {
+        xml = dropTableColumns(xml, kept)
+      }
+    }
+    extensions.push({ path, xml })
   }
   return extensions
 }
 
 /**
- * The name of a table a column insert or delete would resize — landing inside its
- * span so a column must be added, or cutting a column out — neither of which the
- * table's own column list is adjusted for yet. Only reached from a column edit.
+ * The name of a table a column edit would resize in a way not yet supported: a
+ * column inserted inside its span, which needs a new `<tableColumn>` and header,
+ * or a deletion that removes every one of its columns, leaving no table. A
+ * deletion that only narrows a table is allowed. Only reached from a column edit.
  */
 export function tableColumnDamage(
   sheetBytes: Uint8Array,
@@ -248,9 +304,9 @@ export function tableColumnDamage(
     if (table === undefined) continue
     const width = table.range.maxColumn - table.range.minColumn
     const shifted = shiftRange(table.range, spec)
-    if (shifted.maxColumn - shifted.minColumn !== width) {
-      return table.name === undefined ? 'a table' : `table ${table.name}`
-    }
+    const resized = shifted.maxColumn - shifted.minColumn !== width
+    const unsupported = spec.delta > 0 ? resized : survivingColumns(table.range, spec).length === 0
+    if (unsupported) return table.name === undefined ? 'a table' : `table ${table.name}`
   }
   return undefined
 }
