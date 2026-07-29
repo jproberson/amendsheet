@@ -83,6 +83,7 @@ import {
   type TableSpec,
   buildTablePart,
   extendTables,
+  insertTableColumns,
   readTables,
   shiftTables,
   tableColumnDamage,
@@ -2398,16 +2399,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           )
         }
         refuseUnshiftable('its columns cannot be inserted into yet', before, SHIFTABLE_PARTS)
-        const spec = lineSpec('column', atColumn, count)
-        const resized = tableColumnDamage(sheetBytes, reference.path, container, spec)
-        if (resized !== undefined) {
-          throw new XlsxError(
-            'unsupported-edit',
-            `Sheet ${reference.name} carries ${resized}, whose columns cannot be inserted into yet`,
-            { ...at, reference: before },
-          )
-        }
-        lineOps.push({ path: reference.path, spec })
+        lineOps.push({ path: reference.path, spec: lineSpec('column', atColumn, count) })
       },
       deleteRows(from: number, count = 1): void {
         if (sheetBytes === undefined) {
@@ -2922,16 +2914,47 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         // `changes`, so shift from there when present.
         const sheetOriginal = container.parts.get(path)
         if (sheetOriginal !== undefined) {
+          const latestTable = (tablePath: string) => changes.get(tablePath) ?? undefined
           for (const op of lineOps) {
             if (op.path !== path) continue
             for (const extension of shiftTables(
-              (tablePath) => changes.get(tablePath) ?? undefined,
+              latestTable,
               sheetOriginal,
               path,
               container,
               op.spec,
             )) {
               changes.set(extension.path, encoder.encode(extension.xml))
+            }
+            // A column inserted inside a table gains a fresh column entry, and its
+            // header cell is authored on the shifted sheet so no named column sits
+            // over a blank header. The header is written as an inline string.
+            for (const insert of insertTableColumns(
+              latestTable,
+              sheetOriginal,
+              path,
+              container,
+              op.spec,
+            )) {
+              changes.set(insert.path, encoder.encode(insert.xml))
+              const sheetNow = sheetTextNow(path)
+              if (insert.headers.size > 0 && sheetNow !== undefined) {
+                const at: SheetLocation = {
+                  sheet: part.sheets.find((sheet) => sheet.path === path)?.name,
+                  part: path,
+                }
+                changes.set(
+                  path,
+                  patchSheet(
+                    encoder.encode(sheetNow),
+                    insert.headers,
+                    date1904,
+                    undefined,
+                    undefined,
+                    at,
+                  ),
+                )
+              }
             }
           }
         }

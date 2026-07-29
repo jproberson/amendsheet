@@ -275,23 +275,132 @@ export function shiftTables(
     if (table === undefined) continue
     const shifted = shiftRange(table.range, spec)
     if (sameRange(shifted, table.range)) continue
+    const width = table.range.maxColumn - table.range.minColumn
+    // A column insert that widens a table adds columns and headers, which
+    // insertTableColumns authors; leaving the range widened alone would make the
+    // count disagree with it, so it is skipped here.
+    if (spec.axis === 'column' && spec.delta > 0 && shifted.maxColumn - shifted.minColumn !== width)
+      continue
     let xml = rewriteRefs(table.xml, refOf(table.range), refOf(shifted))
     if (spec.axis === 'column' && spec.delta < 0) {
       const kept = survivingColumns(table.range, spec)
-      if (kept.length <= table.range.maxColumn - table.range.minColumn) {
-        xml = dropTableColumns(xml, kept)
-      }
+      if (kept.length <= width) xml = dropTableColumns(xml, kept)
     }
     extensions.push({ path, xml })
   }
   return extensions
 }
 
+/** A table part rewritten for a column insert, with the header cells its new
+ * columns need authored on the sheet — each a cell reference to the column name. */
+export interface TableColumnInsert {
+  readonly path: string
+  readonly xml: string
+  readonly headers: ReadonlyMap<string, string>
+}
+
+// `count` names of the form ColumnN that no existing column already uses.
+const freshNames = (existing: readonly string[], count: number): string[] => {
+  const taken = new Set(existing.map((name) => name.toLowerCase()))
+  const names: string[] = []
+  let cursor = 1
+  for (let index = 0; index < count; index++) {
+    const { name, next } = freshColumnName(taken, cursor)
+    cursor = next
+    taken.add(name.toLowerCase())
+    names.push(name)
+  }
+  return names
+}
+
+// Splices `names.length` new tableColumns in at a zero-based position, each with
+// an id past every one in `ids`, and raises the declared count to match.
+function insertColumnsAt(xml: string, position: number, ids: number[], names: string[]): string {
+  let nextId = ids.reduce((max, id) => Math.max(max, id), 0) + 1
+  const elements = names.map(
+    (name) => `<tableColumn id="${nextId++}" name="${escapeSheetName(name)}"/>`,
+  )
+
+  let prefix = ''
+  let countStart = -1
+  let countEnd = -1
+  let existing = 0
+  let insertAt = -1
+  let closeStart = -1
+  for (const event of readXml(xml)) {
+    if (event.kind === 'open' && event.localName === 'tableColumns') {
+      const colon = event.name.indexOf(':')
+      prefix = colon === -1 ? '' : event.name.slice(0, colon + 1)
+      countStart = event.start
+      countEnd = event.end
+    } else if (event.kind === 'open' && event.localName === 'tableColumn') {
+      if (existing === position) insertAt = event.start
+      existing++
+    } else if (event.kind === 'close' && event.localName === 'tableColumns') {
+      closeStart = event.start
+    }
+  }
+  if (countStart === -1) return xml
+  if (insertAt === -1) insertAt = closeStart // past the last column, before the close
+
+  const openTag = withAttribute(xml.slice(countStart, countEnd), 'count', existing + names.length)
+  const inserted = elements.join('').replace(/<tableColumn /g, `<${prefix}tableColumn `)
+  const splices = [
+    { start: countStart, end: countEnd, text: openTag },
+    { start: insertAt, end: insertAt, text: inserted },
+  ]
+  let out = xml
+  for (const splice of splices.sort((a, b) => b.start - a.start)) {
+    out = out.slice(0, splice.start) + splice.text + out.slice(splice.end)
+  }
+  return out
+}
+
 /**
- * The name of a table a column edit would resize in a way not yet supported: a
- * column inserted inside its span, which needs a new `<tableColumn>` and header,
- * or a deletion that removes every one of its columns, leaving no table. A
- * deletion that only narrows a table is allowed. Only reached from a column edit.
+ * Rewrites a table part for a column inserted inside its span: the range widens,
+ * a fresh `<tableColumn>` goes in at the insert's position, and each new column's
+ * header cell is returned for the sheet to author, so a named column never sits
+ * over a blank header. An insert outside a table does not reach here. Only called
+ * for a column insert, so the spec always adds columns.
+ */
+export function insertTableColumns(
+  currentPart: (path: string) => Uint8Array | undefined,
+  sheetBytes: Uint8Array,
+  sheetPath: string,
+  container: Container,
+  spec: ShiftSpec,
+): TableColumnInsert[] {
+  if (spec.axis !== 'column' || spec.delta <= 0) return []
+  const inserts: TableColumnInsert[] = []
+  for (const path of tablePartPaths(sheetBytes, sheetPath, container)) {
+    const bytes = currentPart(path) ?? container.parts.get(path)
+    const table = bytes === undefined ? undefined : decodeTableBytes(bytes, path)
+    if (table === undefined) continue
+    const { range } = table
+    if (spec.at <= range.minColumn || spec.at > range.maxColumn) continue // not inside the table
+
+    const names = freshNames(table.columnNames, spec.delta)
+    const widened = shiftRange(range, spec)
+    const xml = insertColumnsAt(
+      rewriteRefs(table.xml, refOf(range), refOf(widened)),
+      spec.at - range.minColumn,
+      table.columnIds,
+      names,
+    )
+    const headers = new Map<string, string>()
+    names.forEach((name, offset) => {
+      headers.set(formatReference({ row: range.minRow, column: spec.at + offset }), name)
+    })
+    inserts.push({ path, xml, headers })
+  }
+  return inserts
+}
+
+/**
+ * The name of a table a column deletion would destroy by removing every one of
+ * its columns, leaving no table to shrink to. A deletion that only narrows a
+ * table is allowed, and its dropped columns are handled by `shiftTables`. Only
+ * reached from `deleteColumns`, so the spec is always a column removal.
  */
 export function tableColumnDamage(
   sheetBytes: Uint8Array,
@@ -302,11 +411,9 @@ export function tableColumnDamage(
   for (const path of tablePartPaths(sheetBytes, sheetPath, container)) {
     const table = decodeTable(container, path)
     if (table === undefined) continue
-    const width = table.range.maxColumn - table.range.minColumn
-    const shifted = shiftRange(table.range, spec)
-    const resized = shifted.maxColumn - shifted.minColumn !== width
-    const unsupported = spec.delta > 0 ? resized : survivingColumns(table.range, spec).length === 0
-    if (unsupported) return table.name === undefined ? 'a table' : `table ${table.name}`
+    if (survivingColumns(table.range, spec).length === 0) {
+      return table.name === undefined ? 'a table' : `table ${table.name}`
+    }
   }
   return undefined
 }

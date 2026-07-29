@@ -308,21 +308,27 @@ test('deleteColumns left of a table shifts it left, keeping its columns', () => 
   ])
 })
 
-test('insertColumns inside a table is still refused, its columns unadjusted', () => {
+test('insertColumns inside a table adds a column entry and authors its header', () => {
   const built = createWorkbook('Data')
   const sheet = built.sheet('Data')
   sheet?.set('A1', 'H1')
   sheet?.set('B1', 'H2')
+  sheet?.set('A2', 1)
+  sheet?.set('B2', 2)
   sheet?.addTable('A1:B3', { name: 'T1' })
   const workbook = readWorkbook(built.toBytes())
 
-  assert.throws(
-    () => workbook.sheet('Data')?.insertColumns('B'), // between the table's two columns
-    (error: unknown) =>
-      error instanceof XlsxError &&
-      error.code === 'unsupported-edit' &&
-      error.message.includes('table T1'),
-  )
+  workbook.sheet('Data')?.insertColumns('B') // between the table's two columns
+
+  const back = readWorkbook(workbook.toBytes()).sheet('Data')
+  const table = back?.tables[0]
+  assert.equal(table?.range, 'A1:C3')
+  assert.equal(table?.columns[0], 'H1')
+  assert.equal(table?.columns[2], 'H2')
+  const middle = table?.columns[1] ?? ''
+  assert.match(middle, /^Column\d+$/) // a fresh, collision-free name
+  // The header cell holds that name, so Excel does not offer to repair a blank one.
+  assert.deepEqual(back?.cell('B1')?.value, { kind: 'text', value: middle })
 })
 
 test('deleteColumns removes a table column it cuts out, shrinking the table', () => {
