@@ -165,8 +165,10 @@ below or beside the edit shifts with it; a column inserted inside a table gains 
 fresh column and header, and a deletion that clips a table shrinks it, dropping
 the column entries it cut out. Only a deletion that would take every column of a
 table, or a row deletion that takes its header row, is refused with
-`unsupported-edit`. An edit on a sheet carrying a drawing, pivot table or chart is
-still refused. A delete that would strand a `#REF!` a merge or shared formula
+`unsupported-edit`. A chart-free drawing moves its picture and shape anchors with
+the edit (one a deletion covers entirely is dropped); a drawing that holds a chart
+or diagram, and a pivot table, are still refused since their cell references are
+not adjusted. A delete that would strand a `#REF!` a merge or shared formula
 cannot survive is refused too.
 
 ## Data validation

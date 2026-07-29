@@ -3982,6 +3982,85 @@ test('insertRows still refuses a table sheet that also carries a drawing', () =>
   )
 })
 
+const drawingRels =
+  '<Relationships><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/></Relationships>'
+const XDR = 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'
+const anchor = (fromRow: number, toRow: number) =>
+  `<xdr:twoCellAnchor><xdr:from><xdr:col>0</xdr:col><xdr:colOff>0</xdr:colOff>` +
+  `<xdr:row>${fromRow}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>` +
+  `<xdr:to><xdr:col>3</xdr:col><xdr:colOff>0</xdr:colOff>` +
+  `<xdr:row>${toRow}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>` +
+  `<xdr:pic/><xdr:clientData/></xdr:twoCellAnchor>`
+
+test('insertRows shifts a chart-free drawing anchor down', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      after: '<drawing r:id="rId1"/>',
+      extra: {
+        'xl/worksheets/_rels/sheet1.xml.rels': drawingRels,
+        'xl/drawings/drawing1.xml': `<xdr:wsDr xmlns:xdr="${XDR}">${anchor(2, 5)}</xdr:wsDr>`,
+      },
+    }),
+  )
+
+  workbook.sheets[0]?.insertRows(1) // above the picture, pushes it down one
+
+  const out = decode(readContainer(workbook.toBytes()).parts.get('xl/drawings/drawing1.xml'))
+  assert.match(
+    out,
+    /<xdr:from><xdr:col>0<\/xdr:col><xdr:colOff>0<\/xdr:colOff><xdr:row>3<\/xdr:row>/,
+  )
+  assert.match(out, /<xdr:to><xdr:col>3<\/xdr:col><xdr:colOff>0<\/xdr:colOff><xdr:row>6<\/xdr:row>/)
+})
+
+test('deleteRows drops a drawing fully in the removed rows and shifts one below', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      after: '<drawing r:id="rId1"/>',
+      extra: {
+        'xl/worksheets/_rels/sheet1.xml.rels': drawingRels,
+        'xl/drawings/drawing1.xml': `<xdr:wsDr xmlns:xdr="${XDR}">${anchor(2, 4)}${anchor(10, 12)}</xdr:wsDr>`,
+      },
+    }),
+  )
+
+  workbook.sheets[0]?.deleteRows(3, 3) // removes rows 3-5 (the first picture's rows)
+
+  const out = decode(readContainer(workbook.toBytes()).parts.get('xl/drawings/drawing1.xml'))
+  assert.equal(out.match(/<xdr:twoCellAnchor>/g)?.length, 1) // the first anchor is dropped
+  assert.match(
+    out,
+    /<xdr:from><xdr:col>0<\/xdr:col><xdr:colOff>0<\/xdr:colOff><xdr:row>7<\/xdr:row>/,
+  )
+  assert.match(out, /<xdr:to><xdr:col>3<\/xdr:col><xdr:colOff>0<\/xdr:colOff><xdr:row>9<\/xdr:row>/)
+})
+
+test('insertRows refuses a drawing that holds a chart', () => {
+  const chartDrawing =
+    `<xdr:wsDr xmlns:xdr="${XDR}"><xdr:twoCellAnchor>` +
+    '<xdr:from><xdr:col>0</xdr:col><xdr:row>0</xdr:row></xdr:from>' +
+    '<xdr:to><xdr:col>5</xdr:col><xdr:row>10</xdr:row></xdr:to>' +
+    '<xdr:graphicFrame><xdr:nvGraphicFramePr/></xdr:graphicFrame>' +
+    '<xdr:clientData/></xdr:twoCellAnchor></xdr:wsDr>'
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      after: '<drawing r:id="rId1"/>',
+      extra: {
+        'xl/worksheets/_rels/sheet1.xml.rels': drawingRels,
+        'xl/drawings/drawing1.xml': chartDrawing,
+      },
+    }),
+  )
+
+  assert.throws(
+    () => workbook.sheets[0]?.insertRows(1),
+    (error: unknown) =>
+      error instanceof XlsxError &&
+      error.code === 'unsupported-edit' &&
+      error.message.includes('chart'),
+  )
+})
+
 test('insertRows refuses a sheet that carries a drawing', () => {
   const workbook = readWorkbook(
     build('<row r="1"><c r="A1"><v>1</v></c></row>', {

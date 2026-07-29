@@ -10,6 +10,7 @@ import {
   withSheetsAdded,
 } from './add-sheet.js'
 import { blankWorkbookBytes } from './blank.js'
+import { drawingHasChart, shiftDrawing } from './drawings.js'
 import {
   appendCommentsPart,
   appendVmlShapes,
@@ -678,7 +679,12 @@ const TABLE_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spread
 // so their presence no longer blocks one at the gate. A table still refuses a
 // column edit that would resize it — that check is tableColumnDamage, once the
 // edit's position is known. A drawing, pivot table or chart is not here yet.
-const SHIFTABLE_PARTS: ReadonlySet<string> = new Set(['a table', 'a comment', 'a legacy drawing'])
+const SHIFTABLE_PARTS: ReadonlySet<string> = new Set([
+  'a table',
+  'a comment',
+  'a legacy drawing',
+  'a drawing',
+])
 
 function partText(container: Container, path: string): string | undefined {
   const bytes = container.parts.get(path)
@@ -1518,13 +1524,29 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     ): void => {
       const relationships = partText(container, relationshipsPathFor(reference.path))
       if (relationships === undefined) return
-      const owns = unshiftablePart(relationships, allow)
+      // A drawing is shiftable only when it is readable and holds no chart, so it
+      // is allowed at the gate and then checked here; the rest refuse by presence.
+      const owns = unshiftablePart(relationships, allow) ?? drawingRefusal(relationships)
       if (owns === undefined) return
       throw new XlsxError(
         'unsupported-edit',
         `Sheet ${reference.name} carries ${owns}, so ${action}`,
         { ...at, ...(where === undefined ? {} : { reference: where }) },
       )
+    }
+
+    // The noun a drawing on the sheet refuses with, or undefined when every one is
+    // a chart-free drawing whose anchors can move: a chart (or diagram) is refused
+    // because its cell references are not shifted, and a drawing whose part cannot
+    // be read is refused because it cannot be shown to be chart-free.
+    const drawingRefusal = (relationshipsXml: string): string | undefined => {
+      for (const relationship of readRelationships(relationshipsXml, reference.path).values()) {
+        if (relationship.external || !relationship.type.endsWith('relationships/drawing')) continue
+        const drawing = partText(container, resolveTarget(reference.path, relationship.target))
+        if (drawing === undefined) return 'a drawing'
+        if (drawingHasChart(drawing)) return 'a chart'
+      }
+      return undefined
     }
 
     const lineSpec = (axis: 'row' | 'column', line: number, delta: number): ShiftSpec => ({
@@ -2976,6 +2998,19 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           if (vmlPath !== undefined && vmlText !== undefined) {
             const shifted = shiftNoteShapes(vmlText, op.spec)
             if (shifted !== vmlText) changes.set(vmlPath, encoder.encode(shifted))
+          }
+          // A chart-free drawing (a chart-bearing one is refused at the call) moves
+          // its cell anchors with the edit; a picture fully inside a deletion goes.
+          if (relsForComments !== undefined) {
+            for (const relationship of readRelationships(relsForComments, path).values()) {
+              if (relationship.external || !relationship.type.endsWith('relationships/drawing'))
+                continue
+              const drawingPath = resolveTarget(path, relationship.target)
+              const drawingText = sheetTextNow(drawingPath)
+              if (drawingText === undefined) continue
+              const shifted = shiftDrawing(drawingText, op.spec)
+              if (shifted !== drawingText) changes.set(drawingPath, encoder.encode(shifted))
+            }
           }
         }
       }
