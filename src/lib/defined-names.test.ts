@@ -76,3 +76,13 @@ test('checkDefinedName accepts a valid name and refuses the rest', () => {
   refuses('Good', '') // empty refersTo
   refuses('Good', 5) // non-string refersTo
 })
+
+test('withDefinedNames removes a name without re-adding it, keeping the rest', () => {
+  const xml =
+    '<workbook><sheets><sheet name="S"/></sheets><definedNames>' +
+    '<definedName name="Tax">S!$A$1</definedName>' +
+    '<definedName name="Keep">S!$B$1</definedName></definedNames></workbook>'
+  const out = withDefinedNames(xml, new Map(), new Set(['Tax']))
+  assert.doesNotMatch(out, /name="Tax"/)
+  assert.match(out, /<definedName name="Keep">S!\$B\$1<\/definedName>/)
+})

@@ -258,6 +258,7 @@ added.remove() // a workbook must keep at least one sheet
 
 workbook.definedNames // ReadonlyMap<name, formula>
 workbook.defineName('Tax', 'Sheet1!$B$1')
+workbook.removeDefinedName('Tax') // a name it lacks is ignored
 
 workbook.epoch // 1900 | 1904 — the date system
 ```

@@ -54,16 +54,22 @@ export function readDefinedNames(workbookXml: string): Map<string, string> {
 }
 
 /** Adds each global defined name to the workbook, replacing one of the same name. */
-export function withDefinedNames(workbookXml: string, names: ReadonlyMap<string, string>): string {
-  if (names.size === 0) return workbookXml
+export function withDefinedNames(
+  workbookXml: string,
+  names: ReadonlyMap<string, string>,
+  removed: ReadonlySet<string> = new Set(),
+): string {
+  if (names.size === 0 && removed.size === 0) return workbookXml
 
-  // Drop any existing global definedName we are redefining, so it is not doubled.
+  // Drop any existing global definedName we are redefining (so it is not doubled)
+  // or removing (so it is gone). Only the redefined ones are written back below.
   const spans: { start: number; end: number }[] = []
   let redefined: number | undefined
   for (const event of readXml(workbookXml)) {
     if (event.kind === 'open' && event.localName === 'definedName') {
       const name = globalName(event.attributes)
-      redefined = name !== undefined && names.has(name) ? event.start : undefined
+      redefined =
+        name !== undefined && (names.has(name) || removed.has(name)) ? event.start : undefined
       continue
     }
     if (event.kind === 'close' && event.localName === 'definedName' && redefined !== undefined) {

@@ -42,6 +42,27 @@ function build(
   return writeContainer({ parts: new Map(Object.entries(parts)) })
 }
 
+test('removeDefinedName drops a name and reads back without it', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      extra: {
+        'xl/workbook.xml':
+          '<workbook><sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets>' +
+          '<definedNames><definedName name="Tax">Data!$A$1</definedName>' +
+          '<definedName name="Rate">Data!$B$1</definedName></definedNames></workbook>',
+      },
+    }),
+  )
+  assert.equal(workbook.definedNames.get('Tax'), 'Data!$A$1')
+  workbook.removeDefinedName('Tax')
+  workbook.removeDefinedName('Absent') // a name it lacks is ignored
+  assert.equal(workbook.definedNames.has('Tax'), false) // live
+
+  const back = readWorkbook(workbook.toBytes())
+  assert.equal(back.definedNames.has('Tax'), false)
+  assert.equal(back.definedNames.get('Rate'), 'Data!$B$1') // the rest kept
+})
+
 test('setState hides a sheet, reads it back, and refuses the last visible one', () => {
   const created = createWorkbook('First')
   created.addSheet('Second')

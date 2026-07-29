@@ -544,6 +544,8 @@ export interface Workbook {
    * digits, periods or underscores, no spaces. `refersTo` is a formula.
    */
   defineName(name: string, refersTo: string): void
+  /** Removes a global named range. A name the workbook does not have is ignored. */
+  removeDefinedName(name: string): void
   /**
    * The document's core properties (title, creator, dates and the rest), the
    * file's own plus any set this session. Empty fields are absent, not blank.
@@ -1029,6 +1031,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   ]
   const fileNames = readDefinedNames(partText(container, part.path) ?? '')
   const pendingNames = new Map<string, string>()
+  const removedNames = new Set<string>()
   let pendingProperties: DocumentProperties = {}
   const sheetHyperlinks = new Map<string, Map<string, Hyperlink>>()
   // Row and column inserts and deletes, in call order. Each names the sheet it
@@ -2152,6 +2155,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       renames.size === 0 &&
       removed.size === 0 &&
       pendingNames.size === 0 &&
+      removedNames.size === 0 &&
       lineOps.length === 0 &&
       Object.keys(pendingProperties).length === 0 &&
       sheetStates.size === 0
@@ -2435,7 +2439,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         const original = originalName(path)
         if (original !== undefined) updated = withSheetRemoved(updated, original)
       }
-      return withDefinedNames(updated, namesToWrite)
+      return withDefinedNames(updated, namesToWrite, removedNames)
     })
 
     rewritePart(part.relationshipsPath, (relationshipsXml) => {
@@ -2500,11 +2504,18 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     sheet: (name: string) => sheets.find((candidate) => candidate.name === name),
     addSheet: addWorksheet,
     get definedNames(): ReadonlyMap<string, string> {
-      return new Map([...fileNames, ...pendingNames])
+      const all = new Map([...fileNames, ...pendingNames])
+      for (const name of removedNames) all.delete(name)
+      return all
     },
     defineName(name: string, refersTo: string): void {
       checkDefinedName(name, refersTo)
+      removedNames.delete(name)
       pendingNames.set(name, refersTo)
+    },
+    removeDefinedName(name: string): void {
+      pendingNames.delete(name)
+      removedNames.add(name)
     },
     get properties(): DocumentProperties {
       const fileXml = partText(container, CORE_PROPERTIES_PART)
