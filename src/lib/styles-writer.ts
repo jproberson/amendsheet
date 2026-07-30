@@ -3,12 +3,12 @@ import { builtInFormatId, isDateFormat, numberFormatOf, readStyles } from './sty
 import { findUnwritableCharacter, readXml, withAttribute } from './xml.js'
 
 /** Built in short date format, so no custom numFmt has to be written. */
-const SHORT_DATE_FORMAT_ID = 14
+export const SHORT_DATE_FORMAT_ID = 14
 
 /** Custom format ids start here; everything below is built in. */
-const FIRST_CUSTOM_FORMAT_ID = 164
+export const FIRST_CUSTOM_FORMAT_ID = 164
 
-const escapeXml = (text: string) =>
+export const escapeXml = (text: string) =>
   text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
 export interface DateStyle {
@@ -25,7 +25,7 @@ const prefixOf = (name: string) => {
 /** Prefixes every element name in a freshly built fragment. The builders emit
  *  plain names, and `ensureInTable` fixes only the outer open tag, so without
  *  this a fragment added to a prefixed table closed and nested unprefixed. */
-const withNamespacePrefix = (fragment: string, prefix: string): string =>
+export const withNamespacePrefix = (fragment: string, prefix: string): string =>
   prefix === '' ? fragment : fragment.replace(/<(\/?)([A-Za-z])/g, `<$1${prefix}$2`)
 
 /** One of the styles sub-tables — `fonts`, `fills`, `borders`, `cellXfs`. */
@@ -227,10 +227,10 @@ export function readDxfFill(stylesXml: string, index: number): string | undefine
   return undefined
 }
 
-const DEFAULT_XF = '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+export const DEFAULT_XF = '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
 
 /** The parts of a cell format this library sets, each with its `apply*` flag. */
-interface CellOverrides {
+export interface CellOverrides {
   readonly numFmtId?: number
   readonly fontId?: number
   readonly fillId?: number
@@ -251,7 +251,7 @@ function withApplyFlag(openTag: string, flag: string): string {
   return openTag.replace(/\/?>$/, (tag) => (tag === '/>' ? ` ${flag}="1"/>` : ` ${flag}="1">`))
 }
 
-function withOverrides(element: string, overrides: CellOverrides): string {
+export function withOverrides(element: string, overrides: CellOverrides): string {
   const openTagEnd = element.indexOf('>') + 1
   let openTag = element.slice(0, openTagEnd)
   const rest = element.slice(openTagEnd)
@@ -432,7 +432,7 @@ function colorAttributes(color: Color, location: XlsxErrorContext = {}): string 
 /** A `<b val="0"/>` turns bold off, so presence alone is not the whole story. */
 const flagOn = (value: string | undefined) => value !== '0' && value !== 'false'
 
-function parseFont(element: string): FontFormat {
+export function parseFont(element: string): FontFormat {
   const font: {
     bold?: boolean
     italic?: boolean
@@ -487,7 +487,7 @@ function parseFont(element: string): FontFormat {
   return font
 }
 
-function buildFontElement(font: FontFormat, location: XlsxErrorContext = {}): string {
+export function buildFontElement(font: FontFormat, location: XlsxErrorContext = {}): string {
   let inner = ''
   if (font.bold === true) inner += '<b/>'
   if (font.italic === true) inner += '<i/>'
@@ -521,7 +521,7 @@ const numericAttributePattern = (attribute: string): RegExp => {
 }
 
 /** The value of a numeric xf attribute like `fontId`, or 0 (the default) when it names none. */
-const attrId = (element: string, attribute: string): number => {
+export const attrId = (element: string, attribute: string): number => {
   const match = element.match(numericAttributePattern(attribute))
   return match?.[1] === undefined ? 0 : Number(match[1])
 }
@@ -538,7 +538,7 @@ function idOf(stylesXml: string, basedOn: number | undefined, attribute: string)
  * alignment or protection child. Only such a format is safe for a blank cell to
  * borrow, since a borrow carries the whole xf, not just its number format.
  */
-function isPlainFormat(element: string | undefined): boolean {
+export function isPlainFormat(element: string | undefined): boolean {
   if (element === undefined) return true
   const idIsZero = (attribute: string) => attrId(element, attribute) === 0
   return (
@@ -673,7 +673,7 @@ export type ReadFill = FillFormat
 
 // fillId 0 (none) and 1 (gray125) are reserved, so a real solid fill is the
 // third entry; a file with no fills table has these seeded before ours is added.
-const RESERVED_FILLS =
+export const RESERVED_FILLS =
   '<fill><patternFill patternType="none"/></fill>' +
   '<fill><patternFill patternType="gray125"/></fill>'
 
@@ -687,7 +687,7 @@ function withReservedFills(stylesXml: string): string {
   )
 }
 
-function buildFillElement(fill: FillFormat, location: XlsxErrorContext = {}): string {
+export function buildFillElement(fill: FillFormat, location: XlsxErrorContext = {}): string {
   if (fill.type === 'gradient') {
     const degree = fill.degree === undefined ? '' : ` degree="${fill.degree}"`
     const stops = fill.stops
@@ -765,11 +765,11 @@ export interface BorderFormat {
 
 // The style read from a file is any ST_BorderStyle string, so the sides carried
 // through a merge are looser than the BorderSide a caller passes in.
-interface Side {
+export interface Side {
   readonly style: string
   readonly color?: Color
 }
-interface Sides {
+export interface Sides {
   readonly left?: Side
   readonly right?: Side
   readonly top?: Side
@@ -790,9 +790,9 @@ type MutableSides = {
   diagonalDown?: boolean
 }
 
-const SIDE_NAMES = ['left', 'right', 'top', 'bottom'] as const
+export const SIDE_NAMES = ['left', 'right', 'top', 'bottom'] as const
 
-const RESERVED_BORDER = '<border><left/><right/><top/><bottom/><diagonal/></border>'
+export const RESERVED_BORDER = '<border><left/><right/><top/><bottom/><diagonal/></border>'
 
 function withReservedBorder(stylesXml: string): string {
   return withReservedTable(
@@ -810,7 +810,7 @@ type SideName = 'left' | 'right' | 'top' | 'bottom' | 'diagonal'
 const isSideName = (name: string): name is SideName =>
   name === 'left' || name === 'right' || name === 'top' || name === 'bottom' || name === 'diagonal'
 
-function parseBorder(element: string): Sides {
+export function parseBorder(element: string): Sides {
   const sides: MutableSides = {}
   let inSide: SideName | undefined
   for (const event of readXml(element)) {
@@ -855,7 +855,7 @@ const buildSide = (
   return `<${name} style="${side.style}"><color${colorAttributes(side.color, location)}/></${name}>`
 }
 
-const buildBorderElement = (sides: Sides, location: XlsxErrorContext = {}): string => {
+export const buildBorderElement = (sides: Sides, location: XlsxErrorContext = {}): string => {
   const flags =
     (sides.diagonalUp ? ' diagonalUp="1"' : '') + (sides.diagonalDown ? ' diagonalDown="1"' : '')
   return `<border${flags}>${buildSide('left', sides.left, location)}${buildSide('right', sides.right, location)}${buildSide('top', sides.top, location)}${buildSide('bottom', sides.bottom, location)}${buildSide('diagonal', sides.diagonal, location)}</border>`
@@ -915,7 +915,7 @@ export interface Alignment {
 // Unlike a font or border, alignment is not shared through a table: it lives as a
 // child of the xf itself, read and written looser than the caller's Alignment
 // because a file may hold a horizontal or vertical value outside our union.
-interface AlignmentAttributes {
+export interface AlignmentAttributes {
   readonly horizontal?: string
   readonly vertical?: string
   readonly wrapText?: boolean
@@ -929,7 +929,7 @@ const numberAttribute = (value: string | undefined): number | undefined => {
   return Number.isNaN(parsed) ? undefined : parsed
 }
 
-function parseAlignment(xf: string): AlignmentAttributes {
+export function parseAlignment(xf: string): AlignmentAttributes {
   const out: {
     horizontal?: string
     vertical?: string
@@ -953,7 +953,7 @@ function parseAlignment(xf: string): AlignmentAttributes {
   return out
 }
 
-function buildAlignmentElement(alignment: AlignmentAttributes, prefix: string): string {
+export function buildAlignmentElement(alignment: AlignmentAttributes, prefix: string): string {
   let attributes = ''
   if (alignment.horizontal !== undefined) attributes += ` horizontal="${alignment.horizontal}"`
   if (alignment.vertical !== undefined) attributes += ` vertical="${alignment.vertical}"`
@@ -972,7 +972,7 @@ const ALIGNMENT_CHILD =
 /** Puts `alignment` in the xf as its first child, ahead of any protection or
  *  extLst, and turns applyAlignment on. A self-closing xf is reopened, and the
  *  close tag carries the file's prefix so a prefixed table stays well formed. */
-function withAlignmentChild(xf: string, alignment: string, prefix: string): string {
+export function withAlignmentChild(xf: string, alignment: string, prefix: string): string {
   const close = xf.indexOf('>')
   const selfClosing = xf.charAt(close - 1) === '/'
   const openTag = withApplyFlag(
@@ -983,7 +983,7 @@ function withAlignmentChild(xf: string, alignment: string, prefix: string): stri
   return `${openTag}${alignment}${body.replace(ALIGNMENT_CHILD, '')}</${prefix}xf>`
 }
 
-function validateAlignment(alignment: Alignment, location: XlsxErrorContext = {}): void {
+export function validateAlignment(alignment: Alignment, location: XlsxErrorContext = {}): void {
   const { textRotation, indent } = alignment
   if (
     textRotation !== undefined &&
@@ -1042,12 +1042,12 @@ export interface CellProtection {
   readonly hidden?: boolean
 }
 
-interface ProtectionAttributes {
+export interface ProtectionAttributes {
   readonly locked?: boolean
   readonly hidden?: boolean
 }
 
-function parseProtection(xf: string): ProtectionAttributes {
+export function parseProtection(xf: string): ProtectionAttributes {
   const out: { locked?: boolean; hidden?: boolean } = {}
   for (const event of readXml(xf)) {
     if (event.kind !== 'open' || event.localName !== 'protection') continue
@@ -1059,7 +1059,7 @@ function parseProtection(xf: string): ProtectionAttributes {
   return out
 }
 
-function buildProtectionElement(protection: ProtectionAttributes, prefix: string): string {
+export function buildProtectionElement(protection: ProtectionAttributes, prefix: string): string {
   let attributes = ''
   if (protection.locked !== undefined) attributes += ` locked="${protection.locked ? '1' : '0'}"`
   if (protection.hidden !== undefined) attributes += ` hidden="${protection.hidden ? '1' : '0'}"`
@@ -1070,7 +1070,7 @@ const PROTECTION_CHILD = /<(?:[A-Za-z0-9]+:)?protection\b[^>]*\/>/
 
 /** Puts `protection` in the xf after any alignment and before any extLst, the
  *  order CT_Xf wants, dropping a protection it had and turning applyProtection on. */
-function withProtectionChild(xf: string, protection: string, prefix: string): string {
+export function withProtectionChild(xf: string, protection: string, prefix: string): string {
   const close = xf.indexOf('>')
   const selfClosing = xf.charAt(close - 1) === '/'
   const openTag = withApplyFlag(
@@ -1107,7 +1107,7 @@ export function ensureProtectionStyle(
   return { xml, index: id }
 }
 
-function tablePrefix(xml: string): string {
+export function tablePrefix(xml: string): string {
   for (const event of readXml(xml)) {
     if (event.kind !== 'open') continue
     if (event.localName !== 'numFmts' && event.localName !== 'styleSheet') continue
@@ -1118,7 +1118,7 @@ function tablePrefix(xml: string): string {
 }
 
 /** Every numFmtId the file mentions, including ones only used by dxfs. */
-function usedFormatIds(xml: string): Set<number> {
+export function usedFormatIds(xml: string): Set<number> {
   const used = new Set<number>()
   for (const event of readXml(xml)) {
     if (event.kind !== 'open') continue
@@ -1439,6 +1439,29 @@ function protectionFrom(xf: string): CellProtection | undefined {
   return Object.keys(parsed).length === 0 ? undefined : parsed
 }
 
+/** One cell format's font, fill, border, alignment and protection, resolved
+ * against the table element arrays. Shared by the whole-file read and the styles
+ * session, so a read after an in-memory write resolves the same way. */
+export function formattingOfXf(
+  xf: string,
+  fonts: readonly string[],
+  fills: readonly string[],
+  borders: readonly string[],
+): CellFormatting {
+  const font = fontFrom(xf, fonts)
+  const fill = fillFrom(xf, fills)
+  const border = borderFrom(xf, borders)
+  const alignment = alignmentFrom(xf)
+  const protection = protectionFrom(xf)
+  return {
+    ...(font === undefined ? {} : { font }),
+    ...(fill === undefined ? {} : { fill }),
+    ...(border === undefined ? {} : { border }),
+    ...(alignment === undefined ? {} : { alignment }),
+    ...(protection === undefined ? {} : { protection }),
+  }
+}
+
 /** Resolves every cell format's font, fill, border, alignment and protection in
  * one pass, so a read looks each up by the cell's `s` index. */
 export function readFormatting(stylesXml: string): readonly CellFormatting[] {
@@ -1446,20 +1469,7 @@ export function readFormatting(stylesXml: string): readonly CellFormatting[] {
   const fonts = readTable(stylesXml, 'fonts', 'font')?.elements ?? []
   const fills = readTable(stylesXml, 'fills', 'fill')?.elements ?? []
   const borders = readTable(stylesXml, 'borders', 'border')?.elements ?? []
-  return xfs.map((xf) => {
-    const font = fontFrom(xf, fonts)
-    const fill = fillFrom(xf, fills)
-    const border = borderFrom(xf, borders)
-    const alignment = alignmentFrom(xf)
-    const protection = protectionFrom(xf)
-    return {
-      ...(font === undefined ? {} : { font }),
-      ...(fill === undefined ? {} : { fill }),
-      ...(border === undefined ? {} : { border }),
-      ...(alignment === undefined ? {} : { alignment }),
-      ...(protection === undefined ? {} : { protection }),
-    }
-  })
+  return xfs.map((xf) => formattingOfXf(xf, fonts, fills, borders))
 }
 
 const WRITABLE_UNDERLINES: ReadonlySet<UnderlineStyle> = new Set([

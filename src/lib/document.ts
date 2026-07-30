@@ -106,27 +106,19 @@ import {
   type CellFormatting,
   type CellProtection,
   type Color,
-  type DateStyle,
   type FillFormat,
   type FontFormat,
   type ReadFill,
   checkStyleOptions,
-  ensureAlignmentStyle,
-  ensureBorderStyle,
-  ensureDateStyle,
-  ensureFillStyle,
-  ensureFontStyle,
   ensureDxf,
-  ensureNumberFormat,
-  ensureProtectionStyle,
   normalizeColor,
   readDxfFill,
-  readFormatting,
 } from './styles-writer.js'
+import { type StylesSession, createStylesSession } from './styles-session.js'
 import { type ShiftSpec, shiftDefinedNames } from './shift.js'
 import { paletteByIndex, readThemeColors, resolveColor } from './theme.js'
 import { shiftForeignFormulas, shiftSheet } from './shift-sheet.js'
-import { type Styles, isDateFormat, numberFormatOf, readStyles } from './styles.js'
+import { type Styles, isDateFormat, numberFormatOf } from './styles.js'
 import {
   deletionDamage,
   highestColumn,
@@ -1068,7 +1060,6 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   const { container, date1904 } = part
 
   const stylesXml = partText(container, 'xl/styles.xml')
-  const styles = stylesXml === undefined ? EMPTY_STYLES : readStyles(stylesXml)
 
   const stringsXml = partText(container, 'xl/sharedStrings.xml')
   const sharedStrings = stringsXml === undefined ? [] : readSharedStrings(stringsXml)
@@ -1145,30 +1136,22 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   // was called on; toBytes applies them after the per-sheet patch so an edit made
   // this session lands in the old grid and then moves with the shift.
   const lineOps: { readonly path: string; readonly spec: ShiftSpec }[] = []
-  let workingStyles = stylesXml
-  let parsedStyles = styles
-  let parsedFrom = stylesXml
+  // Style edits amend an in-memory model instead of re-parsing and re-splicing a
+  // growing string on every set(); the string is produced once at toBytes. A file
+  // with no style table has no session, and any format() on it is refused.
+  const session: StylesSession | undefined =
+    stylesXml === undefined ? undefined : createStylesSession(stylesXml)
 
-  const stylesNow = (): Styles => {
-    if (workingStyles !== undefined && workingStyles !== parsedFrom) {
-      parsedStyles = readStyles(workingStyles)
-      parsedFrom = workingStyles
-    }
-    return parsedStyles
-  }
+  const stylesNow = (): Styles => session?.styles() ?? EMPTY_STYLES
 
-  // Parsed lazily, and only for the font/fill/border a read exposes, so a
-  // workbook that is never read for formatting never pays to resolve it.
-  let parsedFormatting: readonly CellFormatting[] | undefined
-  let formattingFrom: string | undefined
-  const formattingFor = (styleIndex: number | undefined): CellFormatting => {
-    if (styleIndex === undefined || workingStyles === undefined) return {}
-    if (parsedFormatting === undefined || workingStyles !== formattingFrom) {
-      parsedFormatting = readFormatting(workingStyles)
-      formattingFrom = workingStyles
-    }
-    return parsedFormatting[styleIndex] ?? {}
-  }
+  const formattingFor = (styleIndex: number | undefined): CellFormatting =>
+    styleIndex === undefined || session === undefined ? {} : session.formattingOf(styleIndex)
+
+  // Conditional-format highlights live in dxfs, a table the session leaves alone.
+  // The path is low volume, so it keeps threading a string; the ordered colours
+  // let toBytes fold the same dxfs onto the serialized styles.
+  let dxfStyles = stylesXml
+  const dxfColors: string[] = []
 
   // Sheets added since the read, path -> its empty worksheet bytes. They flow
   // through the same edit machinery as a sheet the file already had; toBytes()
@@ -1459,9 +1442,9 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       value: CellInput | undefined,
       options: SetOptions | undefined,
       canonical: string,
-    ): DateStyle | undefined => {
+    ): number | undefined => {
       const location = { ...at, reference: canonical }
-      if (workingStyles === undefined) {
+      if (session === undefined) {
         if (Object.values(options ?? {}).some((asked) => asked !== undefined)) {
           throw new XlsxError(
             'missing-part',
@@ -1471,43 +1454,42 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         }
         return undefined
       }
-      let xml = workingStyles
-      let base = current
-      let applied: DateStyle | undefined
-      const step = (next: DateStyle) => {
-        xml = next.xml
-        base = next.index
-        applied = next
-      }
-      // An asked-for format wins; a Date only gets one because without one it
-      // displays as the serial number it is stored as.
-      if (options?.numberFormat !== undefined)
-        step(ensureNumberFormat(xml, base, options.numberFormat, location))
-      else if (value instanceof Date) step(ensureDateStyle(xml, base))
-      if (options?.font !== undefined) step(ensureFontStyle(xml, base, options.font, location))
-      if (options?.fill !== undefined) step(ensureFillStyle(xml, base, options.fill, location))
-      if (options?.border !== undefined)
-        step(ensureBorderStyle(xml, base, options.border, location))
-      if (options?.alignment !== undefined)
-        step(ensureAlignmentStyle(xml, base, options.alignment, location))
-      if (options?.protection !== undefined)
-        step(ensureProtectionStyle(xml, base, options.protection))
-      return applied
+      // One transaction, so a step that throws part-way rolls back everything the
+      // earlier steps added — the file stays as if nothing was asked.
+      return session.transaction(() => {
+        let base = current
+        let applied = false
+        const step = (index: number) => {
+          base = index
+          applied = true
+        }
+        // An asked-for format wins; a Date only gets one because without one it
+        // displays as the serial number it is stored as.
+        if (options?.numberFormat !== undefined)
+          step(session.numberFormat(base, options.numberFormat, location))
+        else if (value instanceof Date) step(session.dateStyle(base))
+        if (options?.font !== undefined) step(session.font(base, options.font, location))
+        if (options?.fill !== undefined) step(session.fill(base, options.fill, location))
+        if (options?.border !== undefined) step(session.border(base, options.border, location))
+        if (options?.alignment !== undefined)
+          step(session.alignment(base, options.alignment, location))
+        if (options?.protection !== undefined) step(session.protection(base, options.protection))
+        return applied ? base : undefined
+      })
     }
 
     const commitStyle = (
       canonical: string,
       current: number | undefined,
-      applied: DateStyle | undefined,
+      applied: number | undefined,
     ): number | undefined => {
       if (applied === undefined) return current
-      workingStyles = applied.xml
-      if (applied.index !== current) {
+      if (applied !== current) {
         const overrides = styleOverrides.get(reference.path) ?? new Map<string, number>()
-        overrides.set(canonical, applied.index)
+        overrides.set(canonical, applied)
         styleOverrides.set(reference.path, overrides)
       }
-      return applied.index
+      return applied
     }
 
     const absent = (canonical: string, verb: string): XlsxError =>
@@ -1676,7 +1658,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           ? []
           : conditionalFormatsCache
         for (const spec of [...fromFile, ...pending]) {
-          const rule = conditionalFormatFromSpec(spec, workingStyles)
+          const rule = conditionalFormatFromSpec(spec, dxfStyles)
           if (rule !== undefined) applied.push({ range: spec.sqref, rule })
         }
         return applied
@@ -2017,7 +1999,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           specs.push({ kind: 'dataBar', sqref, color: normalizeColor(rule.dataBar.color, at) })
         } else {
           // The rest fill matching cells with a highlight held in a dxf.
-          if (workingStyles === undefined) {
+          if (dxfStyles === undefined) {
             throw new XlsxError(
               'missing-part',
               `Cannot fill ${sqref}: the package has no style table to hold the format`,
@@ -2036,8 +2018,10 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
                     : 'top' in rule
                       ? rule.top.fill
                       : rule.bottom.fill
-          const dxf = ensureDxf(workingStyles, normalizeColor(highlight, at))
-          workingStyles = dxf.xml
+          const color = normalizeColor(highlight, at)
+          const dxf = ensureDxf(dxfStyles, color)
+          dxfStyles = dxf.xml
+          dxfColors.push(color)
           const dxfId = dxf.index
           if ('top' in rule || 'bottom' in rule) {
             const rank = 'top' in rule ? rule.top : rule.bottom
@@ -2609,9 +2593,14 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     const hadCalcChain = container.parts.has(CALCULATION_CHAIN)
     if (hadCalcChain) changes.set(CALCULATION_CHAIN, null)
 
-    // set() already resolved every style; only the serialising is left.
-    if (workingStyles !== undefined && workingStyles !== stylesXml) {
-      changes.set('xl/styles.xml', encoder.encode(workingStyles))
+    // set() already assigned every style index in memory; here the tables are
+    // spliced into the original once, then the low-volume dxf highlights are
+    // folded on — dxfs sit in their own table, so replaying them onto the
+    // serialized styles reproduces the same bytes the threaded string held.
+    if (session !== undefined && (session.changed() || dxfColors.length > 0)) {
+      let styles = session.serialize()
+      for (const color of dxfColors) styles = ensureDxf(styles, color).xml
+      if (styles !== stylesXml) changes.set('xl/styles.xml', encoder.encode(styles))
     }
 
     // Text goes into the shared string table when the file has one, so the same

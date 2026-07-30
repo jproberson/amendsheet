@@ -11,3 +11,6 @@ CLAUDE.md
 PLAN.md
 BENCH.md
 REVIEW.md
+
+# Agent worktrees (isolated subagent checkouts)
+.claude/worktrees/
