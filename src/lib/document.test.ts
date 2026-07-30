@@ -4113,7 +4113,7 @@ test('insertRows shifts a chart series reference and its anchor', () => {
   assert.match(drawing, /<xdr:from>.*<xdr:row>3<\/xdr:row>/) // the chart box moved too
 })
 
-test('insertRows refuses a drawing that holds a non-chart graphic frame', () => {
+test('insertRows shifts a diagram (SmartArt) by its anchor, since it holds no cell refs', () => {
   const workbook = readWorkbook(
     build('<row r="1"><c r="A1"><v>1</v></c></row>', {
       after: '<drawing r:id="rId1"/>',
@@ -4127,13 +4127,11 @@ test('insertRows refuses a drawing that holds a non-chart graphic frame', () => 
     }),
   )
 
-  assert.throws(
-    () => workbook.sheets[0]?.insertRows(1),
-    (error: unknown) =>
-      error instanceof XlsxError &&
-      error.code === 'unsupported-edit' &&
-      error.message.includes('drawing'),
-  )
+  workbook.sheets[0]?.insertRows(1) // above the diagram, moves its box down
+
+  const drawing = decode(readContainer(workbook.toBytes()).parts.get('xl/drawings/drawing1.xml'))
+  assert.match(drawing, /<xdr:from>.*<xdr:row>3<\/xdr:row>/) // from row 2 -> 3
+  assert.match(drawing, /<xdr:to>.*<xdr:row>11<\/xdr:row>/) // to row 10 -> 11
 })
 
 test('insertRows refuses a sheet that carries a drawing', () => {

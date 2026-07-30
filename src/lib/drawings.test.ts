@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { drawingHasUnshiftableFrame, shiftDrawing } from './drawings.js'
+import { shiftDrawing } from './drawings.js'
 import type { ShiftSpec } from './shift.js'
 
 const spec = (axis: 'row' | 'column', at: number, delta: number): ShiftSpec => ({
@@ -20,22 +20,16 @@ const twoCell = (from: [number, number], to: [number, number]) =>
   `<xdr:pic/><xdr:clientData/></xdr:twoCellAnchor>`
 const wsDr = (body: string) => `<xdr:wsDr xmlns:xdr="${XDR}">${body}</xdr:wsDr>`
 
-test('drawingHasUnshiftableFrame is true for a non-chart frame, false for a chart or none', () => {
-  const frame = (uri: string) =>
-    `<xdr:twoCellAnchor><xdr:graphicFrame><a:graphic><a:graphicData uri="${uri}"/></a:graphic></xdr:graphicFrame></xdr:twoCellAnchor>`
-  assert.equal(drawingHasUnshiftableFrame(wsDr(twoCell([0, 0], [3, 3]))), false) // just a picture
-  assert.equal(
-    drawingHasUnshiftableFrame(
-      wsDr(frame('http://schemas.openxmlformats.org/drawingml/2006/chart')),
-    ),
-    false, // a chart is shiftable now
-  )
-  assert.equal(
-    drawingHasUnshiftableFrame(
-      wsDr(frame('http://schemas.openxmlformats.org/drawingml/2006/diagram')),
-    ),
-    true, // a diagram is not
-  )
+test('shiftDrawing moves a graphic-frame anchor (chart, diagram, OLE alike)', () => {
+  const frame =
+    '<xdr:twoCellAnchor><xdr:from><xdr:col>0</xdr:col><xdr:colOff>0</xdr:colOff>' +
+    '<xdr:row>2</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>' +
+    '<xdr:to><xdr:col>5</xdr:col><xdr:colOff>0</xdr:colOff>' +
+    '<xdr:row>8</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>' +
+    '<xdr:graphicFrame/></xdr:twoCellAnchor>'
+  const out = shiftDrawing(wsDr(frame), spec('row', 1, 1))
+  assert.match(out, /<xdr:from>.*<xdr:row>3<\/xdr:row>/)
+  assert.match(out, /<xdr:to>.*<xdr:row>9<\/xdr:row>/)
 })
 
 test('shiftDrawing moves a column anchor and leaves rows alone', () => {

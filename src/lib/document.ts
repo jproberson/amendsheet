@@ -10,7 +10,7 @@ import {
   withSheetsAdded,
 } from './add-sheet.js'
 import { blankWorkbookBytes } from './blank.js'
-import { drawingHasUnshiftableFrame, shiftDrawing } from './drawings.js'
+import { shiftDrawing } from './drawings.js'
 import { shiftPivotCacheSource, shiftPivotLocation } from './pivots.js'
 import {
   appendCommentsPart,
@@ -1537,16 +1537,16 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       )
     }
 
-    // The noun a drawing on the sheet refuses with, or undefined when each of its
-    // objects can move: a picture or shape by its anchor, a chart by its anchor and
-    // its series formulas. A diagram or other graphic frame is refused because its
-    // references are not shifted, and a drawing whose part cannot be read is refused
-    // because it cannot be shown to hold only shiftable objects.
+    // A drawing's objects move by their cell anchor — a picture, shape, diagram or
+    // OLE embed by position alone, a chart by its anchor and its series formulas —
+    // since a chart is the only drawing object that references worksheet cells. So
+    // the one drawing an edit refuses is one whose part cannot be read, and whose
+    // anchors therefore cannot be moved to match the cells under them.
     const drawingRefusal = (relationshipsXml: string): string | undefined => {
       for (const relationship of readRelationships(relationshipsXml, reference.path).values()) {
         if (relationship.external || !relationship.type.endsWith('relationships/drawing')) continue
-        const drawing = partText(container, resolveTarget(reference.path, relationship.target))
-        if (drawing === undefined || drawingHasUnshiftableFrame(drawing)) return 'a drawing'
+        if (partText(container, resolveTarget(reference.path, relationship.target)) === undefined)
+          return 'a drawing'
       }
       return undefined
     }

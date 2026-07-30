@@ -1,26 +1,6 @@
 import type { ShiftSpec } from './shift.js'
 import { readXml } from './xml.js'
 
-const CHART_URI = 'http://schemas.openxmlformats.org/drawingml/2006/chart'
-
-/**
- * Whether a drawing holds a graphic frame that is not a chart — a diagram or
- * other embedded graphic whose cell references this library does not shift, so an
- * edit under it is refused. A chart frame is fine: its anchor moves with the
- * drawing and its series formulas are shifted in the chart part it points to.
- */
-export function drawingHasUnshiftableFrame(drawingXml: string): boolean {
-  let inFrame = false
-  for (const event of readXml(drawingXml)) {
-    if (event.kind === 'open' && event.localName === 'graphicFrame') inFrame = true
-    else if (event.kind === 'close' && event.localName === 'graphicFrame') inFrame = false
-    else if (event.kind === 'open' && event.localName === 'graphicData' && inFrame) {
-      if (event.attributes.get('uri') !== CHART_URI) return true
-    }
-  }
-  return false
-}
-
 // A corner at or past the edit moves; a deletion clamps one inside the removed
 // band to the surviving edge — the top up to the line after it, the bottom down
 // to the line before. Values are the one-based lines the anchor corners sit on.
