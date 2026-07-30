@@ -477,6 +477,35 @@ export interface SheetIndex {
   /** Cells that other cells depend on for their formula. */
   readonly sharedFormulas: ReadonlyMap<string, SpillingFormula>
   readonly merges: readonly MergeRange[]
+  /** A row-bucketed lookup so a merge test is not an O(all merges) scan per edit. */
+  readonly mergeLookup: MergeLookup
+}
+
+// A merge covering more rows than this — a tall or whole-column one — is kept in a
+// linear list rather than bucketed per row, so bucketing never explodes on a merge
+// that spans the whole sheet. Such merges are few, so the linear scan stays cheap.
+const TALL_MERGE_ROWS = 64
+
+interface MergeLookup {
+  readonly byRow: ReadonlyMap<number, readonly MergeRange[]>
+  readonly tall: readonly MergeRange[]
+}
+
+function buildMergeLookup(merges: readonly MergeRange[]): MergeLookup {
+  const byRow = new Map<number, MergeRange[]>()
+  const tall: MergeRange[] = []
+  for (const merge of merges) {
+    if (merge.maxRow - merge.minRow >= TALL_MERGE_ROWS) {
+      tall.push(merge)
+      continue
+    }
+    for (let row = merge.minRow; row <= merge.maxRow; row++) {
+      const bucket = byRow.get(row)
+      if (bucket === undefined) byRow.set(row, [merge])
+      else bucket.push(merge)
+    }
+  }
+  return { byRow, tall }
 }
 
 /** One pass, because set() needs all of these before it accepts an edit. */
@@ -499,20 +528,27 @@ export function indexSheet(bytes: Uint8Array): SheetIndex {
     }
   }
 
-  return { styles, sharedFormulas, merges: shape.merges }
+  return {
+    styles,
+    sharedFormulas,
+    merges: shape.merges,
+    mergeLookup: buildMergeLookup(shape.merges),
+  }
 }
 
 /** The anchor of a merge `reference` is buried inside, or undefined if it is free. */
 export function mergeAnchorFor(index: SheetIndex, reference: string): string | undefined {
   const { row, column } = parseReference(reference)
-  for (const merge of index.merges) {
-    const inside =
-      row >= merge.minRow &&
-      row <= merge.maxRow &&
-      column >= merge.minColumn &&
-      column <= merge.maxColumn
-    if (inside && merge.anchor !== reference) return merge.anchor
-  }
+  const buried = (merge: MergeRange): boolean =>
+    row >= merge.minRow &&
+    row <= merge.maxRow &&
+    column >= merge.minColumn &&
+    column <= merge.maxColumn &&
+    merge.anchor !== reference
+  // A cell lies in at most one merge, so the first hit in either the row's bucket or
+  // the tall list is the only one; the two together cover every merge on the sheet.
+  for (const merge of index.mergeLookup.byRow.get(row) ?? []) if (buried(merge)) return merge.anchor
+  for (const merge of index.mergeLookup.tall) if (buried(merge)) return merge.anchor
   return undefined
 }
 

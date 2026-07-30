@@ -3857,6 +3857,25 @@ test('writing into a merged cell that is not the anchor is refused', () => {
   assert.equal(sheet?.cell('Z9')?.value.kind, 'number')
 })
 
+test('a value in a whole-column merge is refused by its anchor, kept in the anchor', () => {
+  // A1:A1048576 spans far more rows than the bucket threshold, so it exercises the
+  // tall-merge list of the row-bucketed lookup rather than the per-row buckets.
+  const merged =
+    '<worksheet><sheetData><row r="1"><c r="A1"><v>1</v></c></row></sheetData>' +
+    '<mergeCells count="1"><mergeCell ref="A1:A1048576"/></mergeCells></worksheet>'
+  const sheet = readWorkbook(build('', { extra: { 'xl/worksheets/sheet1.xml': merged } })).sheets[0]
+
+  assert.throws(
+    () => sheet?.set('A500', 5),
+    (error: unknown) =>
+      error instanceof XlsxError && error.code === 'unwritable-value' && /A1/.test(error.message),
+  )
+  sheet?.set('A1', 9) // the anchor stays writable
+  assert.equal(sheet?.cell('A1')?.value.kind, 'number')
+  sheet?.set('B500', 7) // a cell outside the merged column is free
+  assert.equal(sheet?.cell('B500')?.value.kind, 'number')
+})
+
 const TABLE_ROWS =
   '<row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>2</v></c></row>' +
   '<row r="2"><c r="A2"><v>3</v></c><c r="B2"><v>4</v></c></row>'
