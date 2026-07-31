@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { readPageMargins, readPageSetup, withPageMargins, withPageSetup } from './page.js'
+import {
+  readHeaderFooter,
+  readPageMargins,
+  readPageSetup,
+  withHeaderFooter,
+  withPageMargins,
+  withPageSetup,
+} from './page.js'
 
 const encode = (text: string) => new TextEncoder().encode(text)
 
@@ -128,4 +135,92 @@ test('readPageSetup reads a portrait orientation', () => {
     ),
     { orientation: 'portrait', scale: 100 },
   )
+})
+
+test('withHeaderFooter inserts a fresh element after pageSetup and before its successors', () => {
+  const out = withHeaderFooter(
+    '<worksheet><sheetData/><pageMargins/><pageSetup/><tableParts count="1"/></worksheet>',
+    { header: { center: 'Report' }, footer: { right: '&P of &N' } },
+  )
+  assert.match(
+    out,
+    /<pageSetup\/><headerFooter><oddHeader>&amp;CReport<\/oddHeader><oddFooter>&amp;R&amp;P of &amp;N<\/oddFooter><\/headerFooter><tableParts/,
+  )
+})
+
+test('withHeaderFooter builds only the sections given, in left-center-right order', () => {
+  const out = withHeaderFooter('<worksheet><sheetData/></worksheet>', {
+    header: { right: 'R', left: 'L' },
+  })
+  assert.match(out, /<oddHeader>&amp;LL&amp;RR<\/oddHeader>/)
+})
+
+test('withHeaderFooter replaces the oddHeader within an existing element, keeping siblings and attributes', () => {
+  const out = withHeaderFooter(
+    '<worksheet><sheetData/><headerFooter differentFirst="1"><oddHeader>&amp;COld</oddHeader><oddFooter>&amp;CFoot</oddFooter><firstHeader>&amp;CFirst</firstHeader></headerFooter></worksheet>',
+    { header: { center: 'New' } },
+  )
+  assert.match(
+    out,
+    /<headerFooter differentFirst="1"><oddHeader>&amp;CNew<\/oddHeader><oddFooter>&amp;CFoot<\/oddFooter><firstHeader>&amp;CFirst<\/firstHeader><\/headerFooter>/,
+  )
+})
+
+test('withHeaderFooter inserts an oddFooter after the oddHeader to keep child order', () => {
+  const out = withHeaderFooter(
+    '<worksheet><sheetData/><headerFooter><oddHeader>&amp;CH</oddHeader></headerFooter></worksheet>',
+    { footer: { center: 'F' } },
+  )
+  assert.match(
+    out,
+    /<headerFooter><oddHeader>&amp;CH<\/oddHeader><oddFooter>&amp;CF<\/oddFooter><\/headerFooter>/,
+  )
+})
+
+test('withHeaderFooter xml-escapes the section text', () => {
+  const out = withHeaderFooter('<worksheet><sheetData/></worksheet>', {
+    header: { center: 'a<b&c' },
+  })
+  assert.match(out, /<oddHeader>&amp;Ca&lt;b&amp;c<\/oddHeader>/)
+})
+
+test('readHeaderFooter parses the odd header and footer into sections', () => {
+  const xml =
+    '<worksheet><sheetData/><headerFooter><oddHeader>&amp;LLeft&amp;CMid&amp;RRight</oddHeader><oddFooter>&amp;CPage &amp;P</oddFooter></headerFooter></worksheet>'
+  assert.deepEqual(readHeaderFooter(encode(xml)), {
+    header: { left: 'Left', center: 'Mid', right: 'Right' },
+    footer: { center: 'Page &P' },
+  })
+})
+
+test('readHeaderFooter puts uncoded leading text in the center section', () => {
+  assert.deepEqual(
+    readHeaderFooter(
+      encode(
+        '<worksheet><sheetData/><headerFooter><oddHeader>Plain</oddHeader></headerFooter></worksheet>',
+      ),
+    ),
+    { header: { center: 'Plain' } },
+  )
+})
+
+test('readHeaderFooter treats a doubled ampersand as a literal, not a section switch', () => {
+  const xml =
+    '<worksheet><sheetData/><headerFooter><oddHeader>&amp;CQ&amp;&amp;LA</oddHeader></headerFooter></worksheet>'
+  assert.deepEqual(readHeaderFooter(encode(xml)), { header: { center: 'Q&&LA' } })
+})
+
+test('readHeaderFooter returns nothing when there is no headerFooter', () => {
+  assert.deepEqual(readHeaderFooter(encode('<worksheet><sheetData/></worksheet>')), {})
+})
+
+test('a header and footer written by withHeaderFooter read back through readHeaderFooter', () => {
+  const out = withHeaderFooter('<worksheet><sheetData/></worksheet>', {
+    header: { center: 'Q&&A Report' },
+    footer: { left: 'Confidential', right: '&P of &N' },
+  })
+  assert.deepEqual(readHeaderFooter(encode(out)), {
+    header: { center: 'Q&&A Report' },
+    footer: { left: 'Confidential', right: '&P of &N' },
+  })
 })

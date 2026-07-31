@@ -296,6 +296,24 @@ fills the other five from what the sheet had (or Excel's defaults), so a partial
 edit still writes a complete element. Note the read/write split: `pageSetup` reads,
 `setPageSetup` writes.
 
+## Header and footer for printing
+
+```ts
+const sheet = readWorkbook(bytes).sheets[0]
+
+sheet?.setHeaderFooter({
+  header: { center: 'Quarterly Report' },
+  footer: { left: 'Confidential', right: 'Page &P of &N' },
+})
+sheet?.headerFooter // { header?: { left?, center?, right? }, footer?: same }
+```
+
+Each section is Excel field-code text: `&P` the page number, `&N` the page count,
+`&D` the date, `&A` the sheet name, `&&` a literal ampersand, `&"font,style"` a font.
+The `header` or `footer` you pass is replaced whole; omit one to leave it, and any
+even- or first-page variant the file carries is kept. Read/write split as above:
+`headerFooter` reads, `setHeaderFooter` writes.
+
 ## Sheets and the workbook
 
 ```ts

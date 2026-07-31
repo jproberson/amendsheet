@@ -107,6 +107,40 @@ test('setPageSetup refuses a bad scale and orientation, setPageMargins a negativ
   }
 })
 
+test('setHeaderFooter writes and reads back the odd header and footer, live and on write', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  const sheet = workbook.sheets[0]
+  sheet?.setHeaderFooter({
+    header: { center: 'Quarterly Report' },
+    footer: { left: 'Confidential', right: 'Page &P of &N' },
+  })
+  assert.deepEqual(sheet?.headerFooter, {
+    header: { center: 'Quarterly Report' },
+    footer: { left: 'Confidential', right: 'Page &P of &N' },
+  })
+
+  const back = readWorkbook(workbook.toBytes()).sheets[0]
+  assert.deepEqual(back?.headerFooter, {
+    header: { center: 'Quarterly Report' },
+    footer: { left: 'Confidential', right: 'Page &P of &N' },
+  })
+})
+
+test('setHeaderFooter replaces one section and keeps the other, plus a first-page variant', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      after:
+        '<headerFooter differentFirst="1"><oddHeader>&amp;COld</oddHeader><oddFooter>&amp;CKept</oddFooter><firstHeader>&amp;CFirst</firstHeader></headerFooter>',
+    }),
+  )
+  workbook.sheets[0]?.setHeaderFooter({ header: { center: 'New' } })
+  const xml = decode(readContainer(workbook.toBytes()).parts.get('xl/worksheets/sheet1.xml'))
+  assert.match(
+    xml,
+    /<headerFooter differentFirst="1"><oddHeader>&amp;CNew<\/oddHeader><oddFooter>&amp;CKept<\/oddFooter><firstHeader>&amp;CFirst<\/firstHeader><\/headerFooter>/,
+  )
+})
+
 test('addTable creates a table, writes its headers, wires it, and reads back', () => {
   const workbook = createWorkbook('Data')
   const sheet = workbook.sheet('Data')
@@ -3851,6 +3885,11 @@ test('refuses a write to a sheet whose part is not in the package', () => {
     (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
   )
   assert.deepEqual(workbook.sheets[0]?.pageSetup, {})
+  assert.throws(
+    () => workbook.sheets[0]?.setHeaderFooter({ header: { center: 'x' } }),
+    (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
+  )
+  assert.deepEqual(workbook.sheets[0]?.headerFooter, {})
   assert.throws(
     () => workbook.sheets[0]?.freeze('B2'),
     (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',

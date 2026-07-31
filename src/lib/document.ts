@@ -102,10 +102,14 @@ import {
   withTableParts,
 } from './tables.js'
 import {
+  type HeaderFooter,
+  type HeaderFooterSection,
   type PageMargins,
   type PageSetup,
+  readHeaderFooter,
   readPageMargins,
   readPageSetup,
+  withHeaderFooter,
   withPageMargins,
   withPageSetup,
 } from './page.js'
@@ -197,7 +201,7 @@ export interface Cell {
 
 export type { Hyperlink }
 export type { DocumentProperties }
-export type { PageSetup, PageMargins }
+export type { PageSetup, PageMargins, HeaderFooter, HeaderFooterSection }
 
 export interface Worksheet {
   readonly name: string
@@ -446,6 +450,16 @@ export interface Worksheet {
   /** Sets print margins, merging onto the ones the sheet has, so a partial edit
    * still leaves all six. Refuses a margin that is not a finite number at least zero. */
   setPageMargins(margins: PageMargins): void
+  /** The printed header and footer, each split into left, centre and right, the
+   * file's plus any set this session. */
+  readonly headerFooter: HeaderFooter
+  /**
+   * Sets the printed header and footer. Each section string is Excel field-code
+   * text — `&P` the page number, `&N` the page count, `&D` the date, `&&` a literal
+   * ampersand. The `header` or `footer` passed is replaced whole; omit one to leave
+   * it, and any even- or first-page variant the file carries is kept.
+   */
+  setHeaderFooter(headerFooter: HeaderFooter): void
   /**
    * A row's height in points, the file's or one set this session, or undefined
    * when the row carries no height of its own. The row is one-based.
@@ -1254,6 +1268,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   const sheetImages = new Map<string, PendingImage[]>()
   const sheetPageSetup = new Map<string, PageSetup>()
   const sheetPageMargins = new Map<string, PageMargins>()
+  const sheetHeaderFooter = new Map<string, HeaderFooter>()
   // The per-sheet maps patchSheet applies in one rewrite. Both the "anything
   // pending?" check and the set of sheets to rewrite read this list, so a new
   // kind of sheet edit is registered in one place rather than two enumerations
@@ -2432,6 +2447,23 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           ...margins,
         })
       },
+      get headerFooter(): HeaderFooter {
+        const file = sheetBytes === undefined ? {} : readHeaderFooter(sheetBytes)
+        return { ...file, ...sheetHeaderFooter.get(reference.path) }
+      },
+      setHeaderFooter(headerFooter: HeaderFooter): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so its header and footer cannot be set`,
+            { ...at },
+          )
+        }
+        sheetHeaderFooter.set(reference.path, {
+          ...sheetHeaderFooter.get(reference.path),
+          ...headerFooter,
+        })
+      },
       tabColor(color: string): void {
         if (sheetBytes === undefined) {
           throw new XlsxError(
@@ -2925,6 +2957,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       sheetImages.size === 0 &&
       sheetPageSetup.size === 0 &&
       sheetPageMargins.size === 0 &&
+      sheetHeaderFooter.size === 0 &&
       addedRefs.length === 0 &&
       renames.size === 0 &&
       removed.size === 0 &&
@@ -3319,9 +3352,14 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       changes.set(path, encoder.encode(sheetXml))
     }
 
-    // Page setup writes two self-closing elements. Margins go first so setup, which
-    // the schema orders after them, lands in the right place either way.
-    for (const path of new Set([...sheetPageMargins.keys(), ...sheetPageSetup.keys()])) {
+    // Page setup writes three elements the schema orders margins, setup, then
+    // headerFooter. Applying them in that order lands each in the right place
+    // whether the sheet already had it or it is inserted fresh here.
+    for (const path of new Set([
+      ...sheetPageMargins.keys(),
+      ...sheetPageSetup.keys(),
+      ...sheetHeaderFooter.keys(),
+    ])) {
       if (removed.has(path)) continue
       let sheetXml = sheetTextNow(path)
       if (sheetXml === undefined) continue
@@ -3329,6 +3367,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       if (margins !== undefined) sheetXml = withPageMargins(sheetXml, margins)
       const setup = sheetPageSetup.get(path)
       if (setup !== undefined) sheetXml = withPageSetup(sheetXml, setup)
+      const headerFooter = sheetHeaderFooter.get(path)
+      if (headerFooter !== undefined) sheetXml = withHeaderFooter(sheetXml, headerFooter)
       changes.set(path, encoder.encode(sheetXml))
     }
 

@@ -36,6 +36,8 @@ export type {
   DocumentProperties,
   FillRule,
   FormulaRule,
+  HeaderFooter,
+  HeaderFooterSection,
   Hyperlink,
   NumberConstraint,
   PageMargins,

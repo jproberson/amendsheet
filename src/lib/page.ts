@@ -17,6 +17,24 @@ export interface PageMargins {
   readonly footer?: number
 }
 
+/**
+ * One position of a header or footer. Each string is Excel's field-code text for
+ * that position: `&P` the page number, `&N` the page count, `&D` the date, `&A`
+ * the sheet name, `&&` a literal ampersand, `&"font,style"` a font. Plain text
+ * needs no code.
+ */
+export interface HeaderFooterSection {
+  readonly left?: string
+  readonly center?: string
+  readonly right?: string
+}
+
+/** A sheet's printed header and footer, each split into left, centre and right. */
+export interface HeaderFooter {
+  readonly header?: HeaderFooterSection
+  readonly footer?: HeaderFooterSection
+}
+
 const MARGIN_KEYS = ['left', 'right', 'top', 'bottom', 'header', 'footer'] as const
 // Excel's default margins, so a partial edit still writes a complete element.
 const DEFAULT_MARGINS: Required<PageMargins> = {
@@ -154,4 +172,162 @@ export function readPageMargins(bytes: Uint8Array): PageMargins {
     return margins
   }
   return {}
+}
+
+const escapeXml = (text: string): string =>
+  text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+// The headerFooter children that follow oddHeader and oddFooter, so an inserted
+// odd section lands before an even or first one the sheet already carries.
+const HEADER_FOOTER_SUCCESSORS = AFTER_PAGE_MARGINS.slice(
+  AFTER_PAGE_MARGINS.indexOf('headerFooter') + 1,
+)
+
+// A header or footer is one string, its three positions marked by &L, &C and &R.
+// A doubled && is a literal ampersand, so it is not a position marker.
+function buildSectionString(section: HeaderFooterSection): string {
+  let out = ''
+  if (section.left !== undefined) out += `&L${section.left}`
+  if (section.center !== undefined) out += `&C${section.center}`
+  if (section.right !== undefined) out += `&R${section.right}`
+  return out
+}
+
+function parseSectionString(text: string): HeaderFooterSection {
+  const result: { -readonly [K in keyof HeaderFooterSection]?: string } = {}
+  let current: 'left' | 'center' | 'right' = 'center'
+  let buffer = ''
+  const flush = () => {
+    if (buffer !== '') result[current] = buffer
+    buffer = ''
+  }
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index]
+    const next = text[index + 1]
+    if (char === '&' && next === '&') {
+      buffer += '&&'
+      index++
+    } else if (char === '&' && (next === 'L' || next === 'C' || next === 'R')) {
+      flush()
+      current = next === 'L' ? 'left' : next === 'C' ? 'center' : 'right'
+      index++
+    } else if (char === '&' && next !== undefined) {
+      buffer += char + next
+      index++
+    } else {
+      buffer += char
+    }
+  }
+  flush()
+  return result
+}
+
+function headerFooterElement(
+  sheetXml: string,
+): { start: number; end: number; open: string; inner: string; close: string } | undefined {
+  const selfClosing = /<(?:\w+:)?headerFooter\b[^>]*\/>/.exec(sheetXml)
+  if (selfClosing !== null) {
+    return {
+      start: selfClosing.index,
+      end: selfClosing.index + selfClosing[0].length,
+      open: selfClosing[0].replace(/\/>$/, '>'),
+      inner: '',
+      close: '</headerFooter>',
+    }
+  }
+  const paired = /<(?:\w+:)?headerFooter\b[^>]*>([\s\S]*?)<\/(?:\w+:)?headerFooter>/.exec(sheetXml)
+  if (paired === null) return undefined
+  const openEnd = paired[0].indexOf('>') + 1
+  const closeStart = paired[0].lastIndexOf('</')
+  return {
+    start: paired.index,
+    end: paired.index + paired[0].length,
+    open: paired[0].slice(0, openEnd),
+    inner: paired[0].slice(openEnd, closeStart),
+    close: paired[0].slice(closeStart),
+  }
+}
+
+// Replaces the named child in a headerFooter's inner content, or inserts it in
+// schema order: oddHeader first, oddFooter right after it.
+function setHeaderFooterChild(inner: string, name: string, content: string): string {
+  const element = `<${name}>${content}</${name}>`
+  const existing = new RegExp(
+    `<(?:\\w+:)?${name}\\b[^>]*>[\\s\\S]*?</(?:\\w+:)?${name}>|<(?:\\w+:)?${name}\\b[^>]*/>`,
+  ).exec(inner)
+  if (existing !== null) {
+    return (
+      inner.slice(0, existing.index) + element + inner.slice(existing.index + existing[0].length)
+    )
+  }
+  if (name === 'oddFooter') {
+    const header = /<(?:\w+:)?oddHeader\b[^>]*>[\s\S]*?<\/(?:\w+:)?oddHeader>/.exec(inner)
+    if (header !== null) {
+      const at = header.index + header[0].length
+      return inner.slice(0, at) + element + inner.slice(at)
+    }
+  }
+  return element + inner
+}
+
+/**
+ * Writes the odd header and footer a caller gives, replacing that section whole
+ * and leaving the other section, plus any even or first variants the sheet
+ * carries, untouched.
+ */
+export function withHeaderFooter(sheetXml: string, headerFooter: HeaderFooter): string {
+  const children: { name: string; content: string }[] = []
+  if (headerFooter.header !== undefined)
+    children.push({ name: 'oddHeader', content: buildSectionString(headerFooter.header) })
+  if (headerFooter.footer !== undefined)
+    children.push({ name: 'oddFooter', content: buildSectionString(headerFooter.footer) })
+
+  const element = headerFooterElement(sheetXml)
+  if (element === undefined) {
+    let inner = ''
+    for (const child of children)
+      inner += `<${child.name}>${escapeXml(child.content)}</${child.name}>`
+    return insertBeforeSuccessor(
+      sheetXml,
+      `<headerFooter>${inner}</headerFooter>`,
+      HEADER_FOOTER_SUCCESSORS,
+    )
+  }
+  let inner = element.inner
+  for (const child of children)
+    inner = setHeaderFooterChild(inner, child.name, escapeXml(child.content))
+  return (
+    sheetXml.slice(0, element.start) +
+    element.open +
+    inner +
+    element.close +
+    sheetXml.slice(element.end)
+  )
+}
+
+/** Reads the odd header and footer, each parsed into its left, centre and right. */
+export function readHeaderFooter(bytes: Uint8Array): HeaderFooter {
+  const result: { -readonly [K in keyof HeaderFooter]?: HeaderFooterSection } = {}
+  let capture: 'oddHeader' | 'oddFooter' | undefined
+  let text = ''
+  for (const event of readXmlBytes(bytes)) {
+    if (
+      event.kind === 'open' &&
+      (event.localName === 'oddHeader' || event.localName === 'oddFooter')
+    ) {
+      if (event.selfClosing) continue
+      capture = event.localName
+      text = ''
+    } else if (event.kind === 'text' && capture !== undefined) {
+      text += event.text
+    } else if (event.kind === 'close' && capture !== undefined && event.localName === capture) {
+      const section = parseSectionString(text)
+      if (Object.keys(section).length > 0) {
+        if (capture === 'oddHeader') result.header = section
+        else result.footer = section
+      }
+      capture = undefined
+    }
+  }
+  return result
 }
