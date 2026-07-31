@@ -314,6 +314,19 @@ The `header` or `footer` you pass is replaced whole; omit one to leave it, and a
 even- or first-page variant the file carries is kept. Read/write split as above:
 `headerFooter` reads, `setHeaderFooter` writes.
 
+## Page breaks for printing
+
+```ts
+const sheet = readWorkbook(bytes).sheets[0]
+
+sheet?.addRowPageBreak(10) // a new page begins above row 10
+sheet?.addColumnPageBreak('D') // a new page begins to the left of column D
+sheet?.pageBreaks // { rows: number[], columns: string[] } — file breaks plus these
+```
+
+Breaks accumulate and merge with any the file already has. `addRowPageBreak` refuses
+a row below 2 (nothing sits above row 1); `addColumnPageBreak` refuses column `A`.
+
 ## Sheets and the workbook
 
 ```ts

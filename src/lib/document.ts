@@ -85,6 +85,7 @@ import {
   canonicalReference,
   columnToIndex,
   formatReference,
+  indexToColumn,
   parseReference,
   parseWritableReference,
 } from './reference.js'
@@ -104,14 +105,18 @@ import {
 import {
   type HeaderFooter,
   type HeaderFooterSection,
+  type PageBreaks,
   type PageMargins,
   type PageSetup,
   readHeaderFooter,
+  readPageBreaks,
   readPageMargins,
   readPageSetup,
+  withColumnBreaks,
   withHeaderFooter,
   withPageMargins,
   withPageSetup,
+  withRowBreaks,
 } from './page.js'
 import {
   type Alignment,
@@ -201,7 +206,7 @@ export interface Cell {
 
 export type { Hyperlink }
 export type { DocumentProperties }
-export type { PageSetup, PageMargins, HeaderFooter, HeaderFooterSection }
+export type { PageSetup, PageMargins, HeaderFooter, HeaderFooterSection, PageBreaks }
 
 export interface Worksheet {
   readonly name: string
@@ -460,6 +465,21 @@ export interface Worksheet {
    * it, and any even- or first-page variant the file carries is kept.
    */
   setHeaderFooter(headerFooter: HeaderFooter): void
+  /** The manual page breaks, the file's plus any added this session: the one-based
+   * rows and the column letters that begin a new page. */
+  readonly pageBreaks: PageBreaks
+  /**
+   * Adds a manual page break above `row`, so `row` begins a new page when printed.
+   * The row is one-based. Refuses a row below 2 (nothing sits above row 1) or past
+   * the sheet's last row.
+   */
+  addRowPageBreak(row: number): void
+  /**
+   * Adds a manual page break to the left of `column`, so `column` begins a new page
+   * when printed. The column is a letter like `D`. Refuses column `A` (nothing sits
+   * left of it) or a column past the sheet's last.
+   */
+  addColumnPageBreak(column: string): void
   /**
    * A row's height in points, the file's or one set this session, or undefined
    * when the row carries no height of its own. The row is one-based.
@@ -1269,6 +1289,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   const sheetPageSetup = new Map<string, PageSetup>()
   const sheetPageMargins = new Map<string, PageMargins>()
   const sheetHeaderFooter = new Map<string, HeaderFooter>()
+  const sheetRowBreaks = new Map<string, Set<number>>()
+  const sheetColumnBreaks = new Map<string, Set<number>>()
   // The per-sheet maps patchSheet applies in one rewrite. Both the "anything
   // pending?" check and the set of sheets to rewrite read this list, so a new
   // kind of sheet edit is registered in one place rather than two enumerations
@@ -2464,6 +2486,56 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           ...headerFooter,
         })
       },
+      get pageBreaks(): PageBreaks {
+        const file =
+          sheetBytes === undefined ? { rows: [], columns: [] } : readPageBreaks(sheetBytes)
+        const rows = new Set<number>(file.rows)
+        for (const id of sheetRowBreaks.get(reference.path) ?? []) rows.add(id + 1)
+        const columns = new Set<string>(file.columns)
+        for (const id of sheetColumnBreaks.get(reference.path) ?? [])
+          columns.add(indexToColumn(id + 1))
+        return {
+          rows: [...rows].sort((a, b) => a - b),
+          columns: [...columns].sort((a, b) => columnToIndex(a) - columnToIndex(b)),
+        }
+      },
+      addRowPageBreak(row: number): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so a page break cannot be added`,
+            { ...at, reference: String(row) },
+          )
+        }
+        if (!Number.isInteger(row) || row < 2 || row > LAST_ROW) {
+          throw new XlsxError('bad-reference', `Row ${row} cannot begin a page`, {
+            ...at,
+            reference: String(row),
+          })
+        }
+        const breaks = sheetRowBreaks.get(reference.path) ?? new Set<number>()
+        breaks.add(row - 1)
+        sheetRowBreaks.set(reference.path, breaks)
+      },
+      addColumnPageBreak(column: string): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so a page break cannot be added`,
+            { ...at, reference: column },
+          )
+        }
+        const index = columnToIndex(column)
+        if (index < 2 || index > LAST_COLUMN) {
+          throw new XlsxError('bad-reference', `Column ${column} cannot begin a page`, {
+            ...at,
+            reference: column,
+          })
+        }
+        const breaks = sheetColumnBreaks.get(reference.path) ?? new Set<number>()
+        breaks.add(index - 1)
+        sheetColumnBreaks.set(reference.path, breaks)
+      },
       tabColor(color: string): void {
         if (sheetBytes === undefined) {
           throw new XlsxError(
@@ -2958,6 +3030,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       sheetPageSetup.size === 0 &&
       sheetPageMargins.size === 0 &&
       sheetHeaderFooter.size === 0 &&
+      sheetRowBreaks.size === 0 &&
+      sheetColumnBreaks.size === 0 &&
       addedRefs.length === 0 &&
       renames.size === 0 &&
       removed.size === 0 &&
@@ -3352,13 +3426,15 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       changes.set(path, encoder.encode(sheetXml))
     }
 
-    // Page setup writes three elements the schema orders margins, setup, then
-    // headerFooter. Applying them in that order lands each in the right place
-    // whether the sheet already had it or it is inserted fresh here.
+    // Page setup writes elements the schema orders margins, setup, headerFooter,
+    // rowBreaks, colBreaks. Applying them in that order lands each in the right
+    // place whether the sheet already had it or it is inserted fresh here.
     for (const path of new Set([
       ...sheetPageMargins.keys(),
       ...sheetPageSetup.keys(),
       ...sheetHeaderFooter.keys(),
+      ...sheetRowBreaks.keys(),
+      ...sheetColumnBreaks.keys(),
     ])) {
       if (removed.has(path)) continue
       let sheetXml = sheetTextNow(path)
@@ -3369,6 +3445,10 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       if (setup !== undefined) sheetXml = withPageSetup(sheetXml, setup)
       const headerFooter = sheetHeaderFooter.get(path)
       if (headerFooter !== undefined) sheetXml = withHeaderFooter(sheetXml, headerFooter)
+      const rowBreaks = sheetRowBreaks.get(path)
+      if (rowBreaks !== undefined) sheetXml = withRowBreaks(sheetXml, [...rowBreaks])
+      const columnBreaks = sheetColumnBreaks.get(path)
+      if (columnBreaks !== undefined) sheetXml = withColumnBreaks(sheetXml, [...columnBreaks])
       changes.set(path, encoder.encode(sheetXml))
     }
 

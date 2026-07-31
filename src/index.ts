@@ -40,6 +40,7 @@ export type {
   HeaderFooterSection,
   Hyperlink,
   NumberConstraint,
+  PageBreaks,
   PageMargins,
   PageSetup,
   RankRule,

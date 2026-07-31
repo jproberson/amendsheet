@@ -141,6 +141,53 @@ test('setHeaderFooter replaces one section and keeps the other, plus a first-pag
   )
 })
 
+test('addRowPageBreak and addColumnPageBreak write and read back, live and on write', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  const sheet = workbook.sheets[0]
+  sheet?.addRowPageBreak(10)
+  sheet?.addColumnPageBreak('H')
+  sheet?.addColumnPageBreak('D')
+  assert.deepEqual(sheet?.pageBreaks, { rows: [10], columns: ['D', 'H'] }) // live, sorted
+
+  const xml = decode(readContainer(workbook.toBytes()).parts.get('xl/worksheets/sheet1.xml'))
+  assert.match(xml, /<rowBreaks count="1" manualBreakCount="1"><brk id="9" max="16383" man="1"\/>/)
+  assert.match(
+    xml,
+    /<colBreaks count="2" manualBreakCount="2"><brk id="3" max="1048575" man="1"\/><brk id="7" max="1048575" man="1"\/>/,
+  )
+
+  const back = readWorkbook(workbook.toBytes()).sheets[0]
+  assert.deepEqual(back?.pageBreaks, { rows: [10], columns: ['D', 'H'] })
+})
+
+test('addRowPageBreak merges with breaks the sheet already carries', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      after:
+        '<rowBreaks count="1" manualBreakCount="1"><brk id="20" max="16383" man="1"/></rowBreaks>',
+    }),
+  )
+  workbook.sheets[0]?.addRowPageBreak(10)
+  assert.deepEqual(readWorkbook(workbook.toBytes()).sheets[0]?.pageBreaks, {
+    rows: [10, 21],
+    columns: [],
+  })
+})
+
+test('addRowPageBreak and addColumnPageBreak refuse a line that cannot begin a page', () => {
+  const sheet = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>')).sheets[0]
+  for (const row of [1, 0, 1.5, 1_048_577]) {
+    assert.throws(
+      () => sheet?.addRowPageBreak(row),
+      (error: unknown) => error instanceof XlsxError && error.code === 'bad-reference',
+    )
+  }
+  assert.throws(
+    () => sheet?.addColumnPageBreak('A'),
+    (error: unknown) => error instanceof XlsxError && error.code === 'bad-reference',
+  )
+})
+
 test('addTable creates a table, writes its headers, wires it, and reads back', () => {
   const workbook = createWorkbook('Data')
   const sheet = workbook.sheet('Data')
@@ -3890,6 +3937,15 @@ test('refuses a write to a sheet whose part is not in the package', () => {
     (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
   )
   assert.deepEqual(workbook.sheets[0]?.headerFooter, {})
+  assert.throws(
+    () => workbook.sheets[0]?.addRowPageBreak(10),
+    (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
+  )
+  assert.throws(
+    () => workbook.sheets[0]?.addColumnPageBreak('D'),
+    (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
+  )
+  assert.deepEqual(workbook.sheets[0]?.pageBreaks, { rows: [], columns: [] })
   assert.throws(
     () => workbook.sheets[0]?.freeze('B2'),
     (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',

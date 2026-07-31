@@ -2,11 +2,14 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   readHeaderFooter,
+  readPageBreaks,
   readPageMargins,
   readPageSetup,
+  withColumnBreaks,
   withHeaderFooter,
   withPageMargins,
   withPageSetup,
+  withRowBreaks,
 } from './page.js'
 
 const encode = (text: string) => new TextEncoder().encode(text)
@@ -223,4 +226,88 @@ test('a header and footer written by withHeaderFooter read back through readHead
     header: { center: 'Q&&A Report' },
     footer: { left: 'Confidential', right: '&P of &N' },
   })
+})
+
+test('withRowBreaks inserts a fresh rowBreaks with a manual break after pageSetup', () => {
+  const out = withRowBreaks('<worksheet><sheetData/><pageSetup/></worksheet>', [9])
+  assert.match(
+    out,
+    /<pageSetup\/><rowBreaks count="1" manualBreakCount="1"><brk id="9" max="16383" man="1"\/><\/rowBreaks><\/worksheet>/,
+  )
+})
+
+test('withColumnBreaks inserts a fresh colBreaks that lands after an existing rowBreaks', () => {
+  const out = withColumnBreaks(
+    '<worksheet><sheetData/><rowBreaks count="1" manualBreakCount="1"><brk id="9" max="16383" man="1"/></rowBreaks></worksheet>',
+    [3],
+  )
+  assert.match(
+    out,
+    /<\/rowBreaks><colBreaks count="1" manualBreakCount="1"><brk id="3" max="1048575" man="1"\/><\/colBreaks>/,
+  )
+})
+
+test('withRowBreaks merges into an existing container, sorting, deduping and recounting', () => {
+  const out = withRowBreaks(
+    '<worksheet><sheetData/><rowBreaks count="1" manualBreakCount="1"><brk id="20" max="16383" man="1"/></rowBreaks></worksheet>',
+    [9, 20],
+  )
+  assert.match(
+    out,
+    /<rowBreaks count="2" manualBreakCount="2"><brk id="9" max="16383" man="1"\/><brk id="20" max="16383" man="1"\/><\/rowBreaks>/,
+  )
+})
+
+test('withRowBreaks keeps an existing automatic break and counts the manual ones apart', () => {
+  const out = withRowBreaks(
+    '<worksheet><sheetData/><rowBreaks count="1" manualBreakCount="0"><brk id="30" max="16383"/></rowBreaks></worksheet>',
+    [9],
+  )
+  assert.match(
+    out,
+    /<rowBreaks count="2" manualBreakCount="1"><brk id="9" max="16383" man="1"\/><brk id="30" max="16383"\/><\/rowBreaks>/,
+  )
+})
+
+test('withRowBreaks replaces an empty self-closing container', () => {
+  const out = withRowBreaks('<worksheet><sheetData/><rowBreaks/></worksheet>', [9])
+  assert.match(
+    out,
+    /<rowBreaks count="1" manualBreakCount="1"><brk id="9" max="16383" man="1"\/><\/rowBreaks>/,
+  )
+})
+
+test('readPageBreaks returns rows as 1-based numbers and columns as letters, sorted', () => {
+  const xml =
+    '<worksheet><sheetData/><rowBreaks count="2" manualBreakCount="2"><brk id="20" max="16383" man="1"/><brk id="9" max="16383" man="1"/></rowBreaks><colBreaks count="2" manualBreakCount="2"><brk id="7" max="1048575" man="1"/><brk id="3" max="1048575" man="1"/></colBreaks></worksheet>'
+  assert.deepEqual(readPageBreaks(encode(xml)), { rows: [10, 21], columns: ['D', 'H'] })
+})
+
+test('readPageBreaks returns empty arrays when there are none', () => {
+  assert.deepEqual(readPageBreaks(encode('<worksheet><sheetData/></worksheet>')), {
+    rows: [],
+    columns: [],
+  })
+})
+
+test('readPageBreaks ignores an empty self-closing container', () => {
+  assert.deepEqual(
+    readPageBreaks(
+      encode('<worksheet><sheetData/><rowBreaks count="0" manualBreakCount="0"/></worksheet>'),
+    ),
+    { rows: [], columns: [] },
+  )
+})
+
+test('readPageBreaks treats a break with no id as the sheet top', () => {
+  const xml =
+    '<worksheet><sheetData/><rowBreaks count="1" manualBreakCount="1"><brk max="16383" man="1"/></rowBreaks></worksheet>'
+  assert.deepEqual(readPageBreaks(encode(xml)), { rows: [1], columns: [] })
+})
+
+test('breaks written by withRowBreaks and withColumnBreaks read back through readPageBreaks', () => {
+  let xml = '<worksheet><sheetData/></worksheet>'
+  xml = withRowBreaks(xml, [9, 20])
+  xml = withColumnBreaks(xml, [3])
+  assert.deepEqual(readPageBreaks(encode(xml)), { rows: [10, 21], columns: ['D'] })
 })

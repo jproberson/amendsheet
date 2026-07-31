@@ -1,3 +1,4 @@
+import { indexToColumn } from './reference.js'
 import { readXml, readXmlBytes } from './xml.js'
 
 /** The page setup for printing: which way the paper turns and the print scale. */
@@ -330,4 +331,119 @@ export function readHeaderFooter(bytes: Uint8Array): HeaderFooter {
     }
   }
   return result
+}
+
+/** A sheet's manual page breaks: the rows and columns that begin a new page. */
+export interface PageBreaks {
+  /** One-based rows that begin a new page — the break sits above each. */
+  readonly rows: readonly number[]
+  /** Column letters that begin a new page — the break sits to the left of each. */
+  readonly columns: readonly string[]
+}
+
+// A row break spans every column, a column break every row; the max is the last
+// index, zero-based, of that span.
+const LAST_COLUMN_INDEX = 16383
+const LAST_ROW_INDEX = 1048575
+
+const ROW_BREAKS_SUCCESSORS = AFTER_PAGE_MARGINS.slice(AFTER_PAGE_MARGINS.indexOf('rowBreaks') + 1)
+const COL_BREAKS_SUCCESSORS = AFTER_PAGE_MARGINS.slice(AFTER_PAGE_MARGINS.indexOf('colBreaks') + 1)
+
+function pairedElement(
+  sheetXml: string,
+  localName: string,
+): { start: number; end: number; inner: string } | undefined {
+  const selfClosing = new RegExp(`<(?:\\w+:)?${localName}\\b[^>]*/>`).exec(sheetXml)
+  if (selfClosing !== null) {
+    return { start: selfClosing.index, end: selfClosing.index + selfClosing[0].length, inner: '' }
+  }
+  const paired = new RegExp(
+    `<(?:\\w+:)?${localName}\\b[^>]*>([\\s\\S]*?)</(?:\\w+:)?${localName}>`,
+  ).exec(sheetXml)
+  if (paired === null) return undefined
+  const openEnd = paired[0].indexOf('>') + 1
+  const closeStart = paired[0].lastIndexOf('</')
+  return {
+    start: paired.index,
+    end: paired.index + paired[0].length,
+    inner: paired[0].slice(openEnd, closeStart),
+  }
+}
+
+// Existing breaks are kept verbatim, keyed by id, so their own attributes and any
+// automatic ones survive. A break already at an id we are adding wins, so the same
+// break added twice stays one.
+function readBreaks(inner: string): Map<number, string> {
+  const breaks = new Map<number, string>()
+  for (const match of inner.matchAll(/<(?:\w+:)?brk\b[^>]*\/>/g)) {
+    const idMatch = /\bid\s*=\s*"(\d+)"|\bid\s*=\s*'(\d+)'/.exec(match[0])
+    const id = idMatch === null ? 0 : Number(idMatch[1] ?? idMatch[2])
+    breaks.set(id, match[0])
+  }
+  return breaks
+}
+
+function withBreaks(
+  sheetXml: string,
+  localName: string,
+  childMax: number,
+  ids: readonly number[],
+  successors: readonly string[],
+): string {
+  const element = pairedElement(sheetXml, localName)
+  const breaks = element === undefined ? new Map<number, string>() : readBreaks(element.inner)
+  for (const id of ids) {
+    if (!breaks.has(id)) breaks.set(id, `<brk id="${id}" max="${childMax}" man="1"/>`)
+  }
+  let inner = ''
+  let manual = 0
+  for (const [, raw] of [...breaks.entries()].sort((a, b) => a[0] - b[0])) {
+    inner += raw
+    if (/\bman\s*=\s*["']1["']/.test(raw)) manual++
+  }
+  const container = `<${localName} count="${breaks.size}" manualBreakCount="${manual}">${inner}</${localName}>`
+  if (element !== undefined) {
+    return sheetXml.slice(0, element.start) + container + sheetXml.slice(element.end)
+  }
+  return insertBeforeSuccessor(sheetXml, container, successors)
+}
+
+/** Adds manual row page breaks, each `id` the zero-based row that begins a page. */
+export function withRowBreaks(sheetXml: string, ids: readonly number[]): string {
+  return withBreaks(sheetXml, 'rowBreaks', LAST_COLUMN_INDEX, ids, ROW_BREAKS_SUCCESSORS)
+}
+
+/** Adds manual column page breaks, each `id` the zero-based column that begins a page. */
+export function withColumnBreaks(sheetXml: string, ids: readonly number[]): string {
+  return withBreaks(sheetXml, 'colBreaks', LAST_ROW_INDEX, ids, COL_BREAKS_SUCCESSORS)
+}
+
+/** Reads the manual page breaks, rows as one-based numbers and columns as letters. */
+export function readPageBreaks(bytes: Uint8Array): PageBreaks {
+  const rowIds: number[] = []
+  const columnIds: number[] = []
+  let inside: 'rowBreaks' | 'colBreaks' | undefined
+  for (const event of readXmlBytes(bytes)) {
+    if (
+      event.kind === 'open' &&
+      (event.localName === 'rowBreaks' || event.localName === 'colBreaks')
+    ) {
+      inside = event.selfClosing ? undefined : event.localName
+    } else if (
+      event.kind === 'close' &&
+      (event.localName === 'rowBreaks' || event.localName === 'colBreaks')
+    ) {
+      inside = undefined
+    } else if (event.kind === 'open' && event.localName === 'brk' && inside !== undefined) {
+      const id = numberAttribute(event.attributes, 'id') ?? 0
+      if (inside === 'rowBreaks') rowIds.push(id)
+      else columnIds.push(id)
+    }
+  }
+  rowIds.sort((a, b) => a - b)
+  columnIds.sort((a, b) => a - b)
+  return {
+    rows: rowIds.map((id) => id + 1),
+    columns: columnIds.map((id) => indexToColumn(id + 1)),
+  }
 }
