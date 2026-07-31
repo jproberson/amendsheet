@@ -83,6 +83,13 @@ sheet?.set('A4', new Date('2024-01-01')) // gains a date format if it has none
 sheet?.set('A5', { formula: 'SUM(A1:A4)' })
 sheet?.set('A6', null) // clears the value, keeps the formatting
 sheet?.set('A7', 1234.5, { numberFormat: '"$"#,##0.00' })
+
+// A block of values from a top-left cell; options style every cell written.
+sheet?.setValues('A1', [
+  ['name', 'qty'],
+  ['apple', 3],
+])
+const block = sheet?.getValues('A1:B2') // CellValue[][]; a gap is { kind: 'empty' }
 ```
 
 `set(reference, value, options?)` takes a `number | string | boolean | Date |

@@ -73,6 +73,13 @@ sheet.set('E1', null) // clears the value, keeps the formatting
 sheet.set('F9', { formula: 'SUM(F1:F8)' })
 sheet.set('G1', 1234.5, { numberFormat: '"$"#,##0.00' })
 
+// Write a block of values from a top-left cell, and read a range back.
+sheet.setValues('A10', [
+  ['name', 'qty'],
+  ['apple', 3],
+])
+const block = sheet.getValues('A10:B11') // CellValue[][]
+
 const out = workbook.toBytes() // synchronous
 await writeFile('out.xlsx', out)
 ```

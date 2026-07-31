@@ -236,6 +236,23 @@ export interface Worksheet {
    */
   set(reference: string, value: CellInput, options?: SetOptions): void
   /**
+   * Writes a block of values, `data[r][c]` landing `r` rows below and `c` columns
+   * right of `topLeft`. Each cell goes through `set`, so the same refusals and
+   * `options` apply — `options`, when given, styles every cell written. A row may
+   * be shorter than the others; only the cells it holds are written.
+   */
+  setValues(
+    topLeft: string,
+    data: ReadonlyArray<ReadonlyArray<CellInput>>,
+    options?: SetOptions,
+  ): void
+  /**
+   * The values in a rectangular range, row by row, each cell as its `CellValue`;
+   * a position the sheet stores nothing at is `{ kind: 'empty' }`. Reflects edits
+   * made this session, like `cell`. A single reference reads a one-by-one block.
+   */
+  getValues(range: string): CellValue[][]
+  /**
    * Applies formatting to a cell without changing its value or formula, so a
    * formula cell can be restyled without losing its expression. A cell that is
    * not there yet is created empty with the formatting. Unlike `set`, this is
@@ -1550,6 +1567,39 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       }
     }
 
+    // The one write path `set` and `setValues` share, so a block write is refused
+    // and styled a cell at a time exactly as a single write is.
+    const writeCell = (cellReference: string, value: CellInput, options?: SetOptions): void => {
+      // Normalised so `a1`, `$A$1` and `A1` are one edit, and so the file never
+      // receives a reference spelled the way the caller typed it.
+      const canonical = formatReference(parseWritableReference(cellReference))
+
+      // Refused here rather than at save time. An edit that only fails once the
+      // workbook is written takes the whole batch down with it, and until then
+      // cell() reports a write that is never going to happen.
+      if (sheetBytes === undefined) throw absent(canonical, 'written')
+
+      checkWritable(canonical, value, date1904, at)
+      checkStyleOptions(options, canonical, at)
+      // sheetBytes is present, so indexed() is too; the guard is for the type.
+      const index = indexed()
+      if (index !== undefined) {
+        const si = index.sharedFormulas.get(canonical)
+        if (si !== undefined) throw sharedFormulaRefusal(canonical, si, at)
+        const anchor = mergeAnchorFor(index, canonical)
+        if (anchor !== undefined) throw mergeRefusal(canonical, anchor, at)
+      }
+
+      const current = styleAt(canonical)
+      const applied = resolveStyle(current, value, options, canonical)
+
+      const pending = edits.get(reference.path) ?? new Map<string, CellInput>()
+      pending.set(canonical, value)
+      edits.set(reference.path, pending)
+
+      overlay.set(canonical, predict(canonical, value, commitStyle(canonical, current, applied)))
+    }
+
     return {
       get name(): string {
         return renames.get(reference.path) ?? reference.name
@@ -1714,35 +1764,41 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         if (wanted === undefined) return undefined
         return findCell(wanted)
       },
-      set(cellReference: string, value: CellInput, options?: SetOptions): void {
-        // Normalised so `a1`, `$A$1` and `A1` are one edit, and so the file
-        // never receives a reference spelled the way the caller typed it.
-        const canonical = formatReference(parseWritableReference(cellReference))
-
-        // Refused here rather than at save time. An edit that only fails once the
-        // workbook is written takes the whole batch down with it, and until then
-        // cell() reports a write that is never going to happen.
-        if (sheetBytes === undefined) throw absent(canonical, 'written')
-
-        checkWritable(canonical, value, date1904, at)
-        checkStyleOptions(options, canonical, at)
-        // sheetBytes is present, so indexed() is too; the guard is for the type.
-        const index = indexed()
-        if (index !== undefined) {
-          const si = index.sharedFormulas.get(canonical)
-          if (si !== undefined) throw sharedFormulaRefusal(canonical, si, at)
-          const anchor = mergeAnchorFor(index, canonical)
-          if (anchor !== undefined) throw mergeRefusal(canonical, anchor, at)
+      set: writeCell,
+      setValues(
+        topLeft: string,
+        data: ReadonlyArray<ReadonlyArray<CellInput>>,
+        options?: SetOptions,
+      ): void {
+        const origin = parseWritableReference(topLeft)
+        data.forEach((row, rowOffset) => {
+          row.forEach((value, columnOffset) => {
+            const ref = formatReference({
+              row: origin.row + rowOffset,
+              column: origin.column + columnOffset,
+            })
+            writeCell(ref, value, options)
+          })
+        })
+      },
+      getValues(range: string): CellValue[][] {
+        const colon = range.indexOf(':')
+        const first = parseReference(colon === -1 ? range : range.slice(0, colon))
+        const second = colon === -1 ? first : parseReference(range.slice(colon + 1))
+        const minRow = Math.min(first.row, second.row)
+        const maxRow = Math.max(first.row, second.row)
+        const minColumn = Math.min(first.column, second.column)
+        const maxColumn = Math.max(first.column, second.column)
+        const rows: CellValue[][] = []
+        for (let row = minRow; row <= maxRow; row++) {
+          const values: CellValue[] = []
+          for (let column = minColumn; column <= maxColumn; column++) {
+            const found = findCell(formatReference({ row, column }))
+            values.push(found?.value ?? { kind: 'empty' })
+          }
+          rows.push(values)
         }
-
-        const current = styleAt(canonical)
-        const applied = resolveStyle(current, value, options, canonical)
-
-        const pending = edits.get(reference.path) ?? new Map<string, CellInput>()
-        pending.set(canonical, value)
-        edits.set(reference.path, pending)
-
-        overlay.set(canonical, predict(canonical, value, commitStyle(canonical, current, applied)))
+        return rows
       },
       format(cellReference: string, options: SetOptions): void {
         const canonical = formatReference(parseWritableReference(cellReference))

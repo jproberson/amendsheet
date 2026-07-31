@@ -227,6 +227,72 @@ test('addTable over a date-headed range generates a column name', () => {
   assert.deepEqual(readWorkbook(workbook.toBytes()).sheet('Data')?.tables[0]?.columns, ['Column1'])
 })
 
+test('setValues writes a block and getValues reads it back, with gaps empty', () => {
+  const built = createWorkbook('Data')
+  const sheet = built.sheet('Data')
+  sheet?.setValues('B2', [
+    ['name', 'qty'],
+    ['apple', 3],
+    ['pear', 5],
+  ])
+  // A gap column and a null-cleared cell round-trip as empty.
+  sheet?.set('B5', 'x')
+  sheet?.setValues('B5', [[null]])
+
+  const back = readWorkbook(built.toBytes()).sheet('Data')
+  assert.deepEqual(back?.getValues('B2:C4'), [
+    [
+      { kind: 'text', value: 'name' },
+      { kind: 'text', value: 'qty' },
+    ],
+    [
+      { kind: 'text', value: 'apple' },
+      { kind: 'number', value: 3 },
+    ],
+    [
+      { kind: 'text', value: 'pear' },
+      { kind: 'number', value: 5 },
+    ],
+  ])
+  assert.deepEqual(back?.getValues('B5'), [[{ kind: 'empty' }]])
+})
+
+test('getValues reflects pending edits and fills gaps with empty', () => {
+  const built = createWorkbook('Data')
+  const sheet = built.sheet('Data')
+  sheet?.set('A1', 1)
+  sheet?.set('C1', 3)
+  // Live, before toBytes; the middle cell was never set. Reversed corners work too.
+  assert.deepEqual(sheet?.getValues('C1:A1'), [
+    [{ kind: 'number', value: 1 }, { kind: 'empty' }, { kind: 'number', value: 3 }],
+  ])
+})
+
+test('setValues styles every cell it writes and propagates a merge refusal', () => {
+  const built = createWorkbook('Data')
+  const sheet = built.sheet('Data')
+  sheet?.setValues(
+    'A1',
+    [
+      [1, 2],
+      [3, 4],
+    ],
+    { numberFormat: '0.00' },
+  )
+  const back = readWorkbook(built.toBytes()).sheet('Data')
+  for (const ref of ['A1', 'B1', 'A2', 'B2']) {
+    assert.equal(back?.cell(ref)?.numberFormat, '0.00', `${ref} format`)
+  }
+
+  const merged = createWorkbook('M')
+  merged.sheet('M')?.merge('A1:B2')
+  const remerged = readWorkbook(merged.toBytes()).sheet('M')
+  assert.throws(
+    () => remerged?.setValues('A1', [[1, 2]]), // B1 is a non-anchor merge member
+    (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+  )
+})
+
 test('insertRows shifts a table it sits below and round-trips the range', () => {
   const built = createWorkbook('Data')
   const sheet = built.sheet('Data')
