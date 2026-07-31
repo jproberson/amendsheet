@@ -11,7 +11,8 @@ import {
 } from './add-sheet.js'
 import { blankWorkbookBytes } from './blank.js'
 import { EMPTY_RELATIONSHIPS, createContainerDraft, withRelationship } from './container-draft.js'
-import { comparisonToConstraint, numberComparison } from './constraint.js'
+import { createConditionalFormatStore } from './conditional-format.js'
+import { numberComparison } from './constraint.js'
 import { formatCsv, parseCsv } from './csv.js'
 import { createValidationStore } from './data-validation.js'
 import { shiftDrawing } from './drawings.js'
@@ -125,7 +126,6 @@ import {
   checkStyleOptions,
   ensureDxf,
   normalizeColor,
-  readDxfFill,
 } from './styles-writer.js'
 import { type StylesSession, createStylesSession } from './styles-session.js'
 import { type ShiftSpec, shiftDefinedNames } from './shift.js'
@@ -150,7 +150,6 @@ import type {
   ConditionalFormat,
   CsvReadOptions,
   DataValidation,
-  RankRule,
   SetOptions,
   Workbook,
   Worksheet,
@@ -286,39 +285,6 @@ function withContentTypeDefault(xml: string, extension: string, contentType: str
   const after = xml.indexOf('>', typesOpen) + 1
   const element = `<Default Extension="${extension}" ContentType="${contentType}"/>`
   return xml.slice(0, after) + element + xml.slice(after)
-}
-
-/** A stored conditional-format spec back into the public rule, or undefined for
- * one this does not model: a colour scale short of two rgb stops, a highlight rule
- * whose colour or comparison cannot be recovered. `stylesXml` resolves the
- * highlight a dxf-backed rule names by its index. */
-function conditionalFormatFromSpec(
-  spec: ConditionalFormatSpec,
-  stylesXml: string | undefined,
-): ConditionalFormat | undefined {
-  if (spec.kind === 'dataBar') return { dataBar: { color: spec.color } }
-  if (spec.kind === 'colorScale') {
-    const [min, second, third] = spec.colors
-    if (min === undefined || second === undefined) return undefined
-    return third === undefined
-      ? { colorScale: { min, max: second } }
-      : { colorScale: { min, mid: second, max: third } }
-  }
-  const fill = stylesXml === undefined ? undefined : readDxfFill(stylesXml, spec.dxfId)
-  if (fill === undefined) return undefined
-  if (spec.kind === 'expression') return { expression: { formula: spec.formula, fill } }
-  if (spec.kind === 'cellIs') {
-    const when = comparisonToConstraint(spec.operator, spec.formulas[0] ?? '', spec.formulas[1])
-    return when === undefined ? undefined : { cellIs: { when, fill } }
-  }
-  if (spec.kind === 'top10') {
-    const rank: RankRule = spec.percent
-      ? { count: spec.rank, fill, percent: true }
-      : { count: spec.rank, fill }
-    return spec.bottom ? { bottom: rank } : { top: rank }
-  }
-  // Only duplicateValues and uniqueValues remain.
-  return spec.kind === 'duplicateValues' ? { duplicates: { fill } } : { unique: { fill } }
 }
 
 function checkOutlineLevel(level: number, at: SheetLocation): void {
@@ -474,8 +440,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   const sheetRowGroups = new Map<string, Map<number, number>>()
   const sheetColGroups = new Map<string, Map<number, number>>()
   const validations = createValidationStore(date1904)
-  const sheetConditionalFormats = new Map<string, ConditionalFormatSpec[]>()
-  const sheetClearConditionalFormats = new Set<string>()
+  const conditionalFormats = createConditionalFormatStore()
   // Comments to add, per sheet, only for sheets that had none — an existing
   // comments part is refused at the call rather than rebuilt.
   const sheetComments = new Map<string, Map<string, string>>()
@@ -518,7 +483,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     sheetRowGroups,
     sheetColGroups,
     validations.pending,
-    sheetConditionalFormats,
+    conditionalFormats.pending,
   ]
   const fileNames = readDefinedNames(partText(container, part.path) ?? '')
   const pendingNames = new Map<string, string>()
@@ -1078,16 +1043,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           conditionalFormatsCache =
             sheetBytes === undefined ? [] : readConditionalFormats(sheetBytes)
         }
-        const applied: { range: string; rule: ConditionalFormat }[] = []
-        const pending = sheetConditionalFormats.get(reference.path) ?? []
-        const fromFile = sheetClearConditionalFormats.has(reference.path)
-          ? []
-          : conditionalFormatsCache
-        for (const spec of [...fromFile, ...pending]) {
-          const rule = conditionalFormatFromSpec(spec, dxfStyles)
-          if (rule !== undefined) applied.push({ range: spec.sqref, rule })
-        }
-        return applied
+        return conditionalFormats.applied(reference.path, conditionalFormatsCache, dxfStyles)
       },
       rowHeight(row: number): number | undefined {
         const pending = sheetRowHeights.get(reference.path)?.get(row)
@@ -1465,7 +1421,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           )
         }
         const sqref = sqrefOf(range, at)
-        const specs = sheetConditionalFormats.get(reference.path) ?? []
+        const specs: ConditionalFormatSpec[] = []
         if ('colorScale' in rule) {
           const { min, mid, max } = rule.colorScale
           const colors =
@@ -1551,11 +1507,10 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             specs.push({ kind: 'uniqueValues', sqref, dxfId })
           }
         }
-        sheetConditionalFormats.set(reference.path, specs)
+        for (const spec of specs) conditionalFormats.add(reference.path, spec)
       },
       clearConditionalFormats(): void {
-        sheetConditionalFormats.delete(reference.path)
-        sheetClearConditionalFormats.add(reference.path)
+        conditionalFormats.clear(reference.path)
       },
       comment(cellReference: string, text: string): void {
         if (sheetBytes === undefined) {
@@ -2237,7 +2192,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       Object.keys(pendingProperties).length === 0 &&
       sheetStates.size === 0 &&
       validations.cleared.size === 0 &&
-      sheetClearConditionalFormats.size === 0
+      conditionalFormats.cleared.size === 0
     ) {
       return container.write(changes)
     }
@@ -2282,7 +2237,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     for (const path of new Set([
       ...patchInputs.flatMap((map) => [...map.keys()]),
       ...validations.cleared,
-      ...sheetClearConditionalFormats,
+      ...conditionalFormats.cleared,
       ...addedSheets.keys(),
     ])) {
       if (removed.has(path)) continue
@@ -2293,7 +2248,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       if (validations.cleared.has(path)) {
         bytes = encoder.encode(withoutDataValidations(decodeXmlPart(bytes, path)))
       }
-      if (sheetClearConditionalFormats.has(path)) {
+      if (conditionalFormats.cleared.has(path)) {
         bytes = encoder.encode(withoutConditionalFormatting(decodeXmlPart(bytes, path)))
       }
       const pending = edits.get(path) ?? EMPTY_EDITS
@@ -2319,7 +2274,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         rowOutlineLevels: sheetRowGroups.get(path),
         colOutlineLevels: sheetColGroups.get(path),
         dataValidations: validations.pending.get(path),
-        conditionalFormats: sheetConditionalFormats.get(path),
+        conditionalFormats: conditionalFormats.pending.get(path),
       })
       // Unmerge runs after the merge-add above, on the written sheet, so a range
       // both merged and unmerged this session ends up gone.
