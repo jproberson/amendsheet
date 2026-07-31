@@ -34,6 +34,26 @@ async function findChrome() {
   return undefined
 }
 
+// Chrome writes its endpoint to a DevToolsActivePort file in the profile as two
+// lines, port then websocket path. Polling it survives a slow or contended start
+// where the stderr line lands late or is missed, which is what a full-load publish
+// run hits. Resolves once the file is complete.
+async function endpointFromPortFile(profile, signal) {
+  const file = join(profile, 'DevToolsActivePort')
+  while (!signal.aborted) {
+    try {
+      const [port, path] = (await readFile(file, 'utf8')).split('\n')
+      if (port && path) return `ws://127.0.0.1:${port.trim()}${path.trim()}`
+    } catch {}
+    try {
+      await delay(100, undefined, { signal })
+    } catch {
+      break
+    }
+  }
+  return new Promise(() => {})
+}
+
 function launch(chrome, profile) {
   const child = spawn(
     chrome,
@@ -50,7 +70,9 @@ function launch(chrome, profile) {
     { stdio: ['ignore', 'ignore', 'pipe'] },
   )
 
-  const endpoint = new Promise((resolve, reject) => {
+  const found = new AbortController()
+
+  const fromStderr = new Promise((resolve) => {
     let buffer = ''
     child.stderr.setEncoding('utf8')
     child.stderr.on('data', (chunk) => {
@@ -58,9 +80,21 @@ function launch(chrome, profile) {
       const match = buffer.match(/DevTools listening on (ws:\/\/\S+)/)
       if (match) resolve(match[1])
     })
-    child.on('exit', (code) => reject(new Error(`Chrome exited early with code ${code}`)))
-    delay(15_000).then(() => reject(new Error('Chrome did not report a DevTools endpoint')))
   })
+
+  const failed = new Promise((_, reject) => {
+    child.on('exit', (code) => reject(new Error(`Chrome exited early with code ${code}`)))
+    delay(30_000, undefined, { signal: found.signal }).then(
+      () => reject(new Error('Chrome did not report a DevTools endpoint')),
+      () => {},
+    )
+  })
+
+  const endpoint = Promise.race([
+    fromStderr,
+    endpointFromPortFile(profile, found.signal),
+    failed,
+  ]).finally(() => found.abort())
 
   return { child, endpoint }
 }
