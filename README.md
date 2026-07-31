@@ -169,6 +169,10 @@ has. Excel shows only the top-left cell; the others keep their values, since a
 merge does not clear them, and a write to one is refused the way it already was
 for a merge the file came with.
 
+`worksheet.addImage(bytes, 'B2:E10')` embeds a picture spanning a cell (or range),
+its type read from the image's own bytes (PNG, JPEG or GIF). It joins the sheet's
+drawing, one being created if there is none, so several images share the one part.
+
 `worksheet.setRowHeight(1, 30)` sizes a row in points, and
 `worksheet.setColumnWidth('A', 24)` sizes a column in Excel's width units,
 splitting a `cols` range that spans more than the one column so the rest keeps
@@ -374,7 +378,9 @@ What a minor release is allowed to do, so you know which branches are safe:
   ~512MB string limit; past that a part is refused with `part-too-large`.
   Nothing streams a sheet through in chunks, though, so it is still held whole
   in memory.
-- Charts, pivot tables and drawings are preserved but never created.
+- Charts and pivot tables are preserved but never created. A drawing is preserved,
+  and `worksheet.addImage` adds a picture to one; other drawing objects are not
+  authored.
 - `cell` exposes a cell's `font`, `fill`, `border` and `alignment`, but only the
   parts this library models. A fill is solid, a pattern or a gradient, and each is
   one `set` can write as well as read; `set` writes a gradient as a linear one, so

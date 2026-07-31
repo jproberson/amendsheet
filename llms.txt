@@ -387,6 +387,12 @@ sheet?.tables // readonly [{ name, range, columns }]
 cells already there, or `Column1`, `Column2`… It refuses a bad range, a duplicate
 or empty column name, a table name the workbook uses, or an overlap.
 
+```ts
+// Embed a picture (PNG, JPEG or GIF, read from the bytes) over a cell range.
+const withPicture = createWorkbook().sheets[0]
+withPicture?.addImage(bytes, 'B2:E10') // fills the range; joins the sheet's drawing
+```
+
 Fill a fresh sheet from rows of data:
 
 ```ts

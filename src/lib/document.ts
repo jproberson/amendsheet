@@ -12,6 +12,14 @@ import {
 import { blankWorkbookBytes } from './blank.js'
 import { formatCsv, parseCsv } from './csv.js'
 import { shiftDrawing } from './drawings.js'
+import {
+  type ImageType,
+  appendAnchors,
+  buildDrawing,
+  imageContentType,
+  imageType,
+  pictureAnchor,
+} from './images.js'
 import { shiftPivotCacheSource, shiftPivotLocation } from './pivots.js'
 import {
   appendCommentsPart,
@@ -335,6 +343,14 @@ export interface Worksheet {
       readonly style?: string
     },
   ): void
+  /**
+   * Embeds a picture spanning `anchor` — a cell like `'B2'` or a range like
+   * `'B2:E10'` the image fills, moving and staying sized with its cells. The type
+   * (PNG, JPEG or GIF) is read from the image's own bytes; an unrecognised one is
+   * refused with `unwritable-value`. The picture joins the sheet's drawing, one
+   * being created if it has none, and is written by `toBytes()`.
+   */
+  addImage(image: Uint8Array, anchor: string): void
   /**
    * Adds a data validation over a cell or range. `{ list }` offers inline values as
    * a dropdown (no value may hold a comma, the inline list's separator) and
@@ -701,6 +717,11 @@ const VML_DRAWING_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.
 const TABLE_RELATIONSHIP =
   'http://schemas.openxmlformats.org/officeDocument/2006/relationships/table'
 const TABLE_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml'
+const DRAWING_RELATIONSHIP =
+  'http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing'
+const IMAGE_RELATIONSHIP =
+  'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image'
+const DRAWING_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.drawing+xml'
 
 // Pinned parts whose positions this library now moves with an insert or delete,
 // so their presence no longer blocks one at the gate. A table still refuses a
@@ -784,6 +805,27 @@ function withLegacyDrawing(sheetXml: string, relationshipId: string): string {
   return `${sheetXml.slice(0, at)}<legacyDrawing r:id="${relationshipId}"/>${sheetXml.slice(at)}`
 }
 
+// A worksheet's <drawing> sits before the legacy drawing and the elements after it.
+const DRAWING_SUCCESSORS = ['<legacyDrawing', ...LEGACY_DRAWING_SUCCESSORS]
+
+/** Wires a DrawingML drawing into a sheet, placed in worksheet schema order. */
+function withDrawing(sheetXml: string, relationshipId: string): string {
+  const end = sheetXml.indexOf('</worksheet>')
+  if (end === -1) {
+    throw new XlsxError('invalid-content', 'A worksheet part is malformed', {})
+  }
+  let at = end
+  for (const successor of DRAWING_SUCCESSORS) {
+    const found = sheetXml.indexOf(successor)
+    if (found !== -1 && found < at) at = found
+  }
+  if (/<\/extLst>\s*<\/worksheet>\s*$/.test(sheetXml)) {
+    const worksheetExtLst = sheetXml.lastIndexOf('<extLst')
+    if (worksheetExtLst !== -1 && worksheetExtLst < at) at = worksheetExtLst
+  }
+  return `${sheetXml.slice(0, at)}<drawing r:id="${relationshipId}"/>${sheetXml.slice(at)}`
+}
+
 /** Declares a part in the content types with an Override, once. */
 function withContentTypeOverride(xml: string, partName: string, contentType: string): string {
   if (xml.includes(`PartName="/${partName}"`)) return xml
@@ -795,6 +837,22 @@ function withContentTypeOverride(xml: string, partName: string, contentType: str
     })
   }
   return xml.slice(0, close) + override + xml.slice(close)
+}
+
+/** Declares a file extension in the content types with a Default, once. */
+function withContentTypeDefault(xml: string, extension: string, contentType: string): string {
+  if (new RegExp(`<Default Extension="${extension}"`).test(xml)) return xml
+  const close = xml.indexOf('>')
+  if (close === -1 || !xml.startsWith('<')) {
+    throw new XlsxError('invalid-content', 'Content types part is malformed', {
+      part: '[Content_Types].xml',
+    })
+  }
+  // A Default sits among the other Defaults at the top of the Types element.
+  const typesOpen = xml.indexOf('<Types')
+  const after = xml.indexOf('>', typesOpen) + 1
+  const element = `<Default Extension="${extension}" ContentType="${contentType}"/>`
+  return xml.slice(0, after) + element + xml.slice(after)
 }
 
 /** Maps a constraint's bounds through `f`, preserving its operator — a date
@@ -1185,6 +1243,15 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   const sheetComments = new Map<string, Map<string, string>>()
   const sheetRemovedComments = new Map<string, Set<string>>()
   const sheetTables = new Map<string, TableSpec[]>()
+  // Images to embed, per sheet. Each carries the media bytes and the cell corners
+  // its picture spans; toBytes builds or extends the sheet's drawing from them.
+  interface PendingImage {
+    readonly bytes: Uint8Array
+    readonly type: ImageType
+    readonly from: { readonly column: number; readonly row: number }
+    readonly to: { readonly column: number; readonly row: number }
+  }
+  const sheetImages = new Map<string, PendingImage[]>()
   const sheetPageSetup = new Map<string, PageSetup>()
   const sheetPageMargins = new Map<string, PageMargins>()
   // The per-sheet maps patchSheet applies in one rewrite. Both the "anything
@@ -2111,6 +2178,36 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         specs.push({ name, ref, columns, style: options?.style ?? 'TableStyleMedium2' })
         sheetTables.set(reference.path, specs)
       },
+      addImage(image: Uint8Array, anchor: string): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so an image cannot be added`,
+            { ...at, reference: anchor },
+          )
+        }
+        const type = imageType(image)
+        if (type === undefined) {
+          throw new XlsxError('unwritable-value', 'Image is not a PNG, JPEG or GIF', {
+            ...at,
+            reference: anchor,
+          })
+        }
+        const colon = anchor.indexOf(':')
+        const first = parseWritableReference(colon === -1 ? anchor : anchor.slice(0, colon))
+        const second = colon === -1 ? first : parseWritableReference(anchor.slice(colon + 1))
+        const from = {
+          column: Math.min(first.column, second.column) - 1,
+          row: Math.min(first.row, second.row) - 1,
+        }
+        const to = {
+          column: Math.max(first.column, second.column),
+          row: Math.max(first.row, second.row),
+        }
+        const list = sheetImages.get(reference.path) ?? []
+        list.push({ bytes: image, type, from, to })
+        sheetImages.set(reference.path, list)
+      },
       validate(range: string, rule: DataValidation): void {
         if (sheetBytes === undefined) {
           throw new XlsxError(
@@ -2825,6 +2922,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       sheetComments.size === 0 &&
       sheetRemovedComments.size === 0 &&
       sheetTables.size === 0 &&
+      sheetImages.size === 0 &&
       sheetPageSetup.size === 0 &&
       sheetPageMargins.size === 0 &&
       addedRefs.length === 0 &&
@@ -3111,6 +3209,83 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       }
     }
 
+    // Each image is embedded as a media part, referenced from the sheet's drawing
+    // through a fresh relationship, and its picture anchored over the given cells.
+    // A sheet with no drawing gets one, wired by a <drawing>; one with a drawing
+    // (its own or from another image this session) has the picture appended.
+    const drawingParts: string[] = []
+    const imageExtensions = new Set<ImageType>()
+    let drawingNumber = 0
+    let mediaNumber = 0
+    for (const [path, images] of sheetImages) {
+      if (removed.has(path) || images.length === 0) continue
+
+      const relationshipsPath = relationshipsPathFor(path)
+      const currentRels = sheetTextNow(relationshipsPath)
+      const existingDrawing = relationshipTarget(currentRels, path, DRAWING_RELATIONSHIP)
+
+      let drawingPath = existingDrawing
+      if (drawingPath === undefined) {
+        do {
+          drawingNumber += 1
+        } while (
+          container.parts.has(`xl/drawings/drawing${drawingNumber}.xml`) ||
+          changes.has(`xl/drawings/drawing${drawingNumber}.xml`)
+        )
+        drawingPath = `xl/drawings/drawing${drawingNumber}.xml`
+      }
+      const drawingRelsPath = relationshipsPathFor(drawingPath)
+      let drawingRels = sheetTextNow(drawingRelsPath) ?? EMPTY_RELATIONSHIPS
+      const existingDrawingXml = sheetTextNow(drawingPath)
+      let shapeId = 1
+      for (const match of (existingDrawingXml ?? '').matchAll(/<xdr:cNvPr id="(\d+)"/g)) {
+        shapeId = Math.max(shapeId, Number(match[1]))
+      }
+
+      const anchors: string[] = []
+      for (const image of images) {
+        do {
+          mediaNumber += 1
+        } while (
+          container.parts.has(`xl/media/image${mediaNumber}.${image.type}`) ||
+          changes.has(`xl/media/image${mediaNumber}.${image.type}`)
+        )
+        const mediaPath = `xl/media/image${mediaNumber}.${image.type}`
+        changes.set(mediaPath, image.bytes)
+        imageExtensions.add(image.type)
+        const rel = withRelationship(
+          drawingRels,
+          IMAGE_RELATIONSHIP,
+          `../${mediaPath.slice('xl/'.length)}`,
+        )
+        drawingRels = rel.xml
+        anchors.push(pictureAnchor(image.from, image.to, ++shapeId, rel.id))
+      }
+
+      changes.set(
+        drawingPath,
+        encoder.encode(
+          existingDrawingXml === undefined
+            ? buildDrawing(anchors)
+            : appendAnchors(existingDrawingXml, anchors),
+        ),
+      )
+      changes.set(drawingRelsPath, encoder.encode(drawingRels))
+
+      if (existingDrawing === undefined) {
+        drawingParts.push(drawingPath)
+        const wired = withRelationship(
+          currentRels,
+          DRAWING_RELATIONSHIP,
+          `../${drawingPath.slice('xl/'.length)}`,
+        )
+        changes.set(relationshipsPath, encoder.encode(wired.xml))
+        const sheetXml = sheetTextNow(path)
+        if (sheetXml !== undefined)
+          changes.set(path, encoder.encode(withDrawing(sheetXml, wired.id)))
+      }
+    }
+
     // Tables get their own part, wired to the sheet by a relationship, listed in a
     // <tableParts> element and declared in the content types. The header cells were
     // written through the edit machinery above, so the sheet already carries them.
@@ -3389,6 +3564,12 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       }
       for (const override of addedOverrides) {
         updated = withContentTypeOverride(updated, override.path, override.contentType)
+      }
+      for (const drawingPath of drawingParts) {
+        updated = withContentTypeOverride(updated, drawingPath, DRAWING_CONTENT_TYPE)
+      }
+      for (const extension of imageExtensions) {
+        updated = withContentTypeDefault(updated, extension, imageContentType(extension))
       }
       if (createdCoreProperties) {
         updated = withContentTypeOverride(

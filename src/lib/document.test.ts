@@ -227,6 +227,64 @@ test('addTable over a date-headed range generates a column name', () => {
   assert.deepEqual(readWorkbook(workbook.toBytes()).sheet('Data')?.tables[0]?.columns, ['Column1'])
 })
 
+const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])
+const partNames = (bytes: Uint8Array, pattern: RegExp): string[] =>
+  [...readContainer(bytes).parts.keys()].filter((p) => pattern.test(p))
+
+test('addImage embeds media, a drawing and the sheet wiring', () => {
+  const workbook = createWorkbook('Data')
+  workbook.sheet('Data')?.addImage(PNG_BYTES, 'B2:D10')
+  const bytes = workbook.toBytes()
+  const parts = readContainer(bytes).parts
+
+  const [mediaPath] = partNames(bytes, /^xl\/media\/image\d+\.png$/)
+  assert.deepEqual(parts.get(mediaPath ?? ''), PNG_BYTES)
+  const [drawingPath] = partNames(bytes, /^xl\/drawings\/drawing\d+\.xml$/)
+  assert.match(decode(parts.get(drawingPath ?? '')), /<xdr:twoCellAnchor/)
+  assert.match(decode(parts.get('xl/worksheets/sheet1.xml')), /<drawing r:id="/)
+  const ct = decode(parts.get('[Content_Types].xml'))
+  assert.match(ct, /<Default Extension="png" ContentType="image\/png"\/>/)
+  assert.match(ct, /Override PartName="\/xl\/drawings\/drawing\d+\.xml"/)
+})
+
+test('two images share one drawing with two anchors and two media parts', () => {
+  const workbook = createWorkbook('Data')
+  const sheet = workbook.sheet('Data')
+  sheet?.addImage(PNG_BYTES, 'A1:B2')
+  sheet?.addImage(PNG_BYTES, 'D1:E2')
+  const bytes = workbook.toBytes()
+
+  assert.equal(partNames(bytes, /^xl\/media\/image\d+/).length, 2)
+  const drawings = partNames(bytes, /^xl\/drawings\/drawing\d+\.xml$/)
+  assert.equal(drawings.length, 1)
+  const drawing = decode(readContainer(bytes).parts.get(drawings[0] ?? ''))
+  assert.equal(drawing.match(/<xdr:twoCellAnchor/g)?.length, 2)
+})
+
+test('addImage appends to a drawing the sheet already has', () => {
+  const built = createWorkbook('Data')
+  built.sheet('Data')?.addImage(PNG_BYTES, 'A1:B2')
+  const workbook = readWorkbook(built.toBytes()) // the sheet now carries a drawing
+  workbook.sheet('Data')?.addImage(PNG_BYTES, 'D1:E2')
+  const bytes = workbook.toBytes()
+
+  assert.equal(partNames(bytes, /^xl\/drawings\/drawing\d+\.xml$/).length, 1) // still one
+  assert.equal(partNames(bytes, /^xl\/media\/image\d+/).length, 2)
+  const [drawingPath] = partNames(bytes, /^xl\/drawings\/drawing\d+\.xml$/)
+  assert.equal(
+    decode(readContainer(bytes).parts.get(drawingPath ?? '')).match(/<xdr:twoCellAnchor/g)?.length,
+    2,
+  )
+})
+
+test('addImage refuses bytes that are not a known image', () => {
+  const workbook = createWorkbook('Data')
+  assert.throws(
+    () => workbook.sheet('Data')?.addImage(new Uint8Array([1, 2, 3, 4]), 'A1'),
+    (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+  )
+})
+
 test('copySheet duplicates a sheet independently under a new name', () => {
   const built = createWorkbook('Template')
   const template = built.sheet('Template')
