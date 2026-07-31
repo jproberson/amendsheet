@@ -2311,13 +2311,6 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     for (const path of removedExisting) changes.set(path, null)
     const originalName = (path: string) => part.sheets.find((sheet) => sheet.path === path)?.name
 
-    const decodePart = new TextDecoder()
-    const sheetTextNow = (path: string): string | undefined => {
-      const changed = changes.get(path)
-      if (changed !== undefined && changed !== null) return decodePart.decode(changed)
-      return partText(container, path)
-    }
-
     // Composes a top-level part written once this pass — the workbook, its rels,
     // the content types — from its current text, and writes it back only when the
     // transform changed something, so an untouched part is never rewritten.
@@ -2334,7 +2327,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     // written inline and needs none.
     for (const path of new Set([...sheetHyperlinks.keys(), ...sheetUnlinks.keys()])) {
       if (removed.has(path)) continue
-      let sheetXml = sheetTextNow(path)
+      let sheetXml = draft.text(path)
       if (sheetXml === undefined) continue
       const links = sheetHyperlinks.get(path)
       if (links !== undefined) {
@@ -2365,19 +2358,6 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     // there survives untouched. A cell that already carries a comment is refused
     // at the call, not here. The rels are read from what a hyperlink write may
     // have just changed.
-    const relationshipTarget = (
-      relsXml: string | undefined,
-      sheetPath: string,
-      type: string,
-    ): string | undefined => {
-      if (relsXml === undefined) return undefined
-      for (const relationship of readRelationships(relsXml, sheetPath).values()) {
-        if (relationship.type === type && !relationship.external) {
-          return resolveTarget(sheetPath, relationship.target)
-        }
-      }
-      return undefined
-    }
     const commentParts: string[] = []
     const vmlDrawingParts: string[] = []
     for (const [path, notes] of sheetComments) {
@@ -2466,8 +2446,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       if (removed.has(path) || images.length === 0) continue
 
       const relationshipsPath = relationshipsPathFor(path)
-      const currentRels = sheetTextNow(relationshipsPath)
-      const existingDrawing = relationshipTarget(currentRels, path, DRAWING_RELATIONSHIP)
+      const existingDrawing = draft.relationshipTarget(path, DRAWING_RELATIONSHIP)
 
       let drawingPath = existingDrawing
       if (drawingPath === undefined) {
@@ -2480,8 +2459,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         drawingPath = `xl/drawings/drawing${drawingNumber}.xml`
       }
       const drawingRelsPath = relationshipsPathFor(drawingPath)
-      let drawingRels = sheetTextNow(drawingRelsPath) ?? EMPTY_RELATIONSHIPS
-      const existingDrawingXml = sheetTextNow(drawingPath)
+      let drawingRels = draft.text(drawingRelsPath) ?? EMPTY_RELATIONSHIPS
+      const existingDrawingXml = draft.text(drawingPath)
       let shapeId = 1
       for (const match of (existingDrawingXml ?? '').matchAll(/<xdr:cNvPr id="(\d+)"/g)) {
         shapeId = Math.max(shapeId, Number(match[1]))
@@ -2520,12 +2499,12 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       if (existingDrawing === undefined) {
         drawingParts.push(drawingPath)
         const wired = withRelationship(
-          currentRels,
+          draft.text(relationshipsPath),
           DRAWING_RELATIONSHIP,
           `../${drawingPath.slice('xl/'.length)}`,
         )
         changes.set(relationshipsPath, encoder.encode(wired.xml))
-        const sheetXml = sheetTextNow(path)
+        const sheetXml = draft.text(path)
         if (sheetXml !== undefined)
           changes.set(path, encoder.encode(withDrawing(sheetXml, wired.id)))
       }
@@ -2538,10 +2517,10 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     let tableNumber = 0
     for (const [path, specs] of sheetTables) {
       if (removed.has(path)) continue
-      let sheetXml = sheetTextNow(path)
+      let sheetXml = draft.text(path)
       if (sheetXml === undefined) continue
       const relationshipsPath = relationshipsPathFor(path)
-      let relsXml = sheetTextNow(relationshipsPath)
+      let relsXml = draft.text(relationshipsPath)
       for (const spec of specs) {
         do {
           tableNumber += 1
@@ -2575,7 +2554,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       ...sheetColumnBreaks.keys(),
     ])) {
       if (removed.has(path)) continue
-      let sheetXml = sheetTextNow(path)
+      let sheetXml = draft.text(path)
       if (sheetXml === undefined) continue
       const margins = sheetPageMargins.get(path)
       if (margins !== undefined) sheetXml = withPageMargins(sheetXml, margins)
@@ -2600,7 +2579,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       const sheetPaths = [...part.sheets.map((sheet) => sheet.path), ...addedSheets.keys()]
       for (const path of sheetPaths) {
         if (removed.has(path)) continue
-        let xml = sheetTextNow(path)
+        let xml = draft.text(path)
         if (xml === undefined) continue
         const before = xml
         for (const op of lineOps) {
@@ -2639,7 +2618,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
               op.spec,
             )) {
               changes.set(insert.path, encoder.encode(insert.xml))
-              const sheetNow = sheetTextNow(path)
+              const sheetNow = draft.text(path)
               if (insert.headers.size > 0 && sheetNow !== undefined) {
                 const at: SheetLocation = {
                   sheet: part.sheets.find((sheet) => sheet.path === path)?.name,
@@ -2664,17 +2643,17 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         // A comment pins its cell in the comments part and its box in the legacy
         // drawing; both move with the rows or columns the edit shifts under them,
         // and a note whose cell a deletion removed is dropped from each.
-        const relsForComments = sheetTextNow(relationshipsPathFor(path))
-        const commentsPath = relationshipTarget(relsForComments, path, COMMENTS_RELATIONSHIP)
-        const vmlPath = relationshipTarget(relsForComments, path, VML_DRAWING_RELATIONSHIP)
+        const commentsPath = draft.relationshipTarget(path, COMMENTS_RELATIONSHIP)
+        const vmlPath = draft.relationshipTarget(path, VML_DRAWING_RELATIONSHIP)
+        const sheetRels = draft.text(relationshipsPathFor(path))
         for (const op of lineOps) {
           if (op.path !== path) continue
-          const commentsText = commentsPath === undefined ? undefined : sheetTextNow(commentsPath)
+          const commentsText = commentsPath === undefined ? undefined : draft.text(commentsPath)
           if (commentsPath !== undefined && commentsText !== undefined) {
             const shifted = shiftComments(commentsText, op.spec)
             if (shifted !== commentsText) changes.set(commentsPath, encoder.encode(shifted))
           }
-          const vmlText = vmlPath === undefined ? undefined : sheetTextNow(vmlPath)
+          const vmlText = vmlPath === undefined ? undefined : draft.text(vmlPath)
           if (vmlPath !== undefined && vmlText !== undefined) {
             const shifted = shiftNoteShapes(vmlText, op.spec)
             if (shifted !== vmlText) changes.set(vmlPath, encoder.encode(shifted))
@@ -2682,11 +2661,11 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           // A drawing (a diagram-bearing one is refused at the call) moves its cell
           // anchors with the edit; a picture fully inside a deletion goes. A pivot
           // table on this sheet moves its location, the range where it is drawn.
-          if (relsForComments !== undefined) {
-            for (const relationship of readRelationships(relsForComments, path).values()) {
+          if (sheetRels !== undefined) {
+            for (const relationship of readRelationships(sheetRels, path).values()) {
               if (relationship.external) continue
               const target = resolveTarget(path, relationship.target)
-              const partXml = sheetTextNow(target)
+              const partXml = draft.text(target)
               if (partXml === undefined) continue
               if (relationship.type.endsWith('relationships/drawing')) {
                 const shifted = shiftDrawing(partXml, op.spec)
@@ -2706,7 +2685,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       // drawing anchor moved above; this moves the data the chart plots.
       for (const chartPath of container.parts.keys()) {
         if (!/^xl\/charts\/chart\d+\.xml$/.test(chartPath)) continue
-        let xml = sheetTextNow(chartPath)
+        let xml = draft.text(chartPath)
         if (xml === undefined) continue
         const before = xml
         for (const op of lineOps) {
@@ -2719,7 +2698,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       // is edited, wherever the pivot that reads it sits. The location moved above.
       for (const cachePath of container.parts.keys()) {
         if (!/^xl\/pivotCache\/pivotCacheDefinition\d+\.xml$/.test(cachePath)) continue
-        let xml = sheetTextNow(cachePath)
+        let xml = draft.text(cachePath)
         if (xml === undefined) continue
         const before = xml
         for (const op of lineOps) {
