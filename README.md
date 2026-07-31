@@ -268,8 +268,12 @@ A workbook does not have to come from a file. `createWorkbook()` starts a blank
 one with a single empty sheet named `Sheet1`, or the name you pass, ready for the
 same edit API. `workbook.addSheet('Data')` adds an empty sheet and returns it,
 `worksheet.rename('Report')` renames one, and `worksheet.remove()` drops it,
-refusing to remove the last. Creating goes through the same path a read workbook
-does, so a created sheet takes every edit above.
+refusing to remove the last. `workbook.copySheet('Template', 'March')` duplicates a
+sheet and returns the copy, bringing its cells, formatting, formulas, merges and
+comments across into parts of its own; a sheet carrying a table, drawing or pivot
+table is refused, since those need names, ids or media reworked to stay valid.
+Creating goes through the same path a read workbook does, so a created sheet takes
+every edit above.
 
 ```ts
 import { createWorkbook } from 'amendsheet'

@@ -227,6 +227,69 @@ test('addTable over a date-headed range generates a column name', () => {
   assert.deepEqual(readWorkbook(workbook.toBytes()).sheet('Data')?.tables[0]?.columns, ['Column1'])
 })
 
+test('copySheet duplicates a sheet independently under a new name', () => {
+  const built = createWorkbook('Template')
+  const template = built.sheet('Template')
+  template?.set('A1', 'Header')
+  template?.set('A2', 5)
+  template?.merge('B1:C1')
+  const workbook = readWorkbook(built.toBytes()) // Template is now a file sheet
+
+  workbook.addSheet('Scratch') // a sheet added this session, so the source search spans both
+  const copy = workbook.copySheet('Template', 'March')
+  copy.set('A2', 99) // editing the copy must not touch the source
+
+  const back = readWorkbook(workbook.toBytes())
+  assert.deepEqual(
+    back.sheets.map((s) => s.name),
+    ['Template', 'Scratch', 'March'],
+  )
+  assert.deepEqual(back.sheet('March')?.cell('A1')?.value, { kind: 'text', value: 'Header' })
+  assert.deepEqual(back.sheet('March')?.cell('A2')?.value, { kind: 'number', value: 99 })
+  assert.deepEqual(back.sheet('Template')?.cell('A2')?.value, { kind: 'number', value: 5 })
+  assert.deepEqual(back.sheet('March')?.mergedRanges, ['B1:C1'])
+})
+
+test('copySheet brings a comment across into its own parts', () => {
+  const built = createWorkbook('Notes')
+  const notes = built.sheet('Notes')
+  notes?.set('A1', 'x')
+  notes?.comment('A1', 'hello')
+  const workbook = readWorkbook(built.toBytes())
+
+  workbook.copySheet('Notes', 'Notes copy')
+  const bytes = workbook.toBytes()
+  const back = readWorkbook(bytes)
+  assert.equal(back.sheet('Notes copy')?.cell('A1')?.comment, 'hello')
+  assert.equal(back.sheet('Notes')?.cell('A1')?.comment, 'hello') // source keeps its own
+  // Each sheet owns a separate comments part, so editing one never affects the other.
+  const commentParts = [...readContainer(bytes).parts.keys()].filter((p) =>
+    /xl\/comments\d+\.xml/.test(p),
+  )
+  assert.equal(commentParts.length, 2)
+})
+
+test('copySheet refuses a table and an unknown source', () => {
+  const built = createWorkbook('Data')
+  const data = built.sheet('Data')
+  data?.set('A1', 'h')
+  data?.set('A2', 1)
+  data?.addTable('A1:A2', { name: 'T1' })
+  const workbook = readWorkbook(built.toBytes())
+
+  assert.throws(
+    () => workbook.copySheet('Data', 'Data 2'),
+    (error: unknown) =>
+      error instanceof XlsxError &&
+      error.code === 'unsupported-edit' &&
+      error.message.includes('a table'),
+  )
+  assert.throws(
+    () => workbook.copySheet('Nope', 'X'),
+    (error: unknown) => error instanceof XlsxError && error.code === 'bad-reference',
+  )
+})
+
 test('createWorkbookFromCsv builds a sheet, optionally typing numbers', () => {
   const text = 'name,qty\r\napple,3\r\n"pear, green",5'
   const asText = createWorkbookFromCsv(text, { sheetName: 'Fruit' })

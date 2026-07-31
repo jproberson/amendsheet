@@ -634,6 +634,15 @@ export interface Workbook {
    */
   addSheet(name: string): Worksheet
   /**
+   * Duplicates a sheet under a new name and returns the copy, ready to edit. The
+   * cells, formatting, formulas, merges, validations, conditional formats, widths
+   * and page setup all come across, as do comments and printer settings. A sheet
+   * that carries a table, a drawing or a pivot table is refused with
+   * `unsupported-edit`, since those need names, ids or media reworked to stay
+   * valid. `newName` follows the same rules as `addSheet`.
+   */
+  copySheet(sourceName: string, newName: string): Worksheet
+  /**
    * The workbook's global named ranges, each mapped to what it refers to (a
    * formula like `Sheet1!$A$1:$B$2`). Reflects a pending `defineName`.
    */
@@ -1241,6 +1250,11 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   // Sheets removed since the read, by path. A sheet the file had is unwired and
   // its part dropped; an added one is simply never written.
   const removed = new Set<string>()
+  // Whole parts a copySheet brings into the package — the duplicated dependent
+  // parts and the copy's own relationships — written verbatim by toBytes, plus the
+  // content-type Overrides any of them need.
+  const addedParts = new Map<string, Uint8Array>()
+  const addedOverrides: Array<{ readonly path: string; readonly contentType: string }> = []
 
   const makeWorksheet = (reference: SheetRef): Worksheet => {
     const sheetBytes = container.parts.get(reference.path) ?? addedSheets.get(reference.path)
@@ -2693,10 +2707,115 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     return sheet
   }
 
+  // A part path with a fresh trailing number, keeping the folder and extension, so
+  // a duplicated `comments1.xml` becomes `comments7.xml` and collides with nothing.
+  const freshPartPath = (original: string): string => {
+    const taken = (candidate: string): boolean =>
+      container.parts.has(candidate) || addedParts.has(candidate) || usedSheetPaths.has(candidate)
+    const match = original.match(/^(.*?)(\d+)?(\.[^./]+)$/)
+    const stem = match?.[1] ?? original
+    const extension = match?.[3] ?? ''
+    let n = 1
+    while (taken(`${stem}${n}${extension}`)) n++
+    return `${stem}${n}${extension}`
+  }
+
+  // The content type a part is declared with by an Override, or undefined when it
+  // is covered by a Default (its extension), which the copy is covered by too.
+  const overrideContentType = (path: string): string | undefined => {
+    const types = partText(container, CONTENT_TYPES)
+    const match = types?.match(
+      new RegExp(
+        `<Override PartName="/${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"[^>]*?ContentType="([^"]*)"`,
+      ),
+    )
+    return match?.[1]
+  }
+
+  const copyWorksheet = (sourceName: string, newName: string): Worksheet => {
+    const currentName = (ref: SheetRef): string => renames.get(ref.path) ?? ref.name
+    const source = [...part.sheets, ...addedRefs.map((added) => added.reference)].find(
+      (ref) => !removed.has(ref.path) && currentName(ref) === sourceName,
+    )
+    if (source === undefined) {
+      throw new XlsxError('bad-reference', `No sheet named ${sourceName} to copy`, {})
+    }
+    const sourceBytes = container.parts.get(source.path) ?? addedSheets.get(source.path)
+    if (sourceBytes === undefined) {
+      throw new XlsxError('unsupported-edit', `Sheet ${sourceName} has no worksheet part to copy`, {
+        part: source.path,
+      })
+    }
+    checkSheetName(
+      newName,
+      sheets.map((sheet) => sheet.name),
+    )
+
+    let n = 1
+    while (usedSheetPaths.has(`${workbookDir}worksheets/sheet${n}.xml`)) n++
+    const newPath = `${workbookDir}worksheets/sheet${n}.xml`
+    usedSheetPaths.add(newPath)
+
+    // A sheet's own dependent parts are duplicated so the copy owns its own; parts
+    // that need a unique name, id or shared media reworked are refused for now.
+    const sourceRelsXml = partText(container, relationshipsPathFor(source.path))
+    if (sourceRelsXml !== undefined) {
+      let relsXml = sourceRelsXml
+      for (const relationship of readRelationships(sourceRelsXml, source.path).values()) {
+        if (relationship.external) continue
+        const noun = relationship.type.endsWith('/table')
+          ? 'a table'
+          : relationship.type.endsWith('/pivotTable')
+            ? 'a pivot table'
+            : relationship.type.endsWith('/drawing')
+              ? 'a drawing'
+              : undefined
+        if (noun !== undefined) {
+          throw new XlsxError('unsupported-edit', `Cannot copy ${sourceName}: it carries ${noun}`, {
+            part: source.path,
+          })
+        }
+        const targetPath = resolveTarget(source.path, relationship.target)
+        const bytes = container.parts.get(targetPath)
+        if (bytes === undefined) continue
+        const copyPath = freshPartPath(targetPath)
+        addedParts.set(copyPath, bytes)
+        const contentType = overrideContentType(targetPath)
+        if (contentType !== undefined) addedOverrides.push({ path: copyPath, contentType })
+        const oldFile = targetPath.slice(targetPath.lastIndexOf('/') + 1)
+        const newFile = copyPath.slice(copyPath.lastIndexOf('/') + 1)
+        relsXml = relsXml.replace(
+          `Target="${relationship.target}"`,
+          `Target="${relationship.target.replace(oldFile, newFile)}"`,
+        )
+      }
+      addedParts.set(relationshipsPathFor(newPath), new TextEncoder().encode(relsXml))
+    }
+
+    const reference: SheetRef = {
+      name: newName,
+      path: newPath,
+      sheetId: String(++maxSheetId),
+      state: 'visible',
+    }
+    addedSheets.set(newPath, sourceBytes)
+    addedRefs.push({
+      reference,
+      relationshipId: `rId${++maxRelationshipId}`,
+      target: newPath.slice(workbookDir.length),
+    })
+    const sheet = makeWorksheet(reference)
+    sheets.push(sheet)
+    return sheet
+  }
+
   const toBytes = (): Uint8Array => {
     // A change carries new bytes for a part; null deletes it. Every part not
     // named here is passed through still compressed, never inflated or rebuilt.
     const changes = new Map<string, Uint8Array | null>()
+    // Parts a copySheet duplicated (dependent parts and the copy's own rels) are
+    // written verbatim; the copy's worksheet part flows through the patch below.
+    for (const [path, bytes] of addedParts) changes.set(path, bytes)
     // A format() with no set() records a style override and no value edit; a
     // protect(), merge() or setRowHeight() records neither and still rewrites.
     if (
@@ -3268,6 +3387,9 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       for (const tablePath of tableParts) {
         updated = withContentTypeOverride(updated, tablePath, TABLE_CONTENT_TYPE)
       }
+      for (const override of addedOverrides) {
+        updated = withContentTypeOverride(updated, override.path, override.contentType)
+      }
       if (createdCoreProperties) {
         updated = withContentTypeOverride(
           updated,
@@ -3285,6 +3407,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     sheets,
     sheet: (name: string) => sheets.find((candidate) => candidate.name === name),
     addSheet: addWorksheet,
+    copySheet: copyWorksheet,
     get definedNames(): ReadonlyMap<string, string> {
       const all = new Map([...fileNames, ...pendingNames])
       for (const name of removedNames) all.delete(name)

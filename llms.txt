@@ -304,6 +304,7 @@ const workbook = readWorkbook(bytes)
 workbook.sheets // readonly Worksheet[]
 workbook.sheet('Data') // by name, undefined if none
 const added = workbook.addSheet('New')
+const copy = workbook.copySheet('Data', 'Data 2') // duplicates cells, formatting, comments
 added.rename('Renamed')
 added.setState('hidden') // 'visible' | 'hidden' | 'veryHidden'; refuses the last visible sheet
 added.state // reads it back, reflecting a pending setState
