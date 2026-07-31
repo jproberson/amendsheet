@@ -48,8 +48,21 @@ sheet.set('A1', 'hello')
 const out = workbook.toBytes()
 ```
 
-`readWorkbook` and `createWorkbook` are the only two entry points. Both return a
+`readWorkbook` and `createWorkbook` are the two main entry points. Both return a
 `Workbook`; everything else hangs off it or off a `Worksheet`.
+
+## CSV
+
+```ts
+import { createWorkbookFromCsv } from 'amendsheet'
+
+// Fields are text; { parseNumbers: true } turns plain numeric fields into numbers.
+const workbook = createWorkbookFromCsv('name,qty\r\napple,3', { sheetName: 'Fruit' })
+const csv = workbook.sheets[0]?.toCsv() // RFC 4180; { delimiter: '\t' } for TSV
+```
+
+`toCsv()` prints from `A1` to the furthest non-empty cell; a formula prints its
+cached value (blank for one this library wrote and never recalculated).
 
 ## Reading cells
 

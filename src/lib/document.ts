@@ -10,6 +10,7 @@ import {
   withSheetsAdded,
 } from './add-sheet.js'
 import { blankWorkbookBytes } from './blank.js'
+import { formatCsv, parseCsv } from './csv.js'
 import { shiftDrawing } from './drawings.js'
 import { shiftPivotCacheSource, shiftPivotLocation } from './pivots.js'
 import {
@@ -252,6 +253,13 @@ export interface Worksheet {
    * made this session, like `cell`. A single reference reads a one-by-one block.
    */
   getValues(range: string): CellValue[][]
+  /**
+   * The sheet as delimited text, from `A1` to the furthest cell that holds
+   * anything. A number, boolean, error or date prints as its value (a date in ISO
+   * form); a formula prints its cached result, empty for one this library wrote
+   * and never recalculated. A field that needs it is quoted, RFC 4180 style.
+   */
+  toCsv(options?: { readonly delimiter?: string }): string
   /**
    * Applies formatting to a cell without changing its value or formula, so a
    * formula cell can be restyled without losing its expression. A cell that is
@@ -1072,6 +1080,58 @@ export function createWorkbook(sheetName = 'Sheet1'): Workbook {
   return readWorkbook(blankWorkbookBytes(sheetName))
 }
 
+/** Options for `createWorkbookFromCsv`. */
+export interface CsvReadOptions {
+  /** The name the one sheet is given; `Sheet1` by default. */
+  readonly sheetName?: string
+  /** The field separator; a comma by default. Pass `'\t'` for TSV. */
+  readonly delimiter?: string
+  /** When true, a field that is a plain finite number is written as one rather
+   * than as text. Off by default, since coercing loses a leading zero and turns
+   * a code like `007` into `7`. */
+  readonly parseNumbers?: boolean
+}
+
+const CSV_NUMBER = /^-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?$/
+
+/** One cell's value as a CSV field: a number as itself, a date in ISO form, a
+ * boolean as TRUE/FALSE, and an empty cell or an uncalculated formula as blank. */
+function csvField(value: CellValue): string {
+  switch (value.kind) {
+    case 'number':
+      return String(value.value)
+    case 'text':
+    case 'error':
+      return value.value
+    case 'boolean':
+      return value.value ? 'TRUE' : 'FALSE'
+    case 'date':
+      return value.value.toISOString()
+    case 'empty':
+      return ''
+  }
+}
+
+/**
+ * Builds a workbook from delimited text: one sheet whose cells hold the parsed
+ * fields from `A1`. Fields are text unless `parseNumbers` turns a numeric one into
+ * a number. The result is a normal created workbook — fill it further and write it
+ * with `toBytes()`.
+ */
+export function createWorkbookFromCsv(text: string, options: CsvReadOptions = {}): Workbook {
+  const rows = parseCsv(text, options.delimiter)
+  const workbook = createWorkbook(options.sheetName)
+  const data: CellInput[][] = rows.map((row) =>
+    row.map((field) =>
+      options.parseNumbers === true && CSV_NUMBER.test(field) && Number.isFinite(Number(field))
+        ? Number(field)
+        : field,
+    ),
+  )
+  if (data.length > 0) workbook.sheets[0]?.setValues('A1', data)
+  return workbook
+}
+
 export function readWorkbook(bytes: Uint8Array): Workbook {
   const part = readWorkbookPart(bytes)
   const { container, date1904 } = part
@@ -1799,6 +1859,27 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           rows.push(values)
         }
         return rows
+      },
+      toCsv(options?: { readonly delimiter?: string }): string {
+        let maxRow = 0
+        let maxColumn = 0
+        const byPosition = new Map<string, CellValue>()
+        for (const found of readCells()) {
+          if (found.value.kind === 'empty') continue
+          maxRow = Math.max(maxRow, found.address.row)
+          maxColumn = Math.max(maxColumn, found.address.column)
+          byPosition.set(`${found.address.row},${found.address.column}`, found.value)
+        }
+        const rows: string[][] = []
+        for (let row = 1; row <= maxRow; row++) {
+          const fields: string[] = []
+          for (let column = 1; column <= maxColumn; column++) {
+            const value = byPosition.get(`${row},${column}`)
+            fields.push(value === undefined ? '' : csvField(value))
+          }
+          rows.push(fields)
+        }
+        return formatCsv(rows, options?.delimiter)
       },
       format(cellReference: string, options: SetOptions): void {
         const canonical = formatReference(parseWritableReference(cellReference))

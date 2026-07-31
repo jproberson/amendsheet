@@ -280,6 +280,10 @@ workbook.addSheet('Notes').set('A1', 'draft')
 const out = workbook.toBytes()
 ```
 
+`createWorkbookFromCsv(text, options?)` builds one from delimited text — fields are
+text unless `parseNumbers` is set — and `worksheet.toCsv(options?)` prints a sheet
+back out, RFC 4180 style, from `A1` to the furthest cell that holds anything.
+
 An edit the format cannot hold is refused by `set` itself, with an `XlsxError`
 naming the cell. `NaN`, an infinity, a character XML has no way to encode, a
 date outside the workbook's epoch, and overwriting the cell that defines a

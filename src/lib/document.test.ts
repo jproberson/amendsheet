@@ -3,7 +3,7 @@ import { readFile, readdir } from 'node:fs/promises'
 import { test } from 'node:test'
 import { buildVmlDrawing } from './comments.js'
 import { readContainer, writeContainer } from './container.js'
-import { type Cell, createWorkbook, readWorkbook } from './document.js'
+import { type Cell, createWorkbook, createWorkbookFromCsv, readWorkbook } from './document.js'
 import { XlsxError } from './errors.js'
 import type { CellInput } from './patch.js'
 
@@ -225,6 +225,37 @@ test('addTable over a date-headed range generates a column name', () => {
   sheet?.set('A1', new Date('2024-01-01')) // a date is no use as a column name
   sheet?.addTable('A1:A2')
   assert.deepEqual(readWorkbook(workbook.toBytes()).sheet('Data')?.tables[0]?.columns, ['Column1'])
+})
+
+test('createWorkbookFromCsv builds a sheet, optionally typing numbers', () => {
+  const text = 'name,qty\r\napple,3\r\n"pear, green",5'
+  const asText = createWorkbookFromCsv(text, { sheetName: 'Fruit' })
+  const sheet = readWorkbook(asText.toBytes()).sheet('Fruit')
+  assert.deepEqual(sheet?.cell('A1')?.value, { kind: 'text', value: 'name' })
+  assert.deepEqual(sheet?.cell('A3')?.value, { kind: 'text', value: 'pear, green' }) // quoted comma
+  assert.deepEqual(sheet?.cell('B2')?.value, { kind: 'text', value: '3' }) // text by default
+
+  const typed = createWorkbookFromCsv(text, { parseNumbers: true })
+  const back = readWorkbook(typed.toBytes()).sheets[0]
+  assert.deepEqual(back?.cell('B2')?.value, { kind: 'number', value: 3 }) // now a number
+})
+
+test('toCsv prints the used range, quoting fields and typing values', () => {
+  const workbook = createWorkbook('Data')
+  const sheet = workbook.sheet('Data')
+  sheet?.setValues('A1', [
+    ['name', 'qty', 'ok'],
+    ['a, b', 5, true],
+  ])
+  sheet?.set('B3', new Date('2024-01-02T03:04:05.000Z'))
+  assert.equal(sheet?.toCsv(), 'name,qty,ok\r\n"a, b",5,TRUE\r\n,2024-01-02T03:04:05.000Z,')
+  assert.equal(sheet?.toCsv({ delimiter: '\t' }).split('\r\n')[0], 'name\tqty\tok')
+})
+
+test('a CSV round trip through createWorkbookFromCsv and toCsv preserves the text', () => {
+  const text = 'a,b,c\r\n1,"x,y",\r\n,z,'
+  const csv = createWorkbookFromCsv(text).sheets[0]?.toCsv()
+  assert.equal(csv, text)
 })
 
 test('setValues writes a block and getValues reads it back, with gaps empty', () => {

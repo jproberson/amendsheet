@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url'
 const root = fileURLToPath(new URL('..', import.meta.url))
 
 const usagePrelude = [
-  "import { XlsxError, createWorkbook, readWorkbook } from 'amendsheet'",
+  "import { XlsxError, createWorkbook, createWorkbookFromCsv, readWorkbook } from 'amendsheet'",
   "import type { CellValue } from 'amendsheet'",
   'declare const bytes: Uint8Array',
   'declare const value: CellValue',

@@ -1,4 +1,4 @@
-export { createWorkbook, readWorkbook } from './lib/document.js'
+export { createWorkbook, createWorkbookFromCsv, readWorkbook } from './lib/document.js'
 export type { CellInput, FormulaInput, SheetProtection } from './lib/patch.js'
 export type {
   Alignment,
@@ -29,6 +29,7 @@ export type {
   ColorScale,
   ConditionalFormat,
   Constraint,
+  CsvReadOptions,
   DataBar,
   DataValidation,
   DateConstraint,
