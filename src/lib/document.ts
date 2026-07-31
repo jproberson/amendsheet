@@ -10,7 +10,9 @@ import {
   withSheetsAdded,
 } from './add-sheet.js'
 import { blankWorkbookBytes } from './blank.js'
+import { comparisonToConstraint, numberComparison } from './constraint.js'
 import { formatCsv, parseCsv } from './csv.js'
+import { createValidationStore } from './data-validation.js'
 import { shiftDrawing } from './drawings.js'
 import {
   type ImageType,
@@ -145,10 +147,8 @@ import type {
   CellFormula,
   CellValue,
   ConditionalFormat,
-  Constraint,
   CsvReadOptions,
   DataValidation,
-  NumberConstraint,
   RankRule,
   SetOptions,
   Workbook,
@@ -311,188 +311,6 @@ function withContentTypeDefault(xml: string, extension: string, contentType: str
   const after = xml.indexOf('>', typesOpen) + 1
   const element = `<Default Extension="${extension}" ContentType="${contentType}"/>`
   return xml.slice(0, after) + element + xml.slice(after)
-}
-
-/** Maps a constraint's bounds through `f`, preserving its operator — a date
- * constraint into the serial one written, and back again on read. */
-function mapConstraint<A, B>(constraint: Constraint<A>, f: (bound: A) => B): Constraint<B> {
-  if ('between' in constraint)
-    return { between: [f(constraint.between[0]), f(constraint.between[1])] }
-  if ('notBetween' in constraint)
-    return { notBetween: [f(constraint.notBetween[0]), f(constraint.notBetween[1])] }
-  if ('equal' in constraint) return { equal: f(constraint.equal) }
-  if ('notEqual' in constraint) return { notEqual: f(constraint.notEqual) }
-  if ('greaterThan' in constraint) return { greaterThan: f(constraint.greaterThan) }
-  if ('lessThan' in constraint) return { lessThan: f(constraint.lessThan) }
-  if ('greaterThanOrEqual' in constraint)
-    return { greaterThanOrEqual: f(constraint.greaterThanOrEqual) }
-  return { lessThanOrEqual: f(constraint.lessThanOrEqual) }
-}
-
-function numberComparison(constraint: NumberConstraint): {
-  operator: string
-  formula1: number
-  formula2?: number
-} {
-  if ('between' in constraint)
-    return { operator: 'between', formula1: constraint.between[0], formula2: constraint.between[1] }
-  if ('notBetween' in constraint)
-    return {
-      operator: 'notBetween',
-      formula1: constraint.notBetween[0],
-      formula2: constraint.notBetween[1],
-    }
-  if ('equal' in constraint) return { operator: 'equal', formula1: constraint.equal }
-  if ('notEqual' in constraint) return { operator: 'notEqual', formula1: constraint.notEqual }
-  if ('greaterThan' in constraint)
-    return { operator: 'greaterThan', formula1: constraint.greaterThan }
-  if ('lessThan' in constraint) return { operator: 'lessThan', formula1: constraint.lessThan }
-  if ('greaterThanOrEqual' in constraint)
-    return { operator: 'greaterThanOrEqual', formula1: constraint.greaterThanOrEqual }
-  return { operator: 'lessThanOrEqual', formula1: constraint.lessThanOrEqual }
-}
-
-function buildValidationSpec(
-  rule: DataValidation,
-  sqref: string,
-  at: SheetLocation,
-  date1904: boolean,
-): DataValidationSpec {
-  const allowBlank = rule.allowBlank ?? true
-  if ('list' in rule) {
-    if (rule.list.length === 0) {
-      throw new XlsxError('unwritable-value', 'A list validation needs at least one value', {
-        ...at,
-        reference: sqref,
-      })
-    }
-    for (const value of rule.list) {
-      if (value.includes(',')) {
-        throw new XlsxError(
-          'unwritable-value',
-          `List value "${value}" holds a comma, which an inline list reads as the next value`,
-          { ...at, reference: sqref },
-        )
-      }
-    }
-    return { type: 'list', sqref, allowBlank, formula1: `"${rule.list.join(',')}"` }
-  }
-  if ('listRange' in rule) {
-    return { type: 'list', sqref, allowBlank, formula1: rule.listRange }
-  }
-  if ('custom' in rule) {
-    return { type: 'custom', sqref, allowBlank, formula1: rule.custom }
-  }
-
-  // A date rule compares against serials, so its Date bounds become the same
-  // number rules do; the type marks it a date so a reader turns them back.
-  const type =
-    'whole' in rule
-      ? 'whole'
-      : 'decimal' in rule
-        ? 'decimal'
-        : 'textLength' in rule
-          ? 'textLength'
-          : 'date'
-  const constraint =
-    'whole' in rule
-      ? rule.whole
-      : 'decimal' in rule
-        ? rule.decimal
-        : 'textLength' in rule
-          ? rule.textLength
-          : mapConstraint(rule.date, (date) => dateToSerial(date, date1904))
-  const comparison = numberComparison(constraint)
-  const bounds =
-    comparison.formula2 === undefined
-      ? [comparison.formula1]
-      : [comparison.formula1, comparison.formula2]
-  for (const bound of bounds) {
-    if (!Number.isFinite(bound)) {
-      throw new XlsxError('unwritable-value', `Validation bound ${bound} is not a finite number`, {
-        ...at,
-        reference: sqref,
-      })
-    }
-  }
-  return {
-    type,
-    sqref,
-    allowBlank,
-    operator: comparison.operator,
-    formula1: String(comparison.formula1),
-    formula2: comparison.formula2 === undefined ? undefined : String(comparison.formula2),
-  }
-}
-
-/** The list a validation offers, or undefined when it names a range not an
- * inline set — only the inline form maps back to string values. */
-function listFromFormula(formula1: string): readonly string[] | undefined {
-  if (formula1.length < 2 || !formula1.startsWith('"') || !formula1.endsWith('"')) return undefined
-  const inner = formula1.slice(1, -1)
-  return inner === '' ? [] : inner.split(',')
-}
-
-/** The inverse of `numberComparison`: an operator and its bounds back to a
- * constraint, or undefined for an operator this does not model. */
-function comparisonToConstraint(
-  operator: string | undefined,
-  formula1: string,
-  formula2: string | undefined,
-): NumberConstraint | undefined {
-  const first = Number(formula1)
-  if (!Number.isFinite(first)) return undefined
-  switch (operator) {
-    case 'equal':
-      return { equal: first }
-    case 'notEqual':
-      return { notEqual: first }
-    case 'greaterThan':
-      return { greaterThan: first }
-    case 'lessThan':
-      return { lessThan: first }
-    case 'greaterThanOrEqual':
-      return { greaterThanOrEqual: first }
-    case 'lessThanOrEqual':
-      return { lessThanOrEqual: first }
-    case 'between':
-    case 'notBetween': {
-      const second = Number(formula2)
-      if (!Number.isFinite(second)) return undefined
-      return operator === 'between' ? { between: [first, second] } : { notBetween: [first, second] }
-    }
-    default:
-      return undefined
-  }
-}
-
-/** A stored validation spec back into the public rule, or undefined for a type
- * this does not model (a time). */
-function validationFromSpec(
-  spec: DataValidationSpec,
-  date1904: boolean,
-): DataValidation | undefined {
-  if (spec.type === 'list') {
-    const list = listFromFormula(spec.formula1)
-    return list === undefined
-      ? { allowBlank: spec.allowBlank, listRange: spec.formula1 }
-      : { allowBlank: spec.allowBlank, list }
-  }
-  if (spec.type === 'custom') {
-    return { allowBlank: spec.allowBlank, custom: spec.formula1 }
-  }
-  const constraint = comparisonToConstraint(spec.operator, spec.formula1, spec.formula2)
-  if (constraint === undefined) return undefined
-  if (spec.type === 'whole') return { allowBlank: spec.allowBlank, whole: constraint }
-  if (spec.type === 'decimal') return { allowBlank: spec.allowBlank, decimal: constraint }
-  if (spec.type === 'textLength') return { allowBlank: spec.allowBlank, textLength: constraint }
-  if (spec.type === 'date') {
-    return {
-      allowBlank: spec.allowBlank,
-      date: mapConstraint(constraint, (serial) => serialToDate(serial, date1904)),
-    }
-  }
-  return undefined
 }
 
 /** A stored conditional-format spec back into the public rule, or undefined for
@@ -680,9 +498,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   const sheetZoom = new Map<string, number>()
   const sheetRowGroups = new Map<string, Map<number, number>>()
   const sheetColGroups = new Map<string, Map<number, number>>()
-  const sheetValidations = new Map<string, DataValidationSpec[]>()
+  const validations = createValidationStore(date1904)
   const sheetConditionalFormats = new Map<string, ConditionalFormatSpec[]>()
-  const sheetClearValidations = new Set<string>()
   const sheetClearConditionalFormats = new Set<string>()
   // Comments to add, per sheet, only for sheets that had none — an existing
   // comments part is refused at the call rather than rebuilt.
@@ -725,7 +542,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     sheetZoom,
     sheetRowGroups,
     sheetColGroups,
-    sheetValidations,
+    validations.pending,
     sheetConditionalFormats,
   ]
   const fileNames = readDefinedNames(partText(container, part.path) ?? '')
@@ -1276,13 +1093,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         if (validationsCache === undefined) {
           validationsCache = sheetBytes === undefined ? [] : readDataValidations(sheetBytes)
         }
-        const fromFile = sheetClearValidations.has(reference.path) ? [] : validationsCache
-        const applied: { range: string; rule: DataValidation }[] = []
-        for (const spec of [...fromFile, ...(sheetValidations.get(reference.path) ?? [])]) {
-          const rule = validationFromSpec(spec, date1904)
-          if (rule !== undefined) applied.push({ range: spec.sqref, rule })
-        }
-        return applied
+        return validations.applied(reference.path, validationsCache)
       },
       get conditionalFormats(): readonly {
         readonly range: string
@@ -1665,15 +1476,10 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             { ...at, reference: range },
           )
         }
-        const sqref = sqrefOf(range, at)
-        const spec = buildValidationSpec(rule, sqref, at, date1904)
-        const specs = sheetValidations.get(reference.path) ?? []
-        specs.push(spec)
-        sheetValidations.set(reference.path, specs)
+        validations.add(reference.path, sqrefOf(range, at), at, rule)
       },
       clearValidations(): void {
-        sheetValidations.delete(reference.path)
-        sheetClearValidations.add(reference.path)
+        validations.clear(reference.path)
       },
       conditionalFormat(range: string, rule: ConditionalFormat): void {
         if (sheetBytes === undefined) {
@@ -2452,7 +2258,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       lineOps.length === 0 &&
       Object.keys(pendingProperties).length === 0 &&
       sheetStates.size === 0 &&
-      sheetClearValidations.size === 0 &&
+      validations.cleared.size === 0 &&
       sheetClearConditionalFormats.size === 0
     ) {
       return container.write(changes)
@@ -2497,7 +2303,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     // or a setRowHeight() is rewritten once.
     for (const path of new Set([
       ...patchInputs.flatMap((map) => [...map.keys()]),
-      ...sheetClearValidations,
+      ...validations.cleared,
       ...sheetClearConditionalFormats,
       ...addedSheets.keys(),
     ])) {
@@ -2506,7 +2312,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       if (bytes === undefined) continue
       // Clears drop the file's elements before the patch adds this session's, so a
       // clear-then-add ends with only the added rules.
-      if (sheetClearValidations.has(path)) {
+      if (validations.cleared.has(path)) {
         bytes = encoder.encode(withoutDataValidations(decodeXmlPart(bytes, path)))
       }
       if (sheetClearConditionalFormats.has(path)) {
@@ -2534,7 +2340,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         zoomScale: sheetZoom.get(path),
         rowOutlineLevels: sheetRowGroups.get(path),
         colOutlineLevels: sheetColGroups.get(path),
-        dataValidations: sheetValidations.get(path),
+        dataValidations: validations.pending.get(path),
         conditionalFormats: sheetConditionalFormats.get(path),
       })
       // Unmerge runs after the merge-add above, on the written sheet, so a range
