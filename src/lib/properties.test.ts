@@ -7,8 +7,9 @@ import {
   assertWellFormed,
 } from '../testing/invariants.js'
 import { dateToSerial } from './date.js'
-import { type SetOptions, readWorkbook } from './document.js'
+import { readWorkbook } from './document.js'
 import { XlsxError } from './errors.js'
+import type { SetOptions } from './public-types.js'
 import type { CellInput } from './patch.js'
 import { indexToColumn } from './reference.js'
 

@@ -1,5 +1,5 @@
-import type { CellFormula, CellValue as DocumentValue } from '../lib/document.js'
 import { readWorkbook } from '../lib/document.js'
+import type { CellFormula, CellValue as DocumentValue } from '../lib/public-types.js'
 import type { Adapter, CellValue, SheetValues } from '../harness/types.js'
 
 /** A dependent is identified by its master, which is what exceljs reports too. */

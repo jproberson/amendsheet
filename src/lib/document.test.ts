@@ -3,8 +3,9 @@ import { readFile, readdir } from 'node:fs/promises'
 import { test } from 'node:test'
 import { buildVmlDrawing } from './comments.js'
 import { readContainer, writeContainer } from './container.js'
-import { type Cell, createWorkbook, createWorkbookFromCsv, readWorkbook } from './document.js'
+import { createWorkbook, createWorkbookFromCsv, readWorkbook } from './document.js'
 import { XlsxError } from './errors.js'
+import type { Cell } from './public-types.js'
 import type { CellInput } from './patch.js'
 
 const encode = (text: string) => new TextEncoder().encode(text)

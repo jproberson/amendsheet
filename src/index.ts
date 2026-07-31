@@ -47,7 +47,7 @@ export type {
   SetOptions,
   Workbook,
   Worksheet,
-} from './lib/document.js'
+} from './lib/public-types.js'
 export type { CellAddress } from './lib/reference.js'
 export type { SheetState } from './lib/workbook.js'
 export { XlsxError } from './lib/errors.js'
