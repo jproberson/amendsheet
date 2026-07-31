@@ -2168,32 +2168,36 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     // Parts a copySheet duplicated (dependent parts and the copy's own rels) are
     // written verbatim; the copy's worksheet part flows through the patch below.
     for (const [path, bytes] of addedParts) changes.set(path, bytes)
-    // A format() with no set() records a style override and no value edit; a
+    // One source for "is anything pending?". The sheet-path maps come from
+    // patchInputs, so a new kind of sheet edit registers only there; a part- or
+    // workbook-level container patchSheet does not take adds one line here. A
+    // format() with no set() records a style override and no value edit; a
     // protect(), merge() or setRowHeight() records neither and still rewrites.
-    if (
-      patchInputs.every((map) => map.size === 0) &&
-      sheetHyperlinks.size === 0 &&
-      sheetUnlinks.size === 0 &&
-      sheetComments.size === 0 &&
-      sheetRemovedComments.size === 0 &&
-      sheetTables.size === 0 &&
-      sheetImages.size === 0 &&
-      sheetPageSetup.size === 0 &&
-      sheetPageMargins.size === 0 &&
-      sheetHeaderFooter.size === 0 &&
-      sheetRowBreaks.size === 0 &&
-      sheetColumnBreaks.size === 0 &&
-      addedRefs.length === 0 &&
-      renames.size === 0 &&
-      removed.size === 0 &&
-      pendingNames.size === 0 &&
-      removedNames.size === 0 &&
-      lineOps.length === 0 &&
-      Object.keys(pendingProperties).length === 0 &&
-      sheetStates.size === 0 &&
-      validations.cleared.size === 0 &&
-      conditionalFormats.cleared.size === 0
-    ) {
+    const pendingEdits: ReadonlyArray<() => boolean> = [
+      ...patchInputs.map((map) => () => map.size > 0),
+      () => validations.cleared.size > 0,
+      () => conditionalFormats.cleared.size > 0,
+      () => sheetHyperlinks.size > 0,
+      () => sheetUnlinks.size > 0,
+      () => sheetComments.size > 0,
+      () => sheetRemovedComments.size > 0,
+      () => sheetTables.size > 0,
+      () => sheetImages.size > 0,
+      () => sheetPageSetup.size > 0,
+      () => sheetPageMargins.size > 0,
+      () => sheetHeaderFooter.size > 0,
+      () => sheetRowBreaks.size > 0,
+      () => sheetColumnBreaks.size > 0,
+      () => addedRefs.length > 0,
+      () => renames.size > 0,
+      () => removed.size > 0,
+      () => pendingNames.size > 0,
+      () => removedNames.size > 0,
+      () => lineOps.length > 0,
+      () => Object.keys(pendingProperties).length > 0,
+      () => sheetStates.size > 0,
+    ]
+    if (!pendingEdits.some((has) => has())) {
       return container.write(changes)
     }
 
