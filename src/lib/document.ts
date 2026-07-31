@@ -10,6 +10,7 @@ import {
   withSheetsAdded,
 } from './add-sheet.js'
 import { blankWorkbookBytes } from './blank.js'
+import { EMPTY_RELATIONSHIPS, createContainerDraft, withRelationship } from './container-draft.js'
 import { comparisonToConstraint, numberComparison } from './constraint.js'
 import { formatCsv, parseCsv } from './csv.js'
 import { createValidationStore } from './data-validation.js'
@@ -203,32 +204,6 @@ function partText(container: Container, path: string): string | undefined {
 function sqrefOf(range: string, at: SheetLocation): string {
   if (range.includes(':')) return mergeRangeReference(range, at)
   return formatReference(parseWritableReference(range))
-}
-
-const EMPTY_RELATIONSHIPS =
-  '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
-  '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>'
-
-/**
- * Adds a relationship to a rels part, opening a fresh one when there is none.
- * Returns the id it assigned as well as the text, since a part wired this way is
- * often referenced back by that id from the sheet — a legacy drawing is.
- */
-function withRelationship(
-  relsXml: string | undefined,
-  type: string,
-  target: string,
-): { xml: string; id: string } {
-  const existing = relsXml ?? EMPTY_RELATIONSHIPS
-  let maxId = 0
-  for (const match of existing.matchAll(/Id="rId(\d+)"/g)) maxId = Math.max(maxId, Number(match[1]))
-  const id = `rId${maxId + 1}`
-  const relationship = `<Relationship Id="${id}" Type="${type}" Target="${target}"/>`
-  const close = existing.indexOf('</Relationships>')
-  if (close === -1) {
-    throw new XlsxError('invalid-content', 'A relationships part is malformed', {})
-  }
-  return { xml: existing.slice(0, close) + relationship + existing.slice(close), id }
 }
 
 // A worksheet's <legacyDrawing> must sit after the drawing elements and before
@@ -2232,6 +2207,9 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     // A change carries new bytes for a part; null deletes it. Every part not
     // named here is passed through still compressed, never inflated or rebuilt.
     const changes = new Map<string, Uint8Array | null>()
+    // Reads and stages parts over the container: the plumbing the part-level
+    // features (comments here, images and tables below) share.
+    const draft = createContainerDraft(container, changes)
     // Parts a copySheet duplicated (dependent parts and the copy's own rels) are
     // written verbatim; the copy's worksheet part flows through the patch below.
     for (const [path, bytes] of addedParts) changes.set(path, bytes)
@@ -2443,29 +2421,17 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     }
     const commentParts: string[] = []
     const vmlDrawingParts: string[] = []
-    let commentNumber = 0
-    let vmlDrawingNumber = 0
     for (const [path, notes] of sheetComments) {
       if (removed.has(path) || notes.size === 0) continue
 
       const relationshipsPath = relationshipsPathFor(path)
-      const pendingRels = changes.get(relationshipsPath)
-      const currentRels =
-        pendingRels === undefined || pendingRels === null
-          ? partText(container, relationshipsPath)
-          : decodePart.decode(pendingRels)
+      const currentRels = draft.text(relationshipsPath)
       let relsXml = currentRels
 
-      const existingComments = relationshipTarget(currentRels, path, COMMENTS_RELATIONSHIP)
+      const existingComments = draft.relationshipTarget(path, COMMENTS_RELATIONSHIP)
       if (existingComments === undefined) {
-        do {
-          commentNumber += 1
-        } while (
-          container.parts.has(`xl/comments${commentNumber}.xml`) ||
-          changes.has(`xl/comments${commentNumber}.xml`)
-        )
-        const commentsPath = `xl/comments${commentNumber}.xml`
-        changes.set(commentsPath, encoder.encode(buildCommentsPart(notes)))
+        const commentsPath = `xl/comments${draft.freeNumber((n) => `xl/comments${n}.xml`)}.xml`
+        draft.setBytes(commentsPath, encoder.encode(buildCommentsPart(notes)))
         commentParts.push(commentsPath)
         relsXml = withRelationship(
           relsXml,
@@ -2473,23 +2439,19 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           `../${commentsPath.slice('xl/'.length)}`,
         ).xml
       } else {
-        const existing = partText(container, existingComments) ?? ''
-        changes.set(existingComments, encoder.encode(appendCommentsPart(existing, notes)))
+        const existing = draft.original(existingComments) ?? ''
+        draft.setBytes(existingComments, encoder.encode(appendCommentsPart(existing, notes)))
       }
 
       // A sheet's legacy drawing may hold shapes other than notes (form controls),
       // so an existing one is appended to rather than replaced; only a sheet with
       // none needs a drawing authored and pointed at by a fresh <legacyDrawing>.
-      const existingVml = relationshipTarget(currentRels, path, VML_DRAWING_RELATIONSHIP)
+      const existingVml = draft.relationshipTarget(path, VML_DRAWING_RELATIONSHIP)
       if (existingVml === undefined) {
-        do {
-          vmlDrawingNumber += 1
-        } while (
-          container.parts.has(`xl/drawings/vmlDrawing${vmlDrawingNumber}.vml`) ||
-          changes.has(`xl/drawings/vmlDrawing${vmlDrawingNumber}.vml`)
-        )
-        const vmlDrawingPath = `xl/drawings/vmlDrawing${vmlDrawingNumber}.vml`
-        changes.set(vmlDrawingPath, encoder.encode(buildVmlDrawing([...notes.keys()])))
+        const vmlDrawingPath = `xl/drawings/vmlDrawing${draft.freeNumber(
+          (n) => `xl/drawings/vmlDrawing${n}.vml`,
+        )}.vml`
+        draft.setBytes(vmlDrawingPath, encoder.encode(buildVmlDrawing([...notes.keys()])))
         vmlDrawingParts.push(vmlDrawingPath)
         const withVml = withRelationship(
           relsXml,
@@ -2497,16 +2459,16 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           `../${vmlDrawingPath.slice('xl/'.length)}`,
         )
         relsXml = withVml.xml
-        const sheetXml = sheetTextNow(path)
+        const sheetXml = draft.text(path)
         if (sheetXml !== undefined) {
-          changes.set(path, encoder.encode(withLegacyDrawing(sheetXml, withVml.id)))
+          draft.setBytes(path, encoder.encode(withLegacyDrawing(sheetXml, withVml.id)))
         }
       } else {
-        const existing = partText(container, existingVml) ?? ''
-        changes.set(existingVml, encoder.encode(appendVmlShapes(existing, [...notes.keys()])))
+        const existing = draft.original(existingVml) ?? ''
+        draft.setBytes(existingVml, encoder.encode(appendVmlShapes(existing, [...notes.keys()])))
       }
 
-      if (relsXml !== currentRels) changes.set(relationshipsPath, encoder.encode(relsXml ?? ''))
+      if (relsXml !== currentRels) draft.setBytes(relationshipsPath, encoder.encode(relsXml ?? ''))
     }
 
     // Comment removal runs after the add above, on whatever the add just wrote, so a
@@ -2514,23 +2476,22 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     // the note box leaves the legacy drawing; both are found through the sheet rels.
     for (const [path, refs] of sheetRemovedComments) {
       if (removed.has(path)) continue
-      const relsXml = sheetTextNow(relationshipsPathFor(path))
-      const commentsPath = relationshipTarget(relsXml, path, COMMENTS_RELATIONSHIP)
-      const commentsXml = commentsPath === undefined ? undefined : sheetTextNow(commentsPath)
+      const commentsPath = draft.relationshipTarget(path, COMMENTS_RELATIONSHIP)
+      const commentsXml = commentsPath === undefined ? undefined : draft.text(commentsPath)
       if (commentsPath !== undefined && commentsXml !== undefined) {
         let updated = commentsXml
         for (const ref of refs) updated = withoutComment(updated, ref)
-        if (updated !== commentsXml) changes.set(commentsPath, encoder.encode(updated))
+        if (updated !== commentsXml) draft.setBytes(commentsPath, encoder.encode(updated))
       }
-      const vmlPath = relationshipTarget(relsXml, path, VML_DRAWING_RELATIONSHIP)
-      const vmlXml = vmlPath === undefined ? undefined : sheetTextNow(vmlPath)
+      const vmlPath = draft.relationshipTarget(path, VML_DRAWING_RELATIONSHIP)
+      const vmlXml = vmlPath === undefined ? undefined : draft.text(vmlPath)
       if (vmlPath !== undefined && vmlXml !== undefined) {
         let updated = vmlXml
         for (const ref of refs) {
           const { row, column } = parseReference(ref)
           updated = withoutNoteShape(updated, row - 1, column - 1)
         }
-        if (updated !== vmlXml) changes.set(vmlPath, encoder.encode(updated))
+        if (updated !== vmlXml) draft.setBytes(vmlPath, encoder.encode(updated))
       }
     }
 
