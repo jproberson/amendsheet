@@ -239,6 +239,32 @@ test('hides rows and columns, composing with any width or height', () => {
   assert.match(both, /<col min="5" max="5" width="20" customWidth="1" hidden="1"\/>/)
 })
 
+test('column widths across several col spans each land in the covering span', () => {
+  const patched = patchSheet(
+    '<worksheet xmlns="http://x"><cols><col min="1" max="3" width="10"/>' +
+      '<col min="5" max="7" width="30"/></cols><sheetData/></worksheet>',
+    new Map(),
+    false,
+    undefined,
+    undefined,
+    {
+      columnWidths: new Map([
+        [6, 88],
+        [2, 99],
+      ]),
+    },
+  )
+  // Column 2 splits the first span, column 6 the second; a gap column would append.
+  assert.match(
+    patched,
+    /<col min="1" max="1" width="10"\/><col customWidth="1" min="2" max="2" width="99"\/><col min="3" max="3" width="10"\/>/,
+  )
+  assert.match(
+    patched,
+    /<col min="5" max="5" width="30"\/><col customWidth="1" min="6" max="6" width="88"\/><col min="7" max="7" width="30"\/>/,
+  )
+})
+
 test('a merge the sheet already declares is not added twice', () => {
   const patched = patchSheet(sheet(ROWS), new Map(), false, undefined, undefined, {
     merges: ['A1:B1'],

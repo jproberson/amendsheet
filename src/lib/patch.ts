@@ -1873,7 +1873,26 @@ export function patchSheet(
       return level === undefined ? withHidden : withAttribute(withHidden, 'outlineLevel', level)
     }
 
-    const covering = (column: number) => shape.cols.find((c) => c.min <= column && column <= c.max)
+    // Col spans do not overlap and Excel writes them sorted, so the covering span
+    // is the last one whose `min` is at or before the column — a binary search,
+    // not an O(spans) scan per edited column.
+    const sortedCols = [...shape.cols].sort((a, b) => a.min - b.min)
+    const covering = (column: number) => {
+      let low = 0
+      let high = sortedCols.length - 1
+      let candidate: (typeof shape.cols)[number] | undefined
+      while (low <= high) {
+        const middle = (low + high) >> 1
+        const span = sortedCols[middle]
+        if (span !== undefined && span.min <= column) {
+          candidate = span
+          low = middle + 1
+        } else {
+          high = middle - 1
+        }
+      }
+      return candidate !== undefined && column <= candidate.max ? candidate : undefined
+    }
     const bySpan = new Map<(typeof shape.cols)[number], number[]>()
     const appends: number[] = []
     for (const column of new Set([
