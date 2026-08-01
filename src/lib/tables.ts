@@ -1,8 +1,10 @@
 import { escapeSheetName } from './add-sheet.js'
+import { type ContainerDraft, withRelationship } from './container-draft.js'
 import { type Container, decodeXmlPart } from './container.js'
 import { formatReference, parseReference } from './reference.js'
 import { readRelationships, resolveTarget } from './relationships.js'
 import type { ShiftSpec } from './shift.js'
+import { relationshipsPathFor } from './workbook-parts.js'
 import { readXml, readXmlBytes, withAttribute } from './xml.js'
 
 const SPREADSHEET_NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
@@ -691,4 +693,52 @@ function relationshipId(attributes: ReadonlyMap<string, string>): string | undef
     if (name === 'id' || name.endsWith(':id')) return value
   }
   return undefined
+}
+
+const TABLE_RELATIONSHIP =
+  'http://schemas.openxmlformats.org/officeDocument/2006/relationships/table'
+export const TABLE_CONTENT_TYPE =
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml'
+
+/**
+ * Writes this session's added tables into the draft. Each gets its own part wired
+ * to the sheet by a relationship and listed in a `<tableParts>` element; the header
+ * cells were written through the edit machinery already, so the sheet carries them.
+ * Returns the fresh table parts, for the caller to declare in the content types.
+ */
+export function contributeTables(
+  draft: ContainerDraft,
+  tables: ReadonlyMap<string, readonly TableSpec[]>,
+  removedSheets: ReadonlySet<string>,
+): { tableParts: string[] } {
+  const encoder = new TextEncoder()
+  const tableParts: string[] = []
+  let tableNumber = 0
+
+  for (const [path, specs] of tables) {
+    if (removedSheets.has(path)) continue
+    let sheetXml = draft.text(path)
+    if (sheetXml === undefined) continue
+    const relationshipsPath = relationshipsPathFor(path)
+    let relsXml = draft.text(relationshipsPath)
+    for (const spec of specs) {
+      do {
+        tableNumber += 1
+      } while (draft.has(`xl/tables/table${tableNumber}.xml`))
+      const tablePath = `xl/tables/table${tableNumber}.xml`
+      draft.setBytes(tablePath, encoder.encode(buildTablePart(tableNumber, spec)))
+      tableParts.push(tablePath)
+      const wired = withRelationship(
+        relsXml,
+        TABLE_RELATIONSHIP,
+        `../${tablePath.slice('xl/'.length)}`,
+      )
+      relsXml = wired.xml
+      sheetXml = withTableParts(sheetXml, wired.id)
+    }
+    draft.setBytes(relationshipsPath, encoder.encode(relsXml ?? ''))
+    draft.setBytes(path, encoder.encode(sheetXml))
+  }
+
+  return { tableParts }
 }

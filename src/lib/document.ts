@@ -98,15 +98,15 @@ import { type SharedMasters, toCell } from './cell-read.js'
 import { readSheet } from './sheet.js'
 import { appendSharedStrings, readSharedStrings } from './shared-strings.js'
 import {
+  TABLE_CONTENT_TYPE,
   type TableSpec,
-  buildTablePart,
+  contributeTables,
   extendTables,
   insertTableColumns,
   readTables,
   shiftTables,
   tableColumnDamage,
   tableRowDamage,
-  withTableParts,
 } from './tables.js'
 import type { HeaderFooter, PageBreaks, PageMargins, PageSetup } from './page.js'
 import { createPageStore } from './page-session.js'
@@ -154,9 +154,6 @@ const CORE_PROPERTIES_PART = 'docProps/core.xml'
 const CORE_PROPERTIES_RELATIONSHIP =
   'http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties'
 const CORE_PROPERTIES_CONTENT_TYPE = 'application/vnd.openxmlformats-package.core-properties+xml'
-const TABLE_RELATIONSHIP =
-  'http://schemas.openxmlformats.org/officeDocument/2006/relationships/table'
-const TABLE_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml'
 
 // Pinned parts whose positions this library now moves with an insert or delete,
 // so their presence no longer blocks one at the gate. A table still refuses a
@@ -2123,38 +2120,9 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     // parts and media extensions to declare in the content types.
     const { drawingParts, imageExtensions } = contributeImages(draft, sheetImages, removed)
 
-    // Tables get their own part, wired to the sheet by a relationship, listed in a
-    // <tableParts> element and declared in the content types. The header cells were
-    // written through the edit machinery above, so the sheet already carries them.
-    const tableParts: string[] = []
-    let tableNumber = 0
-    for (const [path, specs] of sheetTables) {
-      if (removed.has(path)) continue
-      let sheetXml = draft.text(path)
-      if (sheetXml === undefined) continue
-      const relationshipsPath = relationshipsPathFor(path)
-      let relsXml = draft.text(relationshipsPath)
-      for (const spec of specs) {
-        do {
-          tableNumber += 1
-        } while (
-          container.parts.has(`xl/tables/table${tableNumber}.xml`) ||
-          changes.has(`xl/tables/table${tableNumber}.xml`)
-        )
-        const tablePath = `xl/tables/table${tableNumber}.xml`
-        changes.set(tablePath, encoder.encode(buildTablePart(tableNumber, spec)))
-        tableParts.push(tablePath)
-        const wired = withRelationship(
-          relsXml,
-          TABLE_RELATIONSHIP,
-          `../${tablePath.slice('xl/'.length)}`,
-        )
-        relsXml = wired.xml
-        sheetXml = withTableParts(sheetXml, wired.id)
-      }
-      changes.set(relationshipsPath, encoder.encode(relsXml ?? ''))
-      changes.set(path, encoder.encode(sheetXml))
-    }
+    // contributeTables writes this session added tables and returns the fresh table
+    // parts to declare in the content types.
+    const { tableParts } = contributeTables(draft, sheetTables, removed)
 
     // Page setup writes elements the schema orders margins, setup, headerFooter,
     // rowBreaks, colBreaks. Applying them in that order lands each in the right
