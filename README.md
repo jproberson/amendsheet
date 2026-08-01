@@ -287,6 +287,8 @@ print area is one such scoped name: `worksheet.setPrintArea('A1:J26')` sets it,
 removes it. Print titles — the rows or columns repeated on every printed page —
 work the same: `worksheet.setPrintTitles({ rows: '1:2', columns: 'A:A' })`,
 `worksheet.printTitles`, and `clearPrintTitles()`.
+`worksheet.setPrintOptions({ gridlines: true, headings: true })` makes a sheet
+print its gridlines and headings, and `worksheet.printOptions` reads it back.
 `worksheet.link('A1', { url: 'https://example.com' })` links a cell out to a
 URL, and `link('A1', { location: 'Sheet2!A1' })` links within the workbook to a
 cell or a defined name — both take an optional `tooltip`, replace any link the

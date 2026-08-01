@@ -5,10 +5,12 @@ import {
   readPageBreaks,
   readPageMargins,
   readPageSetup,
+  readPrintOptions,
   withColumnBreaks,
   withHeaderFooter,
   withPageMargins,
   withPageSetup,
+  withPrintOptions,
   withRowBreaks,
 } from './page.js'
 
@@ -310,4 +312,28 @@ test('breaks written by withRowBreaks and withColumnBreaks read back through rea
   xml = withRowBreaks(xml, [9, 20])
   xml = withColumnBreaks(xml, [3])
   assert.deepEqual(readPageBreaks(encode(xml)), { rows: [10, 21], columns: ['D'] })
+})
+
+test('withPrintOptions creates a fresh element with only what is set', () => {
+  const xml = withPrintOptions('<worksheet><sheetData/></worksheet>', { headings: true })
+  assert.match(xml, /<printOptions headings="1"\/>/)
+  assert.doesNotMatch(xml, /gridLines/)
+})
+
+test('withPrintOptions turning gridlines off writes 0 and pairs gridLinesSet', () => {
+  const xml = withPrintOptions('<worksheet><sheetData/></worksheet>', { gridlines: false })
+  assert.match(xml, /<printOptions gridLines="0" gridLinesSet="0"\/>/)
+})
+
+test('readPrintOptions reads the true spelling and defaults to off', () => {
+  assert.deepEqual(
+    readPrintOptions(
+      encode('<worksheet><printOptions gridLines="true" headings="1"/></worksheet>'),
+    ),
+    { gridlines: true, headings: true },
+  )
+  assert.deepEqual(readPrintOptions(encode('<worksheet><sheetData/></worksheet>')), {
+    gridlines: false,
+    headings: false,
+  })
 })

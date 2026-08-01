@@ -19,13 +19,14 @@ import type {
   PageBreaks,
   PageMargins,
   PageSetup,
+  PrintOptions,
 } from './page.js'
 import type { PrintTitles } from './defined-names.js'
 
 export type { Hyperlink }
 export type { RichText, RichTextRun }
 export type { DocumentProperties }
-export type { PageSetup, PageMargins, HeaderFooter, HeaderFooterSection, PageBreaks }
+export type { PageSetup, PageMargins, HeaderFooter, HeaderFooterSection, PageBreaks, PrintOptions }
 export type { PrintTitles }
 
 export type CellValue =
@@ -380,6 +381,12 @@ export interface Worksheet {
   /** Sets print margins, merging onto the ones the sheet has, so a partial edit
    * still leaves all six. Refuses a margin that is not a finite number at least zero. */
   setPageMargins(margins: PageMargins): void
+  /** Whether the sheet prints its gridlines and its row and column headings, each
+   * off unless the file or a `setPrintOptions` this session turned it on. */
+  readonly printOptions: { readonly gridlines: boolean; readonly headings: boolean }
+  /** Sets whether gridlines and headings print, merging onto what the sheet has, so
+   * setting one leaves the other. */
+  setPrintOptions(options: PrintOptions): void
   /** The printed header and footer, each split into left, centre and right, the
    * file's plus any set this session. */
   readonly headerFooter: HeaderFooter

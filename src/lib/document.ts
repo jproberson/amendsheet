@@ -95,7 +95,7 @@ import {
   tableColumnDamage,
   tableRowDamage,
 } from './tables.js'
-import type { HeaderFooter, PageBreaks, PageMargins, PageSetup } from './page.js'
+import type { HeaderFooter, PageBreaks, PageMargins, PageSetup, PrintOptions } from './page.js'
 import { createPageStore } from './page-session.js'
 import {
   type CellFormatting,
@@ -1333,6 +1333,19 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           )
         }
         page.setPageMargins(reference.path, margins, at)
+      },
+      get printOptions(): { gridlines: boolean; headings: boolean } {
+        return page.mergedPrintOptions(reference.path, sheetBytes)
+      },
+      setPrintOptions(options: PrintOptions): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so its print options cannot be set`,
+            { ...at },
+          )
+        }
+        page.setPrintOptions(reference.path, options)
       },
       get headerFooter(): HeaderFooter {
         return page.mergedHeaderFooter(reference.path, sheetBytes)

@@ -3948,6 +3948,11 @@ test('refuses a write to a sheet whose part is not in the package', () => {
   )
   assert.deepEqual(workbook.sheets[0]?.pageBreaks, { rows: [], columns: [] })
   assert.throws(
+    () => workbook.sheets[0]?.setPrintOptions({ gridlines: true }),
+    (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
+  )
+  assert.deepEqual(workbook.sheets[0]?.printOptions, { gridlines: false, headings: false })
+  assert.throws(
     () => workbook.sheets[0]?.freeze('B2'),
     (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
   )
@@ -5050,4 +5055,38 @@ test('clearPrintTitles removes an existing title', () => {
   workbook.sheets[0]?.clearPrintTitles()
   assert.equal(workbook.sheets[0]?.printTitles, undefined)
   assert.equal(readWorkbook(workbook.toBytes()).sheets[0]?.printTitles, undefined)
+})
+
+test('setPrintOptions writes printOptions, merges, and reads back', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  const sheet = workbook.sheets[0]
+  sheet?.setPrintOptions({ gridlines: true })
+  assert.deepEqual(sheet?.printOptions, { gridlines: true, headings: false })
+  sheet?.setPrintOptions({ headings: true }) // merges, keeping gridlines
+  assert.deepEqual(sheet?.printOptions, { gridlines: true, headings: true })
+  const xml = decode(readContainer(workbook.toBytes()).parts.get('xl/worksheets/sheet1.xml'))
+  assert.match(xml, /<printOptions[^>]*gridLines="1"[^>]*headings="1"[^>]*\/>/)
+  assert.deepEqual(readWorkbook(workbook.toBytes()).sheets[0]?.printOptions, {
+    gridlines: true,
+    headings: true,
+  })
+})
+
+test('printOptions defaults to both off', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  assert.deepEqual(workbook.sheets[0]?.printOptions, { gridlines: false, headings: false })
+})
+
+test('setPrintOptions merges onto an existing printOptions element, keeping other attributes', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      after: '<printOptions horizontalCentered="1"/><pageMargins left="1"/>',
+    }),
+  )
+  workbook.sheets[0]?.setPrintOptions({ gridlines: true })
+  const xml = decode(readContainer(workbook.toBytes()).parts.get('xl/worksheets/sheet1.xml'))
+  assert.match(xml, /<printOptions[^>]*horizontalCentered="1"[^>]*\/>/)
+  assert.match(xml, /<printOptions[^>]*gridLines="1"[^>]*\/>/)
+  // The existing element is edited in place, not doubled.
+  assert.equal((xml.match(/<printOptions/g) ?? []).length, 1)
 })

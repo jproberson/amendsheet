@@ -4,14 +4,17 @@ import {
   type PageBreaks,
   type PageMargins,
   type PageSetup,
+  type PrintOptions,
   readHeaderFooter,
   readPageBreaks,
   readPageMargins,
   readPageSetup,
+  readPrintOptions,
   withColumnBreaks,
   withHeaderFooter,
   withPageMargins,
   withPageSetup,
+  withPrintOptions,
   withRowBreaks,
 } from './page.js'
 import type { SheetLocation } from './cell-input.js'
@@ -28,11 +31,16 @@ import { LAST_COLUMN, LAST_ROW, columnToIndex, indexToColumn } from './reference
 export interface PageStore {
   setPageSetup(path: string, setup: PageSetup, at: SheetLocation): void
   setPageMargins(path: string, margins: PageMargins, at: SheetLocation): void
+  setPrintOptions(path: string, options: PrintOptions): void
   setHeaderFooter(path: string, headerFooter: HeaderFooter): void
   addRowBreak(path: string, row: number, at: SheetLocation): void
   addColumnBreak(path: string, column: string, at: SheetLocation): void
   mergedSetup(path: string, sheetBytes: Uint8Array | undefined): PageSetup
   mergedMargins(path: string, sheetBytes: Uint8Array | undefined): PageMargins
+  mergedPrintOptions(
+    path: string,
+    sheetBytes: Uint8Array | undefined,
+  ): { gridlines: boolean; headings: boolean }
   mergedHeaderFooter(path: string, sheetBytes: Uint8Array | undefined): HeaderFooter
   mergedBreaks(path: string, sheetBytes: Uint8Array | undefined): PageBreaks
   /** The sheet paths carrying any pending print edit, for the write pass. */
@@ -46,6 +54,7 @@ export interface PageStore {
 export function createPageStore(): PageStore {
   const setup = new Map<string, PageSetup>()
   const margins = new Map<string, PageMargins>()
+  const printOptions = new Map<string, PrintOptions>()
   const headerFooter = new Map<string, HeaderFooter>()
   const rowBreaks = new Map<string, Set<number>>()
   const columnBreaks = new Map<string, Set<number>>()
@@ -86,6 +95,9 @@ export function createPageStore(): PageStore {
       }
       margins.set(path, { ...margins.get(path), ...next })
     },
+    setPrintOptions(path, next) {
+      printOptions.set(path, { ...printOptions.get(path), ...next })
+    },
     setHeaderFooter(path, next) {
       headerFooter.set(path, { ...headerFooter.get(path), ...next })
     },
@@ -120,6 +132,17 @@ export function createPageStore(): PageStore {
       const file = sheetBytes === undefined ? {} : readPageMargins(sheetBytes)
       return { ...file, ...margins.get(path) }
     },
+    mergedPrintOptions(path, sheetBytes) {
+      const file =
+        sheetBytes === undefined
+          ? { gridlines: false, headings: false }
+          : readPrintOptions(sheetBytes)
+      const pending = printOptions.get(path)
+      return {
+        gridlines: pending?.gridlines ?? file.gridlines,
+        headings: pending?.headings ?? file.headings,
+      }
+    },
     mergedHeaderFooter(path, sheetBytes) {
       const file = sheetBytes === undefined ? {} : readHeaderFooter(sheetBytes)
       return { ...file, ...headerFooter.get(path) }
@@ -139,6 +162,7 @@ export function createPageStore(): PageStore {
       return new Set([
         ...margins.keys(),
         ...setup.keys(),
+        ...printOptions.keys(),
         ...headerFooter.keys(),
         ...rowBreaks.keys(),
         ...columnBreaks.keys(),
@@ -148,6 +172,7 @@ export function createPageStore(): PageStore {
       return (
         setup.size > 0 ||
         margins.size > 0 ||
+        printOptions.size > 0 ||
         headerFooter.size > 0 ||
         rowBreaks.size > 0 ||
         columnBreaks.size > 0
@@ -155,6 +180,8 @@ export function createPageStore(): PageStore {
     },
     apply(sheetXml, path) {
       let xml = sheetXml
+      const printOptionsFor = printOptions.get(path)
+      if (printOptionsFor !== undefined) xml = withPrintOptions(xml, printOptionsFor)
       const marginsFor = margins.get(path)
       if (marginsFor !== undefined) xml = withPageMargins(xml, marginsFor)
       const setupFor = setup.get(path)

@@ -8,6 +8,12 @@ export interface PageSetup {
   readonly scale?: number
 }
 
+/** Whether a sheet prints its gridlines and its row and column headings. */
+export interface PrintOptions {
+  readonly gridlines?: boolean
+  readonly headings?: boolean
+}
+
 /** The print margins, in inches. Every field is optional. */
 export interface PageMargins {
   readonly left?: number
@@ -145,6 +151,57 @@ export function withPageSetup(sheetXml: string, setup: PageSetup): string {
     `<pageSetup${orientation}${scale}/>`,
     AFTER_PAGE_MARGINS.slice(1),
   )
+}
+
+// printOptions sits just before pageMargins in the worksheet schema.
+const AFTER_PRINT_OPTIONS = ['pageMargins', ...AFTER_PAGE_MARGINS]
+
+const flagAttribute = (
+  attributes: ReadonlyMap<string, string>,
+  name: string,
+): boolean | undefined => {
+  const raw = attributes.get(name)
+  if (raw === undefined) return undefined
+  return raw === '1' || raw === 'true'
+}
+
+/**
+ * Writes the print options a caller gives, keeping any other attribute the
+ * `printOptions` element carries. Turning gridlines on also sets `gridLinesSet`,
+ * the flag Excel pairs with it.
+ */
+export function withPrintOptions(sheetXml: string, options: PrintOptions): string {
+  const tag = selfClosingTag(sheetXml, 'printOptions')
+  if (tag !== undefined) {
+    let openTag = sheetXml.slice(tag.start, tag.end)
+    if (options.gridlines !== undefined) {
+      openTag = setAttribute(openTag, 'gridLines', options.gridlines ? 1 : 0)
+      openTag = setAttribute(openTag, 'gridLinesSet', options.gridlines ? 1 : 0)
+    }
+    if (options.headings !== undefined) {
+      openTag = setAttribute(openTag, 'headings', options.headings ? 1 : 0)
+    }
+    return sheetXml.slice(0, tag.start) + openTag + sheetXml.slice(tag.end)
+  }
+  let attributes = ''
+  if (options.gridlines !== undefined) {
+    const flag = options.gridlines ? 1 : 0
+    attributes += ` gridLines="${flag}" gridLinesSet="${flag}"`
+  }
+  if (options.headings !== undefined) attributes += ` headings="${options.headings ? 1 : 0}"`
+  return insertBeforeSuccessor(sheetXml, `<printOptions${attributes}/>`, AFTER_PRINT_OPTIONS)
+}
+
+/** Reads whether the sheet prints gridlines and headings, each off by default. */
+export function readPrintOptions(bytes: Uint8Array): { gridlines: boolean; headings: boolean } {
+  for (const event of readXmlBytes(bytes)) {
+    if (event.kind !== 'open' || event.localName !== 'printOptions') continue
+    return {
+      gridlines: flagAttribute(event.attributes, 'gridLines') ?? false,
+      headings: flagAttribute(event.attributes, 'headings') ?? false,
+    }
+  }
+  return { gridlines: false, headings: false }
 }
 
 /** Reads the page setup — the orientation and scale this models. */
