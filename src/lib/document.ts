@@ -46,12 +46,7 @@ import {
   writeCoreProperties,
 } from './document-properties.js'
 import { readRelationships, resolveTarget } from './relationships.js'
-import {
-  type Hyperlink,
-  readSheetHyperlinks,
-  withoutHyperlinks,
-  writeSheetHyperlinks,
-} from './hyperlinks.js'
+import { type Hyperlink, contributeHyperlinks, readSheetHyperlinks } from './hyperlinks.js'
 import { type Container, decodeXmlPart } from './container.js'
 import { XlsxError } from './errors.js'
 import { LAST_SERIAL, dateToSerial, serialToDate } from './date.js'
@@ -2079,33 +2074,9 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       if (updated !== xml) changes.set(path, encoder.encode(updated))
     }
 
-    // Hyperlinks are written before the line-ops below, so an inserted or deleted
-    // line shifts their `ref` along with every other reference. An external link
-    // takes a fresh relationship id in the sheet's rels part; an internal one is
-    // written inline and needs none.
-    for (const path of new Set([...sheetHyperlinks.keys(), ...sheetUnlinks.keys()])) {
-      if (removed.has(path)) continue
-      let sheetXml = draft.text(path)
-      if (sheetXml === undefined) continue
-      const links = sheetHyperlinks.get(path)
-      if (links !== undefined) {
-        const relationshipsPath = relationshipsPathFor(path)
-        const written = writeSheetHyperlinks(
-          sheetXml,
-          partText(container, relationshipsPath),
-          links,
-        )
-        sheetXml = written.sheetXml
-        if (written.relsXml !== undefined) {
-          changes.set(relationshipsPath, encoder.encode(written.relsXml))
-        }
-      }
-      // Removal runs after the write, on the same sheet, so a cell linked then
-      // unlinked this session ends with no link.
-      const unlinks = sheetUnlinks.get(path)
-      if (unlinks !== undefined) sheetXml = withoutHyperlinks(sheetXml, unlinks)
-      changes.set(path, encoder.encode(sheetXml))
-    }
+    // contributeHyperlinks writes link adds and removals before the line-ops shift,
+    // so a linked cell reference moves with the rest.
+    contributeHyperlinks(draft, sheetHyperlinks, sheetUnlinks, removed)
 
     // Comments live in two parts wired to the sheet; contributeComments writes the
     // adds and removals and returns the fresh parts to declare in the content types.

@@ -1,7 +1,9 @@
 import { escapeSheetName } from './add-sheet.js'
+import type { ContainerDraft } from './container-draft.js'
 import { canonicalReference, parseReference } from './reference.js'
 import { readRelationships } from './relationships.js'
 import { type Splice, applySplices } from './splices.js'
+import { relationshipsPathFor } from './workbook-parts.js'
 import { readXml } from './xml.js'
 
 const RELATIONSHIPS_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
@@ -278,4 +280,37 @@ export function readSheetHyperlinks(
     }
   }
   return links
+}
+
+/**
+ * Writes this session's hyperlink adds and removals into the draft. An external
+ * link takes a fresh relationship id in the sheet's rels part; an internal one is
+ * written inline and needs none. Runs before the line-ops shift so a link's `ref`
+ * moves with every other reference; removal runs after the add on the same sheet,
+ * so a cell linked then unlinked this session ends with no link.
+ */
+export function contributeHyperlinks(
+  draft: ContainerDraft,
+  hyperlinks: ReadonlyMap<string, ReadonlyMap<string, Hyperlink>>,
+  unlinks: ReadonlyMap<string, ReadonlySet<string>>,
+  removedSheets: ReadonlySet<string>,
+): void {
+  const encoder = new TextEncoder()
+  for (const path of new Set([...hyperlinks.keys(), ...unlinks.keys()])) {
+    if (removedSheets.has(path)) continue
+    let sheetXml = draft.text(path)
+    if (sheetXml === undefined) continue
+    const links = hyperlinks.get(path)
+    if (links !== undefined) {
+      const relationshipsPath = relationshipsPathFor(path)
+      const written = writeSheetHyperlinks(sheetXml, draft.original(relationshipsPath), links)
+      sheetXml = written.sheetXml
+      if (written.relsXml !== undefined) {
+        draft.setBytes(relationshipsPath, encoder.encode(written.relsXml))
+      }
+    }
+    const refs = unlinks.get(path)
+    if (refs !== undefined) sheetXml = withoutHyperlinks(sheetXml, refs)
+    draft.setBytes(path, encoder.encode(sheetXml))
+  }
 }
