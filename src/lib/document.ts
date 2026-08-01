@@ -24,13 +24,7 @@ import {
   imageContentType,
   imageType,
 } from './images.js'
-import {
-  COMMENTS_CONTENT_TYPE,
-  COMMENTS_RELATIONSHIP,
-  VML_DRAWING_CONTENT_TYPE,
-  contributeComments,
-  readComments,
-} from './comments.js'
+import { COMMENTS_RELATIONSHIP, contributeComments, readComments } from './comments.js'
 import { checkDefinedName, readDefinedNames, withDefinedNames } from './defined-names.js'
 import {
   type DocumentProperties,
@@ -2067,13 +2061,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     contributeHyperlinks(draft, sheetHyperlinks, sheetUnlinks, removed)
 
     // Comments live in two parts wired to the sheet; contributeComments writes the
-    // adds and removals and returns the fresh parts to declare in the content types.
-    const { commentParts, vmlDrawingParts } = contributeComments(
-      draft,
-      sheetComments,
-      sheetRemovedComments,
-      removed,
-    )
+    // adds and removals, declaring each fresh part's content type on the draft.
+    contributeComments(draft, sheetComments, sheetRemovedComments, removed)
 
     // contributeImages embeds this session pictures and returns the fresh drawing
     // parts and media extensions to declare in the content types.
@@ -2181,12 +2170,6 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         addedRefs,
       )
       for (const path of removedExisting) updated = withoutOverride(updated, path)
-      for (const commentsPath of commentParts) {
-        updated = withContentTypeOverride(updated, commentsPath, COMMENTS_CONTENT_TYPE)
-      }
-      for (const vmlDrawingPath of vmlDrawingParts) {
-        updated = withContentTypeOverride(updated, vmlDrawingPath, VML_DRAWING_CONTENT_TYPE)
-      }
       for (const override of addedOverrides) {
         updated = withContentTypeOverride(updated, override.path, override.contentType)
       }

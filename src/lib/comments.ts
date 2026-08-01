@@ -389,18 +389,16 @@ export const VML_DRAWING_CONTENT_TYPE = 'application/vnd.openxmlformats-officedo
  * part holds the text, a legacy VML drawing holds the box Excel draws for each
  * note. A sheet with none yet opens fresh parts; one that already has some has the
  * new notes and shapes spliced in, so its existing rich text survives. Removal
- * runs after the adds, on whatever they just wrote. Returns the fresh comment and
- * VML parts, for the caller to declare in the content types.
+ * runs after the adds, on whatever they just wrote. Each fresh part declares its
+ * content type on the draft.
  */
 export function contributeComments(
   draft: ContainerDraft,
   comments: ReadonlyMap<string, ReadonlyMap<string, string>>,
   removedComments: ReadonlyMap<string, ReadonlySet<string>>,
   removedSheets: ReadonlySet<string>,
-): { commentParts: string[]; vmlDrawingParts: string[] } {
+): void {
   const encoder = new TextEncoder()
-  const commentParts: string[] = []
-  const vmlDrawingParts: string[] = []
 
   for (const [path, notes] of comments) {
     if (removedSheets.has(path) || notes.size === 0) continue
@@ -413,7 +411,7 @@ export function contributeComments(
     if (existingComments === undefined) {
       const commentsPath = `xl/comments${draft.freeNumber((n) => `xl/comments${n}.xml`)}.xml`
       draft.setBytes(commentsPath, encoder.encode(buildCommentsPart(notes)))
-      commentParts.push(commentsPath)
+      draft.declareOverride(commentsPath, COMMENTS_CONTENT_TYPE)
       relsXml = withRelationship(
         relsXml,
         COMMENTS_RELATIONSHIP,
@@ -433,7 +431,7 @@ export function contributeComments(
         (n) => `xl/drawings/vmlDrawing${n}.vml`,
       )}.vml`
       draft.setBytes(vmlDrawingPath, encoder.encode(buildVmlDrawing([...notes.keys()])))
-      vmlDrawingParts.push(vmlDrawingPath)
+      draft.declareOverride(vmlDrawingPath, VML_DRAWING_CONTENT_TYPE)
       const withVml = withRelationship(
         relsXml,
         VML_DRAWING_RELATIONSHIP,
@@ -472,6 +470,4 @@ export function contributeComments(
       if (updated !== vmlXml) draft.setBytes(vmlPath, encoder.encode(updated))
     }
   }
-
-  return { commentParts, vmlDrawingParts }
 }

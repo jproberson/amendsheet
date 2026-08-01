@@ -22,14 +22,7 @@ const freshSheet = () => {
 
 test('contributeComments opens a comments part and a VML drawing wired to the sheet', () => {
   const { draft } = freshSheet()
-  const result = contributeComments(
-    draft,
-    new Map([[PATH, new Map([['A1', 'hello']])]]),
-    new Map(),
-    new Set(),
-  )
-  assert.deepEqual(result.commentParts, ['xl/comments1.xml'])
-  assert.deepEqual(result.vmlDrawingParts, ['xl/drawings/vmlDrawing1.vml'])
+  contributeComments(draft, new Map([[PATH, new Map([['A1', 'hello']])]]), new Map(), new Set())
   assert.ok(draft.text('xl/comments1.xml')?.includes('hello'))
   assert.ok(draft.text(PATH)?.includes('legacyDrawing'))
   assert.ok(
@@ -38,6 +31,9 @@ test('contributeComments opens a comments part and a VML drawing wired to the sh
       'http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments',
     ),
   )
+  const types = draft.applyContentTypes(CONTENT_TYPES)
+  assert.ok(types.includes('PartName="/xl/comments1.xml"'))
+  assert.ok(types.includes('PartName="/xl/drawings/vmlDrawing1.vml"'))
 })
 
 test('contributeImages writes a media part and a drawing, returning the extension', () => {
@@ -94,12 +90,7 @@ test('contributeHyperlinks writes the link inline and its external relationship'
 
 test('a removed sheet contributes nothing', () => {
   const { draft, changes } = freshSheet()
-  const result = contributeComments(
-    draft,
-    new Map([[PATH, new Map([['A1', 'x']])]]),
-    new Map(),
-    new Set([PATH]),
-  )
-  assert.deepEqual(result.commentParts, [])
+  contributeComments(draft, new Map([[PATH, new Map([['A1', 'x']])]]), new Map(), new Set([PATH]))
   assert.equal(changes.size, 0)
+  assert.equal(draft.applyContentTypes(CONTENT_TYPES), CONTENT_TYPES)
 })
