@@ -13,8 +13,7 @@ import { blankWorkbookBytes } from './blank.js'
 import { type ContainerDraft, createContainerDraft, withRelationship } from './container-draft.js'
 import { withContentTypeOverride } from './content-types.js'
 import { applyLineShifts } from './apply-line-shifts.js'
-import { createConditionalFormatStore } from './conditional-format.js'
-import { numberComparison } from './constraint.js'
+import { createConditionalFormatStore, planConditionalFormat } from './conditional-format.js'
 import { formatCsv, parseCsv } from './csv.js'
 import { createValidationStore } from './data-validation.js'
 import { type PendingImage, contributeImages, imageType } from './images.js'
@@ -1126,93 +1125,10 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           )
         }
         const sqref = sqrefOf(range, at)
-        const specs: ConditionalFormatSpec[] = []
-        if ('colorScale' in rule) {
-          const { min, mid, max } = rule.colorScale
-          const colors =
-            mid === undefined
-              ? [normalizeColor(min, at), normalizeColor(max, at)]
-              : [normalizeColor(min, at), normalizeColor(mid, at), normalizeColor(max, at)]
-          specs.push({ kind: 'colorScale', sqref, colors })
-        } else if ('dataBar' in rule) {
-          specs.push({ kind: 'dataBar', sqref, color: normalizeColor(rule.dataBar.color, at) })
-        } else {
-          // The rest fill matching cells with a highlight held in a dxf.
-          if (dxfStyles === undefined) {
-            throw new XlsxError(
-              'missing-part',
-              `Cannot fill ${sqref}: the package has no style table to hold the format`,
-              { ...at, part: 'xl/styles.xml', reference: sqref },
-            )
-          }
-          const highlight =
-            'cellIs' in rule
-              ? rule.cellIs.fill
-              : 'expression' in rule
-                ? rule.expression.fill
-                : 'duplicates' in rule
-                  ? rule.duplicates.fill
-                  : 'unique' in rule
-                    ? rule.unique.fill
-                    : 'top' in rule
-                      ? rule.top.fill
-                      : rule.bottom.fill
-          const color = normalizeColor(highlight, at)
-          const dxf = ensureDxf(dxfStyles, color)
-          dxfStyles = dxf.xml
-          dxfColors.push(color)
-          const dxfId = dxf.index
-          if ('top' in rule || 'bottom' in rule) {
-            const rank = 'top' in rule ? rule.top : rule.bottom
-            if (!Number.isInteger(rank.count) || rank.count < 1) {
-              throw new XlsxError(
-                'unwritable-value',
-                `Rank ${rank.count} is not a positive whole number`,
-                {
-                  ...at,
-                  reference: sqref,
-                },
-              )
-            }
-            specs.push({
-              kind: 'top10',
-              sqref,
-              rank: rank.count,
-              bottom: 'bottom' in rule,
-              percent: rank.percent ?? false,
-              dxfId,
-            })
-          } else if ('cellIs' in rule) {
-            const comparison = numberComparison(rule.cellIs.when)
-            const formulas =
-              comparison.formula2 === undefined
-                ? [comparison.formula1]
-                : [comparison.formula1, comparison.formula2]
-            for (const bound of formulas) {
-              if (!Number.isFinite(bound)) {
-                throw new XlsxError(
-                  'unwritable-value',
-                  `Conditional-format bound ${bound} is not a finite number`,
-                  { ...at, reference: sqref },
-                )
-              }
-            }
-            specs.push({
-              kind: 'cellIs',
-              sqref,
-              operator: comparison.operator,
-              formulas: formulas.map(String),
-              dxfId,
-            })
-          } else if ('expression' in rule) {
-            specs.push({ kind: 'expression', sqref, formula: rule.expression.formula, dxfId })
-          } else if ('duplicates' in rule) {
-            specs.push({ kind: 'duplicateValues', sqref, dxfId })
-          } else {
-            specs.push({ kind: 'uniqueValues', sqref, dxfId })
-          }
-        }
-        for (const spec of specs) conditionalFormats.add(reference.path, spec)
+        const planned = planConditionalFormat(rule, sqref, at, dxfStyles)
+        dxfStyles = planned.dxfStyles
+        dxfColors.push(...planned.dxfColors)
+        for (const spec of planned.specs) conditionalFormats.add(reference.path, spec)
       },
       clearConditionalFormats(): void {
         conditionalFormats.clear(reference.path)
