@@ -279,8 +279,12 @@ Adding a comment to a sheet that already has some is refused with
 existing comments hold as plain words.
 
 `workbook.defineName('TaxRate', 'Sheet1!$B$1')` defines a global named range, and
-`workbook.definedNames` reads them back; a name scoped to one sheet is left as it
-was. `worksheet.link('A1', { url: 'https://example.com' })` links a cell out to a
+`workbook.definedNames` reads them back. The same three — `defineName`,
+`removeDefinedName` and `definedNames` — sit on a `worksheet` for names scoped to
+one sheet, where two sheets may each hold a name of the same spelling. A sheet's
+print area is one such scoped name: `worksheet.setPrintArea('A1:J26')` sets it,
+`worksheet.printArea` reads it back as a plain range, and `clearPrintArea()`
+removes it. `worksheet.link('A1', { url: 'https://example.com' })` links a cell out to a
 URL, and `link('A1', { location: 'Sheet2!A1' })` links within the workbook to a
 cell or a defined name — both take an optional `tooltip`, replace any link the
 cell had, and move with an inserted or deleted line.

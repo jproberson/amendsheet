@@ -368,6 +368,17 @@ workbook.definedNames // ReadonlyMap<name, formula>
 workbook.defineName('Tax', 'Sheet1!$B$1')
 workbook.removeDefinedName('Tax') // a name it lacks is ignored
 
+// The same trio, scoped to one sheet (two sheets may share a spelling). Built-in
+// _xlnm.* names are excluded; the print area has its own accessor.
+const sheet = workbook.sheets[0]
+sheet?.definedNames // ReadonlyMap<name, formula> for this sheet
+sheet?.defineName('Region', 'Sheet1!$A$1:$A$9')
+sheet?.removeDefinedName('Region')
+
+sheet?.setPrintArea('A1:J26') // stored as the _xlnm.Print_Area scoped name
+sheet?.printArea // 'A1:J26' — plain range, sheet qualifier and $ dropped; undefined if none
+sheet?.clearPrintArea()
+
 workbook.epoch // 1900 | 1904 — the date system
 ```
 
