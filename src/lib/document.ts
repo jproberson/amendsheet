@@ -10,7 +10,7 @@ import {
   withSheetsAdded,
 } from './add-sheet.js'
 import { blankWorkbookBytes } from './blank.js'
-import { createContainerDraft, withRelationship } from './container-draft.js'
+import { type ContainerDraft, createContainerDraft, withRelationship } from './container-draft.js'
 import { withContentTypeOverride } from './content-types.js'
 import { applyLineShifts } from './apply-line-shifts.js'
 import { createConditionalFormatStore } from './conditional-format.js'
@@ -1891,6 +1891,35 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     return sheet
   }
 
+  // The part-level features that each write their own parts over the draft. One
+  // entry per feature is the whole registration: the write pass reads `pending`
+  // for its "anything to do?" gate and calls `contribute` to do the work, so a new
+  // contributor is a single list entry rather than a probe and a call kept in step.
+  // They run before the line-ops shift so a reference they write moves with it, and
+  // none touches another's parts, so their order among themselves is free.
+  const contributors: ReadonlyArray<{
+    pending: () => boolean
+    contribute: (draft: ContainerDraft) => void
+  }> = [
+    {
+      pending: () => sheetHyperlinks.size > 0 || sheetUnlinks.size > 0,
+      contribute: (draft) => contributeHyperlinks(draft, sheetHyperlinks, sheetUnlinks, removed),
+    },
+    {
+      pending: () => sheetComments.size > 0 || sheetRemovedComments.size > 0,
+      contribute: (draft) =>
+        contributeComments(draft, sheetComments, sheetRemovedComments, removed),
+    },
+    {
+      pending: () => sheetImages.size > 0,
+      contribute: (draft) => contributeImages(draft, sheetImages, removed),
+    },
+    {
+      pending: () => sheetTables.size > 0,
+      contribute: (draft) => contributeTables(draft, sheetTables, removed),
+    },
+  ]
+
   const toBytes = (): Uint8Array => {
     // A change carries new bytes for a part; null deletes it. Every part not
     // named here is passed through still compressed, never inflated or rebuilt.
@@ -1908,14 +1937,9 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     // protect(), merge() or setRowHeight() records neither and still rewrites.
     const pendingEdits: ReadonlyArray<() => boolean> = [
       ...patchInputs.map((map) => () => map.size > 0),
+      ...contributors.map((contributor) => contributor.pending),
       () => validations.cleared.size > 0,
       () => conditionalFormats.cleared.size > 0,
-      () => sheetHyperlinks.size > 0,
-      () => sheetUnlinks.size > 0,
-      () => sheetComments.size > 0,
-      () => sheetRemovedComments.size > 0,
-      () => sheetTables.size > 0,
-      () => sheetImages.size > 0,
       () => page.hasPending(),
       () => addedRefs.length > 0,
       () => renames.size > 0,
@@ -2050,27 +2074,16 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       if (updated !== xml) changes.set(path, encoder.encode(updated))
     }
 
-    // contributeHyperlinks writes link adds and removals before the line-ops shift,
-    // so a linked cell reference moves with the rest.
-    contributeHyperlinks(draft, sheetHyperlinks, sheetUnlinks, removed)
-
-    // Comments live in two parts wired to the sheet; contributeComments writes the
-    // adds and removals, declaring each fresh part's content type on the draft.
-    contributeComments(draft, sheetComments, sheetRemovedComments, removed)
-
-    // contributeImages embeds this session's pictures, declaring each fresh drawing
-    // part and media extension's content type on the draft.
-    contributeImages(draft, sheetImages, removed)
+    // Each part-level feature writes its parts and declares their content types on
+    // the draft. They run before the line-ops shift so a reference one writes (a
+    // hyperlink's cell) moves with it.
+    for (const contributor of contributors) contributor.contribute(draft)
 
     // A copySheet duplicated dependent parts whose bytes are already staged; their
-    // content types declare through the same draft as the contributors above.
+    // content types declare through the same draft as the contributors.
     for (const override of addedOverrides) {
       draft.declareOverride(override.path, override.contentType)
     }
-
-    // contributeTables writes this session's added tables, declaring each table
-    // part's content type on the draft.
-    contributeTables(draft, sheetTables, removed)
 
     // Page setup writes elements the schema orders margins, setup, headerFooter,
     // rowBreaks, colBreaks. Applying them in that order lands each in the right
