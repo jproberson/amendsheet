@@ -94,7 +94,6 @@ import {
   canonicalReference,
   columnToIndex,
   formatReference,
-  indexToColumn,
   parseReference,
   parseWritableReference,
 } from './reference.js'
@@ -112,21 +111,8 @@ import {
   tableRowDamage,
   withTableParts,
 } from './tables.js'
-import {
-  type HeaderFooter,
-  type PageBreaks,
-  type PageMargins,
-  type PageSetup,
-  readHeaderFooter,
-  readPageBreaks,
-  readPageMargins,
-  readPageSetup,
-  withColumnBreaks,
-  withHeaderFooter,
-  withPageMargins,
-  withPageSetup,
-  withRowBreaks,
-} from './page.js'
+import type { HeaderFooter, PageBreaks, PageMargins, PageSetup } from './page.js'
+import { createPageStore } from './page-session.js'
 import {
   type CellFormatting,
   type Color,
@@ -325,11 +311,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     readonly to: { readonly column: number; readonly row: number }
   }
   const sheetImages = new Map<string, PendingImage[]>()
-  const sheetPageSetup = new Map<string, PageSetup>()
-  const sheetPageMargins = new Map<string, PageMargins>()
-  const sheetHeaderFooter = new Map<string, HeaderFooter>()
-  const sheetRowBreaks = new Map<string, Set<number>>()
-  const sheetColumnBreaks = new Map<string, Set<number>>()
+  const page = createPageStore()
   // The per-sheet maps patchSheet applies in one rewrite. Both the "anything
   // pending?" check and the set of sheets to rewrite read this list, so a new
   // kind of sheet edit is registered in one place rather than two enumerations
@@ -1428,8 +1410,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         sheetFreezes.set(reference.path, formatReference(parseWritableReference(cell)))
       },
       get pageSetup(): PageSetup {
-        const file = sheetBytes === undefined ? {} : readPageSetup(sheetBytes)
-        return { ...file, ...sheetPageSetup.get(reference.path) }
+        return page.mergedSetup(reference.path, sheetBytes)
       },
       setPageSetup(setup: PageSetup): void {
         if (sheetBytes === undefined) {
@@ -1439,32 +1420,10 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             { ...at },
           )
         }
-        if (
-          setup.orientation !== undefined &&
-          setup.orientation !== 'portrait' &&
-          setup.orientation !== 'landscape'
-        ) {
-          throw new XlsxError(
-            'unwritable-value',
-            `Orientation must be "portrait" or "landscape", not "${setup.orientation}"`,
-            { ...at },
-          )
-        }
-        if (
-          setup.scale !== undefined &&
-          (!Number.isInteger(setup.scale) || setup.scale < 10 || setup.scale > 400)
-        ) {
-          throw new XlsxError(
-            'unwritable-value',
-            `Print scale ${setup.scale} is not a whole percentage between 10 and 400`,
-            { ...at },
-          )
-        }
-        sheetPageSetup.set(reference.path, { ...sheetPageSetup.get(reference.path), ...setup })
+        page.setPageSetup(reference.path, setup, at)
       },
       get pageMargins(): PageMargins {
-        const file = sheetBytes === undefined ? {} : readPageMargins(sheetBytes)
-        return { ...file, ...sheetPageMargins.get(reference.path) }
+        return page.mergedMargins(reference.path, sheetBytes)
       },
       setPageMargins(margins: PageMargins): void {
         if (sheetBytes === undefined) {
@@ -1474,22 +1433,10 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             { ...at },
           )
         }
-        for (const side of ['left', 'right', 'top', 'bottom', 'header', 'footer'] as const) {
-          const value = margins[side]
-          if (value !== undefined && (!Number.isFinite(value) || value < 0)) {
-            throw new XlsxError('unwritable-value', `Margin ${side} ${value} is not zero or more`, {
-              ...at,
-            })
-          }
-        }
-        sheetPageMargins.set(reference.path, {
-          ...sheetPageMargins.get(reference.path),
-          ...margins,
-        })
+        page.setPageMargins(reference.path, margins, at)
       },
       get headerFooter(): HeaderFooter {
-        const file = sheetBytes === undefined ? {} : readHeaderFooter(sheetBytes)
-        return { ...file, ...sheetHeaderFooter.get(reference.path) }
+        return page.mergedHeaderFooter(reference.path, sheetBytes)
       },
       setHeaderFooter(headerFooter: HeaderFooter): void {
         if (sheetBytes === undefined) {
@@ -1499,23 +1446,10 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             { ...at },
           )
         }
-        sheetHeaderFooter.set(reference.path, {
-          ...sheetHeaderFooter.get(reference.path),
-          ...headerFooter,
-        })
+        page.setHeaderFooter(reference.path, headerFooter)
       },
       get pageBreaks(): PageBreaks {
-        const file =
-          sheetBytes === undefined ? { rows: [], columns: [] } : readPageBreaks(sheetBytes)
-        const rows = new Set<number>(file.rows)
-        for (const id of sheetRowBreaks.get(reference.path) ?? []) rows.add(id + 1)
-        const columns = new Set<string>(file.columns)
-        for (const id of sheetColumnBreaks.get(reference.path) ?? [])
-          columns.add(indexToColumn(id + 1))
-        return {
-          rows: [...rows].sort((a, b) => a - b),
-          columns: [...columns].sort((a, b) => columnToIndex(a) - columnToIndex(b)),
-        }
+        return page.mergedBreaks(reference.path, sheetBytes)
       },
       addRowPageBreak(row: number): void {
         if (sheetBytes === undefined) {
@@ -1525,15 +1459,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             { ...at, reference: String(row) },
           )
         }
-        if (!Number.isInteger(row) || row < 2 || row > LAST_ROW) {
-          throw new XlsxError('bad-reference', `Row ${row} cannot begin a page`, {
-            ...at,
-            reference: String(row),
-          })
-        }
-        const breaks = sheetRowBreaks.get(reference.path) ?? new Set<number>()
-        breaks.add(row - 1)
-        sheetRowBreaks.set(reference.path, breaks)
+        page.addRowBreak(reference.path, row, at)
       },
       addColumnPageBreak(column: string): void {
         if (sheetBytes === undefined) {
@@ -1543,16 +1469,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             { ...at, reference: column },
           )
         }
-        const index = columnToIndex(column)
-        if (index < 2 || index > LAST_COLUMN) {
-          throw new XlsxError('bad-reference', `Column ${column} cannot begin a page`, {
-            ...at,
-            reference: column,
-          })
-        }
-        const breaks = sheetColumnBreaks.get(reference.path) ?? new Set<number>()
-        breaks.add(index - 1)
-        sheetColumnBreaks.set(reference.path, breaks)
+        page.addColumnBreak(reference.path, column, at)
       },
       tabColor(color: string): void {
         if (sheetBytes === undefined) {
@@ -2053,11 +1970,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       () => sheetRemovedComments.size > 0,
       () => sheetTables.size > 0,
       () => sheetImages.size > 0,
-      () => sheetPageSetup.size > 0,
-      () => sheetPageMargins.size > 0,
-      () => sheetHeaderFooter.size > 0,
-      () => sheetRowBreaks.size > 0,
-      () => sheetColumnBreaks.size > 0,
+      () => page.hasPending(),
       () => addedRefs.length > 0,
       () => renames.size > 0,
       () => removed.size > 0,
@@ -2416,27 +2329,11 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     // Page setup writes elements the schema orders margins, setup, headerFooter,
     // rowBreaks, colBreaks. Applying them in that order lands each in the right
     // place whether the sheet already had it or it is inserted fresh here.
-    for (const path of new Set([
-      ...sheetPageMargins.keys(),
-      ...sheetPageSetup.keys(),
-      ...sheetHeaderFooter.keys(),
-      ...sheetRowBreaks.keys(),
-      ...sheetColumnBreaks.keys(),
-    ])) {
+    for (const path of page.paths()) {
       if (removed.has(path)) continue
-      let sheetXml = draft.text(path)
+      const sheetXml = draft.text(path)
       if (sheetXml === undefined) continue
-      const margins = sheetPageMargins.get(path)
-      if (margins !== undefined) sheetXml = withPageMargins(sheetXml, margins)
-      const setup = sheetPageSetup.get(path)
-      if (setup !== undefined) sheetXml = withPageSetup(sheetXml, setup)
-      const headerFooter = sheetHeaderFooter.get(path)
-      if (headerFooter !== undefined) sheetXml = withHeaderFooter(sheetXml, headerFooter)
-      const rowBreaks = sheetRowBreaks.get(path)
-      if (rowBreaks !== undefined) sheetXml = withRowBreaks(sheetXml, [...rowBreaks])
-      const columnBreaks = sheetColumnBreaks.get(path)
-      if (columnBreaks !== undefined) sheetXml = withColumnBreaks(sheetXml, [...columnBreaks])
-      changes.set(path, encoder.encode(sheetXml))
+      changes.set(path, encoder.encode(page.apply(sheetXml, path)))
     }
 
     // Inserting or deleting a line moves references across the whole workbook. The
