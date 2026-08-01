@@ -1,7 +1,9 @@
 import { escapeSheetName } from './add-sheet.js'
 import { type ContainerDraft, withRelationship } from './container-draft.js'
 import { type Container, decodeXmlPart } from './container.js'
-import { formatReference, parseReference } from './reference.js'
+import { XlsxError } from './errors.js'
+import type { SheetLocation } from './patch.js'
+import { formatReference, parseReference, parseWritableReference } from './reference.js'
 import { readRelationships, resolveTarget } from './relationships.js'
 import type { ShiftSpec } from './shift.js'
 import { relationshipsPathFor } from './workbook-parts.js'
@@ -17,6 +19,138 @@ export interface TableSpec {
   readonly ref: string
   readonly columns: readonly string[]
   readonly style: string
+}
+
+export interface PlannedTable {
+  readonly spec: TableSpec
+  /** The header cells the sheet must carry for the table, in column order, for the
+   * caller to write through the ordinary cell machinery. */
+  readonly headerCells: ReadonlyArray<{ readonly ref: string; readonly name: string }>
+}
+
+const tableBounds = (range: string) => {
+  const mid = range.indexOf(':')
+  const start = parseWritableReference(range.slice(0, mid))
+  const end = parseWritableReference(range.slice(mid + 1))
+  return {
+    minRow: Math.min(start.row, end.row),
+    maxRow: Math.max(start.row, end.row),
+    minColumn: Math.min(start.column, end.column),
+    maxColumn: Math.max(start.column, end.column),
+  }
+}
+
+/**
+ * Works out the table a call to `addTable` should author: the canonical range, the
+ * column names (given, read from the header row, or `Column{n}`), and the table
+ * name (given or the next free `Table{n}`). Every refusal — a bad range, a
+ * name-count mismatch, an empty or duplicate column name, an overlap with an
+ * existing table, an invalid or taken table name — is raised here, before the
+ * caller writes anything, so a rejected call leaves the sheet untouched.
+ */
+export function planTable(
+  range: string,
+  options:
+    | { readonly name?: string; readonly columns?: readonly string[]; readonly style?: string }
+    | undefined,
+  at: SheetLocation,
+  context: {
+    readonly existingRanges: readonly string[]
+    /** Names already taken across the workbook, lowercased. */
+    readonly takenNames: ReadonlySet<string>
+    readonly headerTextAt: (headerRef: string) => string | undefined
+  },
+): PlannedTable {
+  const colon = range.indexOf(':')
+  if (colon === -1) {
+    throw new XlsxError('bad-reference', `A table needs a range like A1:C5, not "${range}"`, {
+      ...at,
+      reference: range,
+    })
+  }
+  const start = parseWritableReference(range.slice(0, colon))
+  const end = parseWritableReference(range.slice(colon + 1))
+  const minRow = Math.min(start.row, end.row)
+  const maxRow = Math.max(start.row, end.row)
+  const minColumn = Math.min(start.column, end.column)
+  const maxColumn = Math.max(start.column, end.column)
+  const width = maxColumn - minColumn + 1
+  const ref = `${formatReference({ row: minRow, column: minColumn })}:${formatReference({ row: maxRow, column: maxColumn })}`
+
+  if (options?.columns !== undefined && options.columns.length !== width) {
+    throw new XlsxError(
+      'unwritable-value',
+      `The range is ${width} column(s) wide but ${options.columns.length} name(s) were given`,
+      { ...at, reference: ref },
+    )
+  }
+
+  const columns: string[] = []
+  const headerCells: { ref: string; name: string }[] = []
+  const seen = new Set<string>()
+  for (let index = 0; index < width; index++) {
+    const headerRef = formatReference({ row: minRow, column: minColumn + index })
+    const name =
+      options?.columns?.[index] ?? context.headerTextAt(headerRef) ?? `Column${index + 1}`
+    if (name === '') {
+      throw new XlsxError('unwritable-value', 'A table column name cannot be empty', {
+        ...at,
+        reference: headerRef,
+      })
+    }
+    if (seen.has(name.toLowerCase())) {
+      throw new XlsxError('unwritable-value', `Two table columns are both named "${name}"`, {
+        ...at,
+        reference: ref,
+      })
+    }
+    seen.add(name.toLowerCase())
+    columns.push(name)
+    headerCells.push({ ref: headerRef, name })
+  }
+
+  for (const other of context.existingRanges) {
+    const b = tableBounds(other)
+    if (
+      minRow <= b.maxRow &&
+      maxRow >= b.minRow &&
+      minColumn <= b.maxColumn &&
+      maxColumn >= b.minColumn
+    ) {
+      throw new XlsxError(
+        'unsupported-edit',
+        `A table over ${ref} overlaps one the sheet already has at ${other}`,
+        { ...at, reference: ref },
+      )
+    }
+  }
+
+  let name = options?.name
+  if (name !== undefined) {
+    // A letter, underscore or backslash, then up to 254 more of the same or digits
+    // and dots — Excel's rule, length bound folded in.
+    if (!/^[A-Za-z_\\][A-Za-z0-9_.\\]{0,254}$/.test(name)) {
+      throw new XlsxError('unwritable-value', `"${name}" is not a valid table name`, {
+        ...at,
+        reference: ref,
+      })
+    }
+    if (context.takenNames.has(name.toLowerCase())) {
+      throw new XlsxError('unwritable-value', `A table is already named "${name}"`, {
+        ...at,
+        reference: ref,
+      })
+    }
+  } else {
+    let n = 1
+    while (context.takenNames.has(`table${n}`)) n++
+    name = `Table${n}`
+  }
+
+  return {
+    spec: { name, ref, columns, style: options?.style ?? 'TableStyleMedium2' },
+    headerCells,
+  }
 }
 
 /** Builds a table part. Columns are numbered from one; the auto-filter starts out

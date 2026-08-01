@@ -2,7 +2,94 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { Container } from './container.js'
 import { XlsxError } from './errors.js'
-import { buildTablePart, extendTables, withTableParts } from './tables.js'
+import { buildTablePart, extendTables, planTable, withTableParts } from './tables.js'
+
+const AT = { sheet: 'Sheet1', part: 'xl/worksheets/sheet1.xml' }
+const NO_HEADERS = () => undefined
+const planContext = (over: Partial<Parameters<typeof planTable>[3]> = {}) => ({
+  existingRanges: [] as string[],
+  takenNames: new Set<string>(),
+  headerTextAt: NO_HEADERS,
+  ...over,
+})
+
+test('planTable derives column names from header text, falling back to Column{n}', () => {
+  const planned = planTable(
+    'A1:C1',
+    undefined,
+    AT,
+    planContext({
+      headerTextAt: (ref) => (ref === 'A1' ? 'Year' : ref === 'B1' ? 'Sales' : undefined),
+    }),
+  )
+  assert.deepEqual(planned.spec.columns, ['Year', 'Sales', 'Column3'])
+  assert.equal(planned.spec.ref, 'A1:C1')
+  assert.deepEqual(
+    planned.headerCells.map((cell) => cell.ref),
+    ['A1', 'B1', 'C1'],
+  )
+})
+
+test('planTable normalises a reversed range and honours explicit names and style', () => {
+  const planned = planTable(
+    'C1:A2',
+    { name: 'Totals', columns: ['a', 'b', 'c'], style: 'TableStyleLight1' },
+    AT,
+    planContext(),
+  )
+  assert.equal(planned.spec.ref, 'A1:C2')
+  assert.equal(planned.spec.name, 'Totals')
+  assert.equal(planned.spec.style, 'TableStyleLight1')
+})
+
+test('planTable refuses a column-name count that does not match the width', () => {
+  assert.throws(
+    () => planTable('A1:C1', { columns: ['only', 'two'] }, AT, planContext()),
+    XlsxError,
+  )
+})
+
+test('planTable refuses an empty or duplicate column name', () => {
+  assert.throws(
+    () => planTable('A1:B1', { columns: ['ok', ''] }, AT, planContext()),
+    /column name cannot be empty/,
+  )
+  assert.throws(
+    () => planTable('A1:B1', { columns: ['Dup', 'dup'] }, AT, planContext()),
+    /both named/,
+  )
+})
+
+test('planTable refuses a range overlapping an existing table', () => {
+  assert.throws(
+    () => planTable('B2:D4', undefined, AT, planContext({ existingRanges: ['A1:B2'] })),
+    /overlaps/,
+  )
+})
+
+test('planTable auto-names Table{n}, skipping taken names', () => {
+  const planned = planTable(
+    'A1:A2',
+    undefined,
+    AT,
+    planContext({
+      takenNames: new Set(['table1', 'table2']),
+    }),
+  )
+  assert.equal(planned.spec.name, 'Table3')
+})
+
+test('planTable refuses an invalid or already-taken explicit name', () => {
+  assert.throws(
+    () => planTable('A1:A2', { name: '1bad' }, AT, planContext()),
+    /not a valid table name/,
+  )
+  assert.throws(
+    () =>
+      planTable('A1:A2', { name: 'Taken' }, AT, planContext({ takenNames: new Set(['taken']) })),
+    /already named/,
+  )
+})
 
 const encode = (text: string) => new TextEncoder().encode(text)
 

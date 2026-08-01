@@ -76,6 +76,7 @@ import {
   type TableSpec,
   contributeTables,
   extendTables,
+  planTable,
   readTables,
   tableColumnDamage,
   tableRowDamage,
@@ -1061,110 +1062,17 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
             { ...at, reference: range },
           )
         }
-        const colon = range.indexOf(':')
-        if (colon === -1) {
-          throw new XlsxError('bad-reference', `A table needs a range like A1:C5, not "${range}"`, {
-            ...at,
-            reference: range,
-          })
-        }
-        const start = parseWritableReference(range.slice(0, colon))
-        const end = parseWritableReference(range.slice(colon + 1))
-        const minRow = Math.min(start.row, end.row)
-        const maxRow = Math.max(start.row, end.row)
-        const minColumn = Math.min(start.column, end.column)
-        const maxColumn = Math.max(start.column, end.column)
-        const width = maxColumn - minColumn + 1
-        const ref = `${formatReference({ row: minRow, column: minColumn })}:${formatReference({ row: maxRow, column: maxColumn })}`
-
-        if (options?.columns !== undefined && options.columns.length !== width) {
-          throw new XlsxError(
-            'unwritable-value',
-            `The range is ${width} column(s) wide but ${options.columns.length} name(s) were given`,
-            { ...at, reference: ref },
-          )
-        }
-        const columns: string[] = []
-        const seen = new Set<string>()
-        for (let index = 0; index < width; index++) {
-          const headerRef = formatReference({ row: minRow, column: minColumn + index })
-          const name =
-            options?.columns?.[index] ?? headerTextOf(findCell(headerRef)) ?? `Column${index + 1}`
-          if (name === '') {
-            throw new XlsxError('unwritable-value', 'A table column name cannot be empty', {
-              ...at,
-              reference: headerRef,
-            })
-          }
-          if (seen.has(name.toLowerCase())) {
-            throw new XlsxError('unwritable-value', `Two table columns are both named "${name}"`, {
-              ...at,
-              reference: ref,
-            })
-          }
-          seen.add(name.toLowerCase())
-          columns.push(name)
-          writeHeaderCell(headerRef, name)
-        }
-
-        const boundsOf = (other: string) => {
-          const mid = other.indexOf(':')
-          const a = parseWritableReference(other.slice(0, mid))
-          const b = parseWritableReference(other.slice(mid + 1))
-          return {
-            minRow: Math.min(a.row, b.row),
-            maxRow: Math.max(a.row, b.row),
-            minColumn: Math.min(a.column, b.column),
-            maxColumn: Math.max(a.column, b.column),
-          }
-        }
-        const existing = [
-          ...(sheetBytes === undefined
-            ? []
-            : readTables(sheetBytes, reference.path, container).map((table) => table.range)),
-          ...(sheetTables.get(reference.path) ?? []).map((spec) => spec.ref),
-        ]
-        for (const other of existing) {
-          const b = boundsOf(other)
-          if (
-            minRow <= b.maxRow &&
-            maxRow >= b.minRow &&
-            minColumn <= b.maxColumn &&
-            maxColumn >= b.minColumn
-          ) {
-            throw new XlsxError(
-              'unsupported-edit',
-              `A table over ${ref} overlaps one the sheet already has at ${other}`,
-              { ...at, reference: ref },
-            )
-          }
-        }
-
-        const taken = takenTableNames()
-        let name = options?.name
-        if (name !== undefined) {
-          // A letter, underscore or backslash, then up to 254 more of the same or
-          // digits and dots — Excel's rule, length bound folded in.
-          if (!/^[A-Za-z_\\][A-Za-z0-9_.\\]{0,254}$/.test(name)) {
-            throw new XlsxError('unwritable-value', `"${name}" is not a valid table name`, {
-              ...at,
-              reference: ref,
-            })
-          }
-          if (taken.has(name.toLowerCase())) {
-            throw new XlsxError('unwritable-value', `A table is already named "${name}"`, {
-              ...at,
-              reference: ref,
-            })
-          }
-        } else {
-          let n = 1
-          while (taken.has(`table${n}`)) n++
-          name = `Table${n}`
-        }
-
+        const planned = planTable(range, options, at, {
+          existingRanges: [
+            ...readTables(sheetBytes, reference.path, container).map((table) => table.range),
+            ...(sheetTables.get(reference.path) ?? []).map((spec) => spec.ref),
+          ],
+          takenNames: takenTableNames(),
+          headerTextAt: (headerRef) => headerTextOf(findCell(headerRef)),
+        })
+        for (const header of planned.headerCells) writeHeaderCell(header.ref, header.name)
         const specs = sheetTables.get(reference.path) ?? []
-        specs.push({ name, ref, columns, style: options?.style ?? 'TableStyleMedium2' })
+        specs.push(planned.spec)
         sheetTables.set(reference.path, specs)
       },
       addImage(image: Uint8Array, anchor: string): void {
