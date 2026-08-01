@@ -284,7 +284,10 @@ existing comments hold as plain words.
 one sheet, where two sheets may each hold a name of the same spelling. A sheet's
 print area is one such scoped name: `worksheet.setPrintArea('A1:J26')` sets it,
 `worksheet.printArea` reads it back as a plain range, and `clearPrintArea()`
-removes it. `worksheet.link('A1', { url: 'https://example.com' })` links a cell out to a
+removes it. Print titles — the rows or columns repeated on every printed page —
+work the same: `worksheet.setPrintTitles({ rows: '1:2', columns: 'A:A' })`,
+`worksheet.printTitles`, and `clearPrintTitles()`.
+`worksheet.link('A1', { url: 'https://example.com' })` links a cell out to a
 URL, and `link('A1', { location: 'Sheet2!A1' })` links within the workbook to a
 cell or a defined name — both take an optional `tooltip`, replace any link the
 cell had, and move with an inserted or deleted line.

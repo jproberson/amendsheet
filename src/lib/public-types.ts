@@ -20,11 +20,13 @@ import type {
   PageMargins,
   PageSetup,
 } from './page.js'
+import type { PrintTitles } from './defined-names.js'
 
 export type { Hyperlink }
 export type { RichText, RichTextRun }
 export type { DocumentProperties }
 export type { PageSetup, PageMargins, HeaderFooter, HeaderFooterSection, PageBreaks }
+export type { PrintTitles }
 
 export type CellValue =
   | { readonly kind: 'number'; readonly value: number }
@@ -135,6 +137,21 @@ export interface Worksheet {
   setPrintArea(range: string): void
   /** Removes the sheet's print area, if it has one. */
   clearPrintArea(): void
+  /**
+   * The rows and columns the sheet repeats on every printed page — `rows` like
+   * `'1:2'`, `columns` like `'A:B'` — or undefined when it repeats neither.
+   * Reflects a pending `setPrintTitles`.
+   */
+  readonly printTitles: PrintTitles | undefined
+  /**
+   * Sets the rows and/or columns to repeat on each printed page, replacing any it
+   * has. Pass `rows` as a row range like `'1:2'`, `columns` as a column range like
+   * `'A:B'`; at least one is required, and an omitted axis is not repeated. Stored
+   * as the built-in `_xlnm.Print_Titles` name scoped to the sheet.
+   */
+  setPrintTitles(titles: PrintTitles): void
+  /** Removes the sheet's print titles, if it has any. */
+  clearPrintTitles(): void
   /**
    * The worksheet protection in force, in the shape `protect()` takes, or
    * undefined when the sheet is not protected. Reflects a pending `protect()` or

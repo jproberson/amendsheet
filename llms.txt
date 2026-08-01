@@ -379,6 +379,11 @@ sheet?.setPrintArea('A1:J26') // stored as the _xlnm.Print_Area scoped name
 sheet?.printArea // 'A1:J26' — plain range, sheet qualifier and $ dropped; undefined if none
 sheet?.clearPrintArea()
 
+// Print titles: rows/columns repeated on each printed page (_xlnm.Print_Titles).
+sheet?.setPrintTitles({ rows: '1:2', columns: 'A:A' }) // at least one axis; omitted one not repeated
+sheet?.printTitles // { rows?: '1:2', columns?: 'A:A' } or undefined
+sheet?.clearPrintTitles()
+
 workbook.epoch // 1900 | 1904 — the date system
 ```
 

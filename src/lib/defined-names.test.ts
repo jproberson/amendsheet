@@ -2,8 +2,10 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   checkDefinedName,
+  parsePrintTitles,
   printAreaRanges,
   printAreaRefersTo,
+  printTitlesRefersTo,
   readDefinedNames,
   readSheetScopedNames,
   withDefinedNames,
@@ -119,6 +121,15 @@ test('printAreaRefersTo quotes the sheet and makes the range absolute', () => {
 test('printAreaRanges strips the qualifier and $ across comma-joined ranges', () => {
   assert.equal(printAreaRanges("'S'!$A$1:$B$2,'S'!$D$1:$E$2"), 'A1:B2,D1:E2')
   assert.equal(printAreaRanges('$A$1:$C$3'), 'A1:C3')
+})
+
+test('print titles round-trip through refersTo and back, undefined when neither axis reads', () => {
+  assert.equal(
+    printTitlesRefersTo('Data', { rows: '1:2', columns: 'A:A' }),
+    "'Data'!$A:$A,'Data'!$1:$2",
+  )
+  assert.deepEqual(parsePrintTitles("'Data'!$A:$A,'Data'!$1:$2"), { rows: '1:2', columns: 'A:A' })
+  assert.equal(parsePrintTitles("'Data'!garbage"), undefined)
 })
 
 test('checkDefinedName accepts a valid name and refuses the rest', () => {

@@ -20,11 +20,16 @@ import { type PendingImage, contributeImages, imageType } from './images.js'
 import { COMMENTS_RELATIONSHIP, contributeComments, readComments } from './comments.js'
 import {
   PRINT_AREA_NAME,
+  PRINT_TITLES_NAME,
+  type PrintTitles,
   type SheetScopedName,
   checkDefinedName,
+  checkPrintTitles,
   isBuiltInName,
+  parsePrintTitles,
   printAreaRanges,
   printAreaRefersTo,
+  printTitlesRefersTo,
   readDefinedNames,
   readSheetScopedNames,
   withDefinedNames,
@@ -889,6 +894,33 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         sheetPendingNames.get(reference.path)?.delete(PRINT_AREA_NAME)
         const removedSet = sheetRemovedNames.get(reference.path) ?? new Set<string>()
         removedSet.add(PRINT_AREA_NAME)
+        sheetRemovedNames.set(reference.path, removedSet)
+      },
+      get printTitles(): PrintTitles | undefined {
+        const pending = sheetPendingNames.get(reference.path)?.get(PRINT_TITLES_NAME)
+        if (pending !== undefined) return parsePrintTitles(pending)
+        if (sheetRemovedNames.get(reference.path)?.has(PRINT_TITLES_NAME)) return undefined
+        if (fileSheetIndex >= 0) {
+          for (const entry of fileScopedNames) {
+            if (entry.localSheetId === fileSheetIndex && entry.name === PRINT_TITLES_NAME) {
+              return parsePrintTitles(entry.refersTo)
+            }
+          }
+        }
+        return undefined
+      },
+      setPrintTitles(titles: PrintTitles): void {
+        checkPrintTitles(titles, at)
+        const current = renames.get(reference.path) ?? reference.name
+        sheetRemovedNames.get(reference.path)?.delete(PRINT_TITLES_NAME)
+        const pending = sheetPendingNames.get(reference.path) ?? new Map<string, string>()
+        pending.set(PRINT_TITLES_NAME, printTitlesRefersTo(current, titles))
+        sheetPendingNames.set(reference.path, pending)
+      },
+      clearPrintTitles(): void {
+        sheetPendingNames.get(reference.path)?.delete(PRINT_TITLES_NAME)
+        const removedSet = sheetRemovedNames.get(reference.path) ?? new Set<string>()
+        removedSet.add(PRINT_TITLES_NAME)
         sheetRemovedNames.set(reference.path, removedSet)
       },
       get protection(): SheetProtection | undefined {

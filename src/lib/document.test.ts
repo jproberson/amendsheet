@@ -4992,3 +4992,62 @@ test('the print area stays off worksheet.definedNames', () => {
   workbook.sheets[0]?.setPrintArea('A1:B2')
   assert.equal(workbook.sheets[0]?.definedNames.size, 0)
 })
+
+test('setPrintTitles writes _xlnm.Print_Titles with columns then rows, read back', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.setPrintTitles({ rows: '1:2', columns: 'A:A' })
+  assert.deepEqual(workbook.sheets[0]?.printTitles, { rows: '1:2', columns: 'A:A' })
+  const xml = decode(readContainer(workbook.toBytes()).parts.get('xl/workbook.xml'))
+  assert.match(
+    xml,
+    /<definedName name="_xlnm.Print_Titles" localSheetId="0">'Data'!\$A:\$A,'Data'!\$1:\$2<\/definedName>/,
+  )
+  assert.deepEqual(readWorkbook(workbook.toBytes()).sheets[0]?.printTitles, {
+    rows: '1:2',
+    columns: 'A:A',
+  })
+})
+
+test('printTitles reads a rows-only title', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      extra: {
+        'xl/workbook.xml':
+          '<workbook><sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets>' +
+          `<definedNames><definedName name="_xlnm.Print_Titles" localSheetId="0">'Data'!$1:$2</definedName></definedNames></workbook>`,
+      },
+    }),
+  )
+  assert.deepEqual(workbook.sheets[0]?.printTitles, { rows: '1:2' })
+})
+
+test('setPrintTitles with columns only omits rows', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.setPrintTitles({ columns: 'A:B' })
+  assert.deepEqual(workbook.sheets[0]?.printTitles, { columns: 'A:B' })
+  const back = readWorkbook(workbook.toBytes()).sheets[0]
+  assert.deepEqual(back?.printTitles, { columns: 'A:B' })
+})
+
+test('setPrintTitles refuses an empty selection and a mis-typed range', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  const badRef = (error: unknown) => error instanceof XlsxError && error.code === 'bad-reference'
+  assert.throws(() => workbook.sheets[0]?.setPrintTitles({}), badRef)
+  assert.throws(() => workbook.sheets[0]?.setPrintTitles({ rows: 'A:B' }), badRef)
+  assert.throws(() => workbook.sheets[0]?.setPrintTitles({ columns: '1:2' }), badRef)
+})
+
+test('clearPrintTitles removes an existing title', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      extra: {
+        'xl/workbook.xml':
+          '<workbook><sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets>' +
+          `<definedNames><definedName name="_xlnm.Print_Titles" localSheetId="0">'Data'!$1:$2</definedName></definedNames></workbook>`,
+      },
+    }),
+  )
+  workbook.sheets[0]?.clearPrintTitles()
+  assert.equal(workbook.sheets[0]?.printTitles, undefined)
+  assert.equal(readWorkbook(workbook.toBytes()).sheets[0]?.printTitles, undefined)
+})

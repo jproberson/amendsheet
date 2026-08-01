@@ -44,6 +44,7 @@ export type {
   PageBreaks,
   PageMargins,
   PageSetup,
+  PrintTitles,
   RankRule,
   SetOptions,
   Workbook,
