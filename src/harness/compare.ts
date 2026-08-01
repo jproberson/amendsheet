@@ -29,6 +29,10 @@ const EDIT_MAY_CHANGE = [
   // A cell written just past a table grows it, so its part changes. Loss would
   // still show as a dropped table part or a changed cell, which are caught.
   /^xl\/tables\/[^/]+\.xml$/,
+  // Adding a hyperlink gives it a relationship, so the sheet's rels change. A
+  // relationship dropped alongside would surface as its target part going
+  // missing, which is caught.
+  /^xl\/worksheets\/_rels\/[^/]+\.xml\.rels$/,
 ]
 
 const isWorksheet = (path: string) => /^xl\/worksheets\/[^/]+\.xml$/.test(path)

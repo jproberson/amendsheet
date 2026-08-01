@@ -104,8 +104,10 @@ export function buildComparison(runs: Run[]): string {
       'entries in the style registry — deduping or pruning an unused format is not a loss.',
   )
   lines.push(
-    '- The "after editing one cell" pass changes a single cell and asks the same question, so a ' +
-      'writer that spills changes across the document beyond the one edit shows up.',
+    '- The "after editing" pass adds cells, a merge, a validation, a conditional format, a ' +
+      'column width, a hyperlink and a print area, all on fresh space, and asks the same ' +
+      'question — so a write path that rebuilds a container and drops what the file already held ' +
+      'shows up.',
   )
   lines.push('')
 

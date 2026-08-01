@@ -40,11 +40,27 @@ export const amendsheetAdapter: Adapter = {
     const sheet = workbook.sheets[0]
     if (sheet === undefined) return workbook.toBytes()
 
-    // Past the last row in use, so nothing already in the file is overwritten
-    // and every existing cell must still come back unchanged.
+    // Every write lands on fresh space past the last row in use, so nothing
+    // already in the file is touched and every existing cell, merge, validation,
+    // conditional format and defined name must still come back unchanged. A
+    // one-cell edit exercises the read path; this exercises the write paths a
+    // release adds — where a rebuilt container could silently drop what the file
+    // already held.
     let lastRow = 0
     for (const cell of sheet.cells()) lastRow = Math.max(lastRow, cell.address.row)
-    sheet.set(`A${lastRow + 1}`, 'amendsheet harness')
+    const row = lastRow + 2
+
+    sheet.set(`A${row}`, 'amendsheet harness')
+    sheet.set(`B${row}`, 123.5, { numberFormat: '0.00' })
+    sheet.set(`C${row}`, true)
+    sheet.set(`D${row}`, new Date(Date.UTC(2021, 5, 15)))
+    sheet.set(`E${row}`, { formula: `B${row}*2` })
+    sheet.merge(`A${row + 2}:B${row + 2}`)
+    sheet.validate(`A${row + 4}`, { list: ['x', 'y', 'z'] })
+    sheet.conditionalFormat(`B${row + 4}`, { cellIs: { when: { greaterThan: 0 }, fill: 'FF0000' } })
+    sheet.setColumnWidth('ZZ', 20)
+    sheet.link(`C${row + 4}`, { url: 'https://example.com/' })
+    sheet.setPrintArea(`A1:B${row}`)
 
     return workbook.toBytes()
   },

@@ -57,7 +57,7 @@ export async function collectRuns(only?: string): Promise<Run[]> {
     runs.push({ title: adapter.name, results: await measureAll(adapter, files, false) })
     if (adapter.edit !== undefined) {
       runs.push({
-        title: `${adapter.name}, after editing one cell`,
+        title: `${adapter.name}, after editing`,
         results: await measureAll(adapter, files, true),
       })
     }

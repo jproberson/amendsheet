@@ -7,7 +7,7 @@ Read a real `.xlsx`, write it back, and check that nothing was lost. Measured ov
 | Library | Clean | Lossy | Failed | Rewrote |
 | --- | --: | --: | --: | --: |
 | amendsheet (this library) | 73 | 0 | 0 | 0 |
-| amendsheet (this library), after editing one cell | 73 | 0 | 0 | 0 |
+| amendsheet (this library), after editing | 73 | 0 | 0 | 0 |
 | exceljs@4.4.0 | 25 | 46 | 2 | 71 |
 
 - **Clean** — every part and every cell value survived. **Lossy** — at least one part or value was dropped or altered. **Failed** — the library threw instead of producing a file.
@@ -35,7 +35,7 @@ Read a real `.xlsx`, write it back, and check that nothing was lost. Measured ov
 - Each library reads the file and writes it back through its own API. The output is unzipped and compared to the input part by part, and every cell value is compared after a second read, so a value that survives the file but decodes differently still counts as a loss.
 - Parts that legitimately differ on every write are excluded: document timestamps (`docProps/core.xml`, `docProps/app.xml`) and the calculation chain, which a spreadsheet rebuilds anyway.
 - Formatting is compared per cell, by the style each cell resolves to, not by counting entries in the style registry — deduping or pruning an unused format is not a loss.
-- The "after editing one cell" pass changes a single cell and asks the same question, so a writer that spills changes across the document beyond the one edit shows up.
+- The "after editing" pass adds cells, a merge, a validation, a conditional format, a column width, a hyperlink and a print area, all on fresh space, and asks the same question — so a write path that rebuilds a container and drops what the file already held shows up.
 
 ## Reproduce
 
