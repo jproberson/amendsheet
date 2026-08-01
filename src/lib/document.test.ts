@@ -3953,6 +3953,15 @@ test('refuses a write to a sheet whose part is not in the package', () => {
   )
   assert.deepEqual(workbook.sheets[0]?.printOptions, { gridlines: false, headings: false })
   assert.throws(
+    () => workbook.sheets[0]?.setFitToPages({ width: 1 }),
+    (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
+  )
+  assert.throws(
+    () => workbook.sheets[0]?.clearFitToPages(),
+    (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
+  )
+  assert.equal(workbook.sheets[0]?.fitToPages, undefined)
+  assert.throws(
     () => workbook.sheets[0]?.freeze('B2'),
     (error: unknown) => error instanceof XlsxError && error.code === 'missing-part',
   )
@@ -5126,4 +5135,57 @@ test('a validation message with a quote and newline is attribute-escaped and rea
   assert.match(xml, /error="say &quot;hi&quot;&#10;again"/)
   const back = readWorkbook(workbook.toBytes()).sheets[0]?.validations[0]
   assert.deepEqual(back?.rule.error, { message: 'say "hi"\nagain' })
+})
+
+test('setFitToPages turns on fit-to-page mode and writes width and height', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.setFitToPages({ width: 1, height: 2 })
+  assert.deepEqual(workbook.sheets[0]?.fitToPages, { width: 1, height: 2 })
+  const xml = decode(readContainer(workbook.toBytes()).parts.get('xl/worksheets/sheet1.xml'))
+  assert.match(xml, /<sheetPr><pageSetUpPr fitToPage="1"\/><\/sheetPr>/)
+  assert.match(xml, /<pageSetup[^>]*fitToWidth="1"[^>]*fitToHeight="2"[^>]*\/>/)
+  assert.deepEqual(readWorkbook(workbook.toBytes()).sheets[0]?.fitToPages, { width: 1, height: 2 })
+})
+
+test('fitToPages is undefined when the sheet is not in fit-to-page mode', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  assert.equal(workbook.sheets[0]?.fitToPages, undefined)
+})
+
+test('setFitToPages defaults an unset dimension to one page', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.setFitToPages({ width: 2 })
+  assert.deepEqual(workbook.sheets[0]?.fitToPages, { width: 2, height: 1 })
+})
+
+test('setFitToPages joins an existing sheetPr from a tab colour, not doubling it', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.tabColor('FF0000')
+  workbook.sheets[0]?.setFitToPages({ width: 1, height: 1 })
+  const xml = decode(readContainer(workbook.toBytes()).parts.get('xl/worksheets/sheet1.xml'))
+  assert.equal((xml.match(/<sheetPr/g) ?? []).length, 1)
+  assert.match(xml, /<sheetPr><tabColor rgb="FFFF0000"\/><pageSetUpPr fitToPage="1"\/><\/sheetPr>/)
+})
+
+test('clearFitToPages turns fit-to-page off', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      sheetPr: '<sheetPr><pageSetUpPr fitToPage="1"/></sheetPr>',
+      after: '<pageSetup fitToWidth="1" fitToHeight="1"/>',
+    }),
+  )
+  assert.deepEqual(workbook.sheets[0]?.fitToPages, { width: 1, height: 1 })
+  workbook.sheets[0]?.clearFitToPages()
+  assert.equal(workbook.sheets[0]?.fitToPages, undefined)
+  assert.match(
+    decode(readContainer(workbook.toBytes()).parts.get('xl/worksheets/sheet1.xml')),
+    /fitToPage="0"/,
+  )
+})
+
+test('setFitToPages refuses a negative or fractional page count', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  const bad = (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value'
+  assert.throws(() => workbook.sheets[0]?.setFitToPages({ width: -1 }), bad)
+  assert.throws(() => workbook.sheets[0]?.setFitToPages({ height: 1.5 }), bad)
 })

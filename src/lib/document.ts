@@ -1347,6 +1347,29 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         }
         page.setPrintOptions(reference.path, options)
       },
+      get fitToPages(): { width: number; height: number } | undefined {
+        return page.mergedFitToPages(reference.path, sheetBytes)
+      },
+      setFitToPages(dimensions: { width?: number; height?: number }): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so fit-to-page cannot be set`,
+            { ...at },
+          )
+        }
+        page.setFitToPages(reference.path, dimensions, at)
+      },
+      clearFitToPages(): void {
+        if (sheetBytes === undefined) {
+          throw new XlsxError(
+            'missing-part',
+            `Sheet ${reference.name} is not in the package, so fit-to-page cannot be cleared`,
+            { ...at },
+          )
+        }
+        page.clearFitToPages(reference.path)
+      },
       get headerFooter(): HeaderFooter {
         return page.mergedHeaderFooter(reference.path, sheetBytes)
       },

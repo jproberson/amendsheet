@@ -5,12 +5,15 @@ import {
   readPageBreaks,
   readPageMargins,
   readPageSetup,
+  readFitToPage,
   readPrintOptions,
   withColumnBreaks,
   withHeaderFooter,
   withPageMargins,
   withPageSetup,
+  withFitToPage,
   withPrintOptions,
+  withoutFitToPage,
   withRowBreaks,
 } from './page.js'
 
@@ -336,4 +339,74 @@ test('readPrintOptions reads the true spelling and defaults to off', () => {
     gridlines: false,
     headings: false,
   })
+})
+
+test('withFitToPage opens a fresh sheetPr when the worksheet has none', () => {
+  const xml = withFitToPage('<worksheet><sheetData/></worksheet>', { width: 1, height: 2 })
+  assert.match(xml, /<worksheet><sheetPr><pageSetUpPr fitToPage="1"\/><\/sheetPr>/)
+  assert.match(xml, /<pageSetup fitToWidth="1" fitToHeight="2"\/>/)
+})
+
+test('withFitToPage expands a self-closing sheetPr, keeping its prefix', () => {
+  const xml = withFitToPage('<x:worksheet><x:sheetPr codeName="S"/><x:sheetData/></x:worksheet>', {
+    width: 1,
+  })
+  assert.match(xml, /<x:sheetPr codeName="S"><pageSetUpPr fitToPage="1"\/><\/x:sheetPr>/)
+})
+
+test('withFitToPage appends pageSetUpPr inside an existing sheetPr, after its children', () => {
+  const xml = withFitToPage(
+    '<worksheet><sheetPr><tabColor rgb="FF00FF00"/></sheetPr><sheetData/></worksheet>',
+    { width: 1 },
+  )
+  assert.match(xml, /<sheetPr><tabColor rgb="FF00FF00"\/><pageSetUpPr fitToPage="1"\/><\/sheetPr>/)
+})
+
+test('withFitToPage and withoutFitToPage flip an existing pageSetUpPr in place', () => {
+  const on = withFitToPage(
+    '<worksheet><sheetPr><pageSetUpPr fitToPage="0" autoPageBreaks="1"/></sheetPr><sheetData/></worksheet>',
+    {},
+  )
+  assert.match(on, /<pageSetUpPr fitToPage="1" autoPageBreaks="1"\/>/)
+  const off = withoutFitToPage(on)
+  assert.match(off, /<pageSetUpPr fitToPage="0" autoPageBreaks="1"\/>/)
+  assert.equal((off.match(/<pageSetUpPr/g) ?? []).length, 1)
+})
+
+test('withFitToPage sets its dimensions on an existing pageSetup element', () => {
+  const xml = withFitToPage(
+    '<worksheet><sheetData/><pageSetup orientation="landscape"/></worksheet>',
+    { width: 2, height: 0 },
+  )
+  assert.match(xml, /<pageSetup [^>]*fitToWidth="2"[^>]*\/>/)
+  assert.match(xml, /<pageSetup [^>]*fitToHeight="0"[^>]*\/>/)
+  assert.match(xml, /orientation="landscape"/)
+})
+
+test('readFitToPage reads the flag and dimensions, off by default', () => {
+  assert.deepEqual(
+    readFitToPage(
+      encode(
+        '<worksheet><sheetPr><pageSetUpPr fitToPage="1"/></sheetPr><sheetData/><pageSetup fitToWidth="3" fitToHeight="0"/></worksheet>',
+      ),
+    ),
+    { enabled: true, width: 3, height: 0 },
+  )
+  assert.deepEqual(readFitToPage(encode('<worksheet><sheetData/></worksheet>')), {
+    enabled: false,
+    width: undefined,
+    height: undefined,
+  })
+})
+
+test('withFitToPage falls back to the front when there is no worksheet element', () => {
+  const xml = withFitToPage('<sheetData/>', { width: 1 })
+  assert.match(xml, /^<sheetPr><pageSetUpPr fitToPage="1"\/><\/sheetPr><sheetData\/>/)
+})
+
+test('readFitToPage treats a pageSetUpPr without the flag as off', () => {
+  assert.deepEqual(
+    readFitToPage(encode('<worksheet><sheetPr><pageSetUpPr/></sheetPr><sheetData/></worksheet>')),
+    { enabled: false, width: undefined, height: undefined },
+  )
 })

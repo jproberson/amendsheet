@@ -192,6 +192,93 @@ export function withPrintOptions(sheetXml: string, options: PrintOptions): strin
   return insertBeforeSuccessor(sheetXml, `<printOptions${attributes}/>`, AFTER_PRINT_OPTIONS)
 }
 
+/**
+ * Sets the `fitToPage` flag on the sheet's `pageSetUpPr`, joining an existing
+ * `sheetPr` (a tab colour's, say) as a later child, expanding a self-closing one,
+ * or opening a fresh `sheetPr` at the front of the worksheet. `pageSetUpPr` is the
+ * last child of `sheetPr`, so a fresh one appends before the close.
+ */
+function withPageSetUpPr(sheetXml: string, on: boolean): string {
+  const flag = on ? 1 : 0
+  const fresh = `<pageSetUpPr fitToPage="${flag}"/>`
+
+  const existing = /<(?:\w+:)?pageSetUpPr\b[^>]*\/>/.exec(sheetXml)
+  if (existing !== null) {
+    const updated = setAttribute(existing[0], 'fitToPage', flag)
+    return (
+      sheetXml.slice(0, existing.index) +
+      updated +
+      sheetXml.slice(existing.index + existing[0].length)
+    )
+  }
+
+  const paired = /<(?:\w+:)?sheetPr\b[^>]*>[\s\S]*?<\/(?:\w+:)?sheetPr>/.exec(sheetXml)
+  if (paired !== null) {
+    const closeAt = paired.index + paired[0].lastIndexOf('</')
+    return sheetXml.slice(0, closeAt) + fresh + sheetXml.slice(closeAt)
+  }
+
+  const selfClosing = /<((?:\w+:)?sheetPr)\b[^>]*\/>/.exec(sheetXml)
+  if (selfClosing !== null) {
+    const opened = selfClosing[0].replace(/\/>$/, '>')
+    const end = selfClosing.index + selfClosing[0].length
+    return `${sheetXml.slice(0, selfClosing.index)}${opened}${fresh}</${selfClosing[1]}>${sheetXml.slice(end)}`
+  }
+
+  const worksheet = /<(?:\w+:)?worksheet\b[^>]*>/.exec(sheetXml)
+  const at = worksheet === null ? 0 : worksheet.index + worksheet[0].length
+  return `${sheetXml.slice(0, at)}<sheetPr>${fresh}</sheetPr>${sheetXml.slice(at)}`
+}
+
+/** Turns on fit-to-page and sets how many pages wide and tall the sheet fits, each
+ * a `pageSetup` attribute; a dimension of 0 fits as many pages as needed. */
+export function withFitToPage(
+  sheetXml: string,
+  dimensions: { width?: number; height?: number },
+): string {
+  const xml = withPageSetUpPr(sheetXml, true)
+  const attributes: [string, number][] = []
+  if (dimensions.width !== undefined) attributes.push(['fitToWidth', dimensions.width])
+  if (dimensions.height !== undefined) attributes.push(['fitToHeight', dimensions.height])
+  if (attributes.length === 0) return xml
+
+  const tag = selfClosingTag(xml, 'pageSetup')
+  if (tag !== undefined) {
+    let openTag = xml.slice(tag.start, tag.end)
+    for (const [name, value] of attributes) openTag = setAttribute(openTag, name, value)
+    return xml.slice(0, tag.start) + openTag + xml.slice(tag.end)
+  }
+  let attrs = ''
+  for (const [name, value] of attributes) attrs += ` ${name}="${value}"`
+  return insertBeforeSuccessor(xml, `<pageSetup${attrs}/>`, AFTER_PAGE_MARGINS.slice(1))
+}
+
+/** Turns fit-to-page off, leaving any width and height in place but ignored. */
+export function withoutFitToPage(sheetXml: string): string {
+  return withPageSetUpPr(sheetXml, false)
+}
+
+/** Reads whether fit-to-page is on and the pages-wide and pages-tall it fits. */
+export function readFitToPage(bytes: Uint8Array): {
+  enabled: boolean
+  width?: number
+  height?: number
+} {
+  let enabled = false
+  let width: number | undefined
+  let height: number | undefined
+  for (const event of readXmlBytes(bytes)) {
+    if (event.kind !== 'open') continue
+    if (event.localName === 'pageSetUpPr') {
+      enabled = flagAttribute(event.attributes, 'fitToPage') ?? false
+    } else if (event.localName === 'pageSetup') {
+      width = numberAttribute(event.attributes, 'fitToWidth')
+      height = numberAttribute(event.attributes, 'fitToHeight')
+    }
+  }
+  return { enabled, width, height }
+}
+
 /** Reads whether the sheet prints gridlines and headings, each off by default. */
 export function readPrintOptions(bytes: Uint8Array): { gridlines: boolean; headings: boolean } {
   for (const event of readXmlBytes(bytes)) {

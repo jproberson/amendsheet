@@ -323,6 +323,10 @@ sheet?.pageMargins // { left?, right?, top?, bottom?, header?, footer? }
 
 sheet?.setPrintOptions({ gridlines: true, headings: true }) // print them; merges
 sheet?.printOptions // { gridlines: boolean, headings: boolean } — both off by default
+
+sheet?.setFitToPages({ width: 1, height: 2 }) // scale to 1 page wide, 2 tall; 0 = as many as needed
+sheet?.fitToPages // { width, height } or undefined when printing at the scale instead
+sheet?.clearFitToPages() // back to scale printing
 ```
 
 `setPageSetup` keeps any other `pageSetup` attribute the sheet has; `setPageMargins`

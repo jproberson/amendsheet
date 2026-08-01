@@ -7,14 +7,17 @@ import {
   type PrintOptions,
   readHeaderFooter,
   readPageBreaks,
+  readFitToPage,
   readPageMargins,
   readPageSetup,
   readPrintOptions,
   withColumnBreaks,
+  withFitToPage,
   withHeaderFooter,
   withPageMargins,
   withPageSetup,
   withPrintOptions,
+  withoutFitToPage,
   withRowBreaks,
 } from './page.js'
 import type { SheetLocation } from './cell-input.js'
@@ -32,6 +35,12 @@ export interface PageStore {
   setPageSetup(path: string, setup: PageSetup, at: SheetLocation): void
   setPageMargins(path: string, margins: PageMargins, at: SheetLocation): void
   setPrintOptions(path: string, options: PrintOptions): void
+  setFitToPages(
+    path: string,
+    dimensions: { width?: number; height?: number },
+    at: SheetLocation,
+  ): void
+  clearFitToPages(path: string): void
   setHeaderFooter(path: string, headerFooter: HeaderFooter): void
   addRowBreak(path: string, row: number, at: SheetLocation): void
   addColumnBreak(path: string, column: string, at: SheetLocation): void
@@ -41,6 +50,10 @@ export interface PageStore {
     path: string,
     sheetBytes: Uint8Array | undefined,
   ): { gridlines: boolean; headings: boolean }
+  mergedFitToPages(
+    path: string,
+    sheetBytes: Uint8Array | undefined,
+  ): { width: number; height: number } | undefined
   mergedHeaderFooter(path: string, sheetBytes: Uint8Array | undefined): HeaderFooter
   mergedBreaks(path: string, sheetBytes: Uint8Array | undefined): PageBreaks
   /** The sheet paths carrying any pending print edit, for the write pass. */
@@ -55,6 +68,7 @@ export function createPageStore(): PageStore {
   const setup = new Map<string, PageSetup>()
   const margins = new Map<string, PageMargins>()
   const printOptions = new Map<string, PrintOptions>()
+  const fitToPages = new Map<string, { width?: number; height?: number } | 'off'>()
   const headerFooter = new Map<string, HeaderFooter>()
   const rowBreaks = new Map<string, Set<number>>()
   const columnBreaks = new Map<string, Set<number>>()
@@ -97,6 +111,23 @@ export function createPageStore(): PageStore {
     },
     setPrintOptions(path, next) {
       printOptions.set(path, { ...printOptions.get(path), ...next })
+    },
+    setFitToPages(path, next, at) {
+      for (const side of ['width', 'height'] as const) {
+        const value = next[side]
+        if (value !== undefined && (!Number.isInteger(value) || value < 0)) {
+          throw new XlsxError(
+            'unwritable-value',
+            `Fit-to-page ${side} ${value} is not a whole number of pages, zero or more`,
+            { ...at },
+          )
+        }
+      }
+      const current = fitToPages.get(path)
+      fitToPages.set(path, { ...(current === 'off' ? {} : current), ...next })
+    },
+    clearFitToPages(path) {
+      fitToPages.set(path, 'off')
     },
     setHeaderFooter(path, next) {
       headerFooter.set(path, { ...headerFooter.get(path), ...next })
@@ -143,6 +174,18 @@ export function createPageStore(): PageStore {
         headings: pending?.headings ?? file.headings,
       }
     },
+    mergedFitToPages(path, sheetBytes) {
+      const file = sheetBytes === undefined ? { enabled: false } : readFitToPage(sheetBytes)
+      const pending = fitToPages.get(path)
+      if (pending === 'off') return undefined
+      if (pending === undefined) {
+        return file.enabled ? { width: file.width ?? 1, height: file.height ?? 1 } : undefined
+      }
+      return {
+        width: pending.width ?? file.width ?? 1,
+        height: pending.height ?? file.height ?? 1,
+      }
+    },
     mergedHeaderFooter(path, sheetBytes) {
       const file = sheetBytes === undefined ? {} : readHeaderFooter(sheetBytes)
       return { ...file, ...headerFooter.get(path) }
@@ -163,6 +206,7 @@ export function createPageStore(): PageStore {
         ...margins.keys(),
         ...setup.keys(),
         ...printOptions.keys(),
+        ...fitToPages.keys(),
         ...headerFooter.keys(),
         ...rowBreaks.keys(),
         ...columnBreaks.keys(),
@@ -173,6 +217,7 @@ export function createPageStore(): PageStore {
         setup.size > 0 ||
         margins.size > 0 ||
         printOptions.size > 0 ||
+        fitToPages.size > 0 ||
         headerFooter.size > 0 ||
         rowBreaks.size > 0 ||
         columnBreaks.size > 0
@@ -180,6 +225,9 @@ export function createPageStore(): PageStore {
     },
     apply(sheetXml, path) {
       let xml = sheetXml
+      const fitToPagesFor = fitToPages.get(path)
+      if (fitToPagesFor === 'off') xml = withoutFitToPage(xml)
+      else if (fitToPagesFor !== undefined) xml = withFitToPage(xml, fitToPagesFor)
       const printOptionsFor = printOptions.get(path)
       if (printOptionsFor !== undefined) xml = withPrintOptions(xml, printOptionsFor)
       const marginsFor = margins.get(path)

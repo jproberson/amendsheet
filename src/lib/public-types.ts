@@ -387,6 +387,21 @@ export interface Worksheet {
   /** Sets whether gridlines and headings print, merging onto what the sheet has, so
    * setting one leaves the other. */
   setPrintOptions(options: PrintOptions): void
+  /**
+   * How many pages wide and tall the sheet is scaled to fit when printed, or
+   * undefined when it is not in fit-to-page mode (it prints at its `pageSetup`
+   * scale instead). Reflects a pending `setFitToPages`.
+   */
+  readonly fitToPages: { readonly width: number; readonly height: number } | undefined
+  /**
+   * Scales the sheet to fit a number of pages when printed, turning on fit-to-page
+   * mode. `width` is the pages across, `height` the pages down; either omitted
+   * stays one, and a `0` fits as many pages as needed in that direction. This
+   * overrides the print scale until `clearFitToPages`.
+   */
+  setFitToPages(dimensions: { readonly width?: number; readonly height?: number }): void
+  /** Turns off fit-to-page, so the sheet prints at its scale again. */
+  clearFitToPages(): void
   /** The printed header and footer, each split into left, centre and right, the
    * file's plus any set this session. */
   readonly headerFooter: HeaderFooter
