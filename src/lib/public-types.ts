@@ -8,7 +8,8 @@ import type {
   FontFormat,
   ReadFill,
 } from './styles-writer.js'
-import type { CellInput, SheetProtection } from './patch.js'
+import type { CellInput } from './cell-input.js'
+import type { SheetProtection } from './patch.js'
 import type { SheetState } from './workbook.js'
 import type { Hyperlink } from './hyperlinks.js'
 import type { DocumentProperties } from './document-properties.js'

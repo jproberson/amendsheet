@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { type CellInput, patchSheet as patchSheetBytes } from './patch.js'
+import type { CellInput } from './cell-input.js'
+import { patchSheet as patchSheetBytes } from './patch.js'
 
 const encode = (text: string) => new TextEncoder().encode(text)
 const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes)

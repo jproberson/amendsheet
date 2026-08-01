@@ -14,7 +14,7 @@ import {
   withPageSetup,
   withRowBreaks,
 } from './page.js'
-import type { SheetLocation } from './patch.js'
+import type { SheetLocation } from './cell-input.js'
 import { LAST_COLUMN, LAST_ROW, columnToIndex, indexToColumn } from './reference.js'
 
 /**

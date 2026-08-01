@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { readFile, readdir } from 'node:fs/promises'
 import { test } from 'node:test'
 import { readWorkbook } from './document.js'
-import { type CellInput, patchSheet as patchSheetBytes } from './patch.js'
+import type { CellInput } from './cell-input.js'
+import { patchSheet as patchSheetBytes } from './patch.js'
 import { assertPatchedSheet } from '../testing/invariants.js'
 
 const encode = (text: string) => new TextEncoder().encode(text)

@@ -6,7 +6,7 @@ import { readContainer, writeContainer } from './container.js'
 import { createWorkbook, createWorkbookFromCsv, readWorkbook } from './document.js'
 import { XlsxError } from './errors.js'
 import type { Cell } from './public-types.js'
-import type { CellInput } from './patch.js'
+import type { CellInput } from './cell-input.js'
 
 const encode = (text: string) => new TextEncoder().encode(text)
 const decode = (bytes: Uint8Array | undefined) =>

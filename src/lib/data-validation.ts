@@ -1,7 +1,8 @@
 import { comparisonToConstraint, mapConstraint, numberComparison } from './constraint.js'
 import { dateToSerial, serialToDate } from './date.js'
 import { XlsxError } from './errors.js'
-import type { DataValidationSpec, SheetLocation } from './patch.js'
+import type { SheetLocation } from './cell-input.js'
+import type { DataValidationSpec } from './patch.js'
 import type { DataValidation } from './public-types.js'
 
 function buildValidationSpec(

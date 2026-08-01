@@ -10,7 +10,7 @@ import { dateToSerial } from './date.js'
 import { readWorkbook } from './document.js'
 import { XlsxError } from './errors.js'
 import type { SetOptions } from './public-types.js'
-import type { CellInput } from './patch.js'
+import type { CellInput } from './cell-input.js'
 import { indexToColumn } from './reference.js'
 
 /**

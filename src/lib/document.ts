@@ -30,8 +30,8 @@ import { type Hyperlink, contributeHyperlinks, readSheetHyperlinks } from './hyp
 import { type Container, decodeXmlPart } from './container.js'
 import { XlsxError } from './errors.js'
 import { LAST_SERIAL, dateToSerial, serialToDate } from './date.js'
+import type { CellInput, SheetLocation } from './cell-input.js'
 import {
-  type CellInput,
   type ConditionalFormatSpec,
   type DataValidationSpec,
   checkProtection,
@@ -57,7 +57,6 @@ import {
   sharedFormulaRefusal,
   type SheetIndex,
   type SheetViewState,
-  type SheetLocation,
   type SheetProtection,
 } from './patch.js'
 import {
