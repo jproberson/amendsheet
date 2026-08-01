@@ -4938,3 +4938,57 @@ test('two sheets can hold a scoped name of the same spelling', () => {
   assert.match(xml, /name="Range" localSheetId="0">First!\$A\$1</)
   assert.match(xml, /name="Range" localSheetId="1">Second!\$B\$2</)
 })
+
+test('setPrintArea writes a scoped _xlnm.Print_Area and reads it back', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.setPrintArea('A1:J26')
+  assert.equal(workbook.sheets[0]?.printArea, 'A1:J26')
+  const xml = decode(readContainer(workbook.toBytes()).parts.get('xl/workbook.xml'))
+  assert.match(
+    xml,
+    /<definedName name="_xlnm.Print_Area" localSheetId="0">'Data'!\$A\$1:\$J\$26<\/definedName>/,
+  )
+  assert.equal(readWorkbook(workbook.toBytes()).sheets[0]?.printArea, 'A1:J26')
+})
+
+test('printArea reads an existing print area, sheet qualifier and $ stripped', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      extra: {
+        'xl/workbook.xml':
+          '<workbook><sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets>' +
+          `<definedNames><definedName name="_xlnm.Print_Area" localSheetId="0">'Data'!$A$1:$C$10</definedName></definedNames></workbook>`,
+      },
+    }),
+  )
+  assert.equal(workbook.sheets[0]?.printArea, 'A1:C10')
+})
+
+test('clearPrintArea removes an existing print area', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      extra: {
+        'xl/workbook.xml':
+          '<workbook><sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets>' +
+          `<definedNames><definedName name="_xlnm.Print_Area" localSheetId="0">'Data'!$A$1:$C$10</definedName></definedNames></workbook>`,
+      },
+    }),
+  )
+  workbook.sheets[0]?.clearPrintArea()
+  assert.equal(workbook.sheets[0]?.printArea, undefined)
+  assert.equal(readWorkbook(workbook.toBytes()).sheets[0]?.printArea, undefined)
+})
+
+test('setPrintArea refuses a value that is not a range', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  assert.throws(
+    () => workbook.sheets[0]?.setPrintArea('nonsense'),
+    (error: unknown) => error instanceof XlsxError && error.code === 'bad-reference',
+  )
+})
+
+test('the print area stays off worksheet.definedNames', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.setPrintArea('A1:B2')
+  assert.equal(workbook.sheets[0]?.definedNames.size, 0)
+})

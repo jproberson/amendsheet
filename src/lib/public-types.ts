@@ -122,6 +122,20 @@ export interface Worksheet {
   /** Removes a name scoped to this sheet. A name it does not have is ignored. */
   removeDefinedName(name: string): void
   /**
+   * The sheet's print area — the range or comma-joined ranges that print — with
+   * the sheet qualifier and the `$` of the stored form dropped, like `A1:J26`, or
+   * undefined when the sheet has none. Reflects a pending `setPrintArea`.
+   */
+  readonly printArea: string | undefined
+  /**
+   * Sets the sheet's print area to a range like `A1:J26`, replacing any it has. It
+   * is stored as the built-in `_xlnm.Print_Area` name scoped to the sheet. Refuses
+   * anything that is not an `A1:B2` range.
+   */
+  setPrintArea(range: string): void
+  /** Removes the sheet's print area, if it has one. */
+  clearPrintArea(): void
+  /**
    * The worksheet protection in force, in the shape `protect()` takes, or
    * undefined when the sheet is not protected. Reflects a pending `protect()` or
    * `unprotect()` as well as what the file was read with.

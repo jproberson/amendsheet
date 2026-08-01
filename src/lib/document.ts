@@ -19,9 +19,12 @@ import { createValidationStore } from './data-validation.js'
 import { type PendingImage, contributeImages, imageType } from './images.js'
 import { COMMENTS_RELATIONSHIP, contributeComments, readComments } from './comments.js'
 import {
+  PRINT_AREA_NAME,
   type SheetScopedName,
   checkDefinedName,
   isBuiltInName,
+  printAreaRanges,
+  printAreaRefersTo,
   readDefinedNames,
   readSheetScopedNames,
   withDefinedNames,
@@ -859,6 +862,33 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         sheetPendingNames.get(reference.path)?.delete(name)
         const removedSet = sheetRemovedNames.get(reference.path) ?? new Set<string>()
         removedSet.add(name)
+        sheetRemovedNames.set(reference.path, removedSet)
+      },
+      get printArea(): string | undefined {
+        const pending = sheetPendingNames.get(reference.path)?.get(PRINT_AREA_NAME)
+        if (pending !== undefined) return printAreaRanges(pending)
+        if (sheetRemovedNames.get(reference.path)?.has(PRINT_AREA_NAME)) return undefined
+        if (fileSheetIndex >= 0) {
+          for (const entry of fileScopedNames) {
+            if (entry.localSheetId === fileSheetIndex && entry.name === PRINT_AREA_NAME) {
+              return printAreaRanges(entry.refersTo)
+            }
+          }
+        }
+        return undefined
+      },
+      setPrintArea(range: string): void {
+        const canonical = mergeRangeReference(range, at)
+        const current = renames.get(reference.path) ?? reference.name
+        sheetRemovedNames.get(reference.path)?.delete(PRINT_AREA_NAME)
+        const pending = sheetPendingNames.get(reference.path) ?? new Map<string, string>()
+        pending.set(PRINT_AREA_NAME, printAreaRefersTo(current, canonical))
+        sheetPendingNames.set(reference.path, pending)
+      },
+      clearPrintArea(): void {
+        sheetPendingNames.get(reference.path)?.delete(PRINT_AREA_NAME)
+        const removedSet = sheetRemovedNames.get(reference.path) ?? new Set<string>()
+        removedSet.add(PRINT_AREA_NAME)
         sheetRemovedNames.set(reference.path, removedSet)
       },
       get protection(): SheetProtection | undefined {

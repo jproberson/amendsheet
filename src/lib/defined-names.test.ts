@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   checkDefinedName,
+  printAreaRanges,
+  printAreaRefersTo,
   readDefinedNames,
   readSheetScopedNames,
   withDefinedNames,
@@ -107,6 +109,16 @@ test('withDefinedNames removes a scoped name by its pair', () => {
   })
   assert.doesNotMatch(out, /name="R"/)
   assert.match(out, /<definedName name="Keep" localSheetId="0">stays<\/definedName>/)
+})
+
+test('printAreaRefersTo quotes the sheet and makes the range absolute', () => {
+  assert.equal(printAreaRefersTo('My Sheet', 'A1:B2'), "'My Sheet'!$A$1:$B$2")
+  assert.equal(printAreaRefersTo("O'Brien", 'A1:A1'), "'O''Brien'!$A$1:$A$1")
+})
+
+test('printAreaRanges strips the qualifier and $ across comma-joined ranges', () => {
+  assert.equal(printAreaRanges("'S'!$A$1:$B$2,'S'!$D$1:$E$2"), 'A1:B2,D1:E2')
+  assert.equal(printAreaRanges('$A$1:$C$3'), 'A1:C3')
 })
 
 test('checkDefinedName accepts a valid name and refuses the rest', () => {
