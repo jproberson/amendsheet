@@ -702,17 +702,16 @@ export const TABLE_CONTENT_TYPE =
 
 /**
  * Writes this session's added tables into the draft. Each gets its own part wired
- * to the sheet by a relationship and listed in a `<tableParts>` element; the header
- * cells were written through the edit machinery already, so the sheet carries them.
- * Returns the fresh table parts, for the caller to declare in the content types.
+ * to the sheet by a relationship and listed in a `<tableParts>` element, and
+ * declares its content type on the draft; the header cells were written through
+ * the edit machinery already, so the sheet carries them.
  */
 export function contributeTables(
   draft: ContainerDraft,
   tables: ReadonlyMap<string, readonly TableSpec[]>,
   removedSheets: ReadonlySet<string>,
-): { tableParts: string[] } {
+): void {
   const encoder = new TextEncoder()
-  const tableParts: string[] = []
 
   for (const [path, specs] of tables) {
     if (removedSheets.has(path)) continue
@@ -725,7 +724,7 @@ export function contributeTables(
       const tableNumber = draft.freeNumber((n) => `xl/tables/table${n}.xml`)
       const tablePath = `xl/tables/table${tableNumber}.xml`
       draft.setBytes(tablePath, encoder.encode(buildTablePart(tableNumber, spec)))
-      tableParts.push(tablePath)
+      draft.declareOverride(tablePath, TABLE_CONTENT_TYPE)
       const wired = withRelationship(
         relsXml,
         TABLE_RELATIONSHIP,
@@ -737,6 +736,4 @@ export function contributeTables(
     draft.setBytes(relationshipsPath, encoder.encode(relsXml ?? ''))
     draft.setBytes(path, encoder.encode(sheetXml))
   }
-
-  return { tableParts }
 }

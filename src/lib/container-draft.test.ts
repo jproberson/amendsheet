@@ -62,6 +62,39 @@ test('relationshipTarget resolves an owner rel of a type', () => {
   )
 })
 
+const EMPTY_CONTENT_TYPES =
+  '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+  '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+  '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+  '</Types>'
+
+test('applyContentTypes folds in the overrides and defaults declared on the draft', () => {
+  const draft = createContainerDraft(containerOf({}), new Map())
+  draft.declareOverride('xl/comments1.xml', 'application/comments')
+  draft.declareDefault('png', 'image/png')
+  const updated = draft.applyContentTypes(EMPTY_CONTENT_TYPES)
+  assert.ok(
+    updated.includes('<Override PartName="/xl/comments1.xml" ContentType="application/comments"/>'),
+  )
+  assert.ok(updated.includes('<Default Extension="png" ContentType="image/png"/>'))
+})
+
+test('applyContentTypes leaves a content-types part untouched when nothing was declared', () => {
+  const draft = createContainerDraft(containerOf({}), new Map())
+  assert.equal(draft.applyContentTypes(EMPTY_CONTENT_TYPES), EMPTY_CONTENT_TYPES)
+})
+
+test('declareOverride and declareDefault each register a part or extension once', () => {
+  const draft = createContainerDraft(containerOf({}), new Map())
+  draft.declareOverride('xl/tables/table1.xml', 'application/table')
+  draft.declareOverride('xl/tables/table1.xml', 'application/table')
+  draft.declareDefault('emf', 'image/emf')
+  draft.declareDefault('emf', 'image/emf')
+  const updated = draft.applyContentTypes(EMPTY_CONTENT_TYPES)
+  assert.equal(updated.match(/PartName="\/xl\/tables\/table1.xml"/g)?.length, 1)
+  assert.equal(updated.match(/Extension="emf"/g)?.length, 1)
+})
+
 test('withRelationship appends a relationship and returns its fresh id', () => {
   const empty = undefined
   const first = withRelationship(empty, 'http://example/t', 'target.xml')

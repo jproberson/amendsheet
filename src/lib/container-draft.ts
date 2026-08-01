@@ -1,4 +1,5 @@
 import { type Container, decodeXmlPart } from './container.js'
+import { withContentTypeDefault, withContentTypeOverride } from './content-types.js'
 import { XlsxError } from './errors.js'
 import { readRelationships, resolveTarget } from './relationships.js'
 import { relationshipsPathFor } from './workbook-parts.js'
@@ -58,6 +59,16 @@ export interface ContainerDraft {
   /** The resolved target of `ownerPath`'s relationship of `type`, read from the
    * owner's current rels, or undefined when it declares none. */
   relationshipTarget(ownerPath: string, type: string): string | undefined
+  /** Records that a fresh part needs an Override in the content types. A feature
+   * that opens a part declares its own type here rather than handing the path
+   * back for the write pass to look up. */
+  declareOverride(path: string, contentType: string): void
+  /** Records that a fresh part's file extension needs a Default in the content
+   * types — the media extensions an embedded image introduces. */
+  declareDefault(extension: string, contentType: string): void
+  /** Folds every declared Override and Default into a content-types part, once
+   * each. Left untouched when nothing was declared. */
+  applyContentTypes(contentTypesXml: string): string
 }
 
 export function createContainerDraft(
@@ -65,6 +76,8 @@ export function createContainerDraft(
   changes: Map<string, Uint8Array | null>,
 ): ContainerDraft {
   const decoder = new TextDecoder()
+  const overrides = new Map<string, string>()
+  const defaults = new Map<string, string>()
 
   const original = (path: string): string | undefined => {
     const bytes = container.parts.get(path)
@@ -102,6 +115,22 @@ export function createContainerDraft(
         }
       }
       return undefined
+    },
+    declareOverride(path, contentType) {
+      overrides.set(path, contentType)
+    },
+    declareDefault(extension, contentType) {
+      defaults.set(extension, contentType)
+    },
+    applyContentTypes(contentTypesXml) {
+      let updated = contentTypesXml
+      for (const [path, contentType] of overrides) {
+        updated = withContentTypeOverride(updated, path, contentType)
+      }
+      for (const [extension, contentType] of defaults) {
+        updated = withContentTypeDefault(updated, extension, contentType)
+      }
+      return updated
     },
   }
 }

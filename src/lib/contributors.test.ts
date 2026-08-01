@@ -10,6 +10,9 @@ import { contributeTables } from './tables.js'
 const encode = (text: string) => new TextEncoder().encode(text)
 const PATH = 'xl/worksheets/sheet1.xml'
 const RELS = 'xl/worksheets/_rels/sheet1.xml.rels'
+const CONTENT_TYPES =
+  '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+  '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"></Types>'
 
 const freshSheet = () => {
   const changes = new Map<string, Uint8Array | null>()
@@ -63,18 +66,18 @@ test('contributeImages writes a media part and a drawing, returning the extensio
   assert.ok(draft.text(PATH)?.includes('<drawing '))
 })
 
-test('contributeTables writes a table part and lists it on the sheet', () => {
+test('contributeTables writes a table part, lists it on the sheet and declares its type', () => {
   const { draft } = freshSheet()
-  const result = contributeTables(
+  contributeTables(
     draft,
     new Map([
       [PATH, [{ name: 'T1', ref: 'A1:B2', columns: ['a', 'b'], style: 'TableStyleMedium2' }]],
     ]),
     new Set(),
   )
-  assert.deepEqual(result.tableParts, ['xl/tables/table1.xml'])
   assert.ok(draft.text('xl/tables/table1.xml')?.includes('displayName="T1"'))
   assert.ok(draft.text(PATH)?.includes('tableParts'))
+  assert.ok(draft.applyContentTypes(CONTENT_TYPES).includes('PartName="/xl/tables/table1.xml"'))
 })
 
 test('contributeHyperlinks writes the link inline and its external relationship', () => {

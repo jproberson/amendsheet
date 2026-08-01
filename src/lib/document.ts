@@ -85,7 +85,6 @@ import { type SharedMasters, toCell } from './cell-read.js'
 import { readSheet } from './sheet.js'
 import { appendSharedStrings, readSharedStrings } from './shared-strings.js'
 import {
-  TABLE_CONTENT_TYPE,
   type TableSpec,
   contributeTables,
   extendTables,
@@ -2080,9 +2079,9 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     // parts and media extensions to declare in the content types.
     const { drawingParts, imageExtensions } = contributeImages(draft, sheetImages, removed)
 
-    // contributeTables writes this session added tables and returns the fresh table
-    // parts to declare in the content types.
-    const { tableParts } = contributeTables(draft, sheetTables, removed)
+    // contributeTables writes this session's added tables, declaring each table
+    // part's content type on the draft.
+    contributeTables(draft, sheetTables, removed)
 
     // Page setup writes elements the schema orders margins, setup, headerFooter,
     // rowBreaks, colBreaks. Applying them in that order lands each in the right
@@ -2188,9 +2187,6 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       for (const vmlDrawingPath of vmlDrawingParts) {
         updated = withContentTypeOverride(updated, vmlDrawingPath, VML_DRAWING_CONTENT_TYPE)
       }
-      for (const tablePath of tableParts) {
-        updated = withContentTypeOverride(updated, tablePath, TABLE_CONTENT_TYPE)
-      }
       for (const override of addedOverrides) {
         updated = withContentTypeOverride(updated, override.path, override.contentType)
       }
@@ -2207,7 +2203,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
           CORE_PROPERTIES_CONTENT_TYPE,
         )
       }
-      return updated
+      return draft.applyContentTypes(updated)
     })
 
     return container.write(changes)
