@@ -21,7 +21,7 @@ import { createConditionalFormatStore } from './conditional-format.js'
 import { numberComparison } from './constraint.js'
 import { formatCsv, parseCsv } from './csv.js'
 import { createValidationStore } from './data-validation.js'
-import { shiftDrawing, withDrawing, withLegacyDrawing } from './drawings.js'
+import { shiftDrawing, withDrawing } from './drawings.js'
 import {
   type ImageType,
   appendAnchors,
@@ -32,15 +32,14 @@ import {
 } from './images.js'
 import { shiftPivotCacheSource, shiftPivotLocation } from './pivots.js'
 import {
-  appendCommentsPart,
-  appendVmlShapes,
-  buildCommentsPart,
-  buildVmlDrawing,
+  COMMENTS_CONTENT_TYPE,
+  COMMENTS_RELATIONSHIP,
+  VML_DRAWING_CONTENT_TYPE,
+  VML_DRAWING_RELATIONSHIP,
+  contributeComments,
   readComments,
   shiftComments,
   shiftNoteShapes,
-  withoutComment,
-  withoutNoteShape,
 } from './comments.js'
 import { checkDefinedName, readDefinedNames, withDefinedNames } from './defined-names.js'
 import {
@@ -157,13 +156,6 @@ const CORE_PROPERTIES_PART = 'docProps/core.xml'
 const CORE_PROPERTIES_RELATIONSHIP =
   'http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties'
 const CORE_PROPERTIES_CONTENT_TYPE = 'application/vnd.openxmlformats-package.core-properties+xml'
-const COMMENTS_RELATIONSHIP =
-  'http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments'
-const COMMENTS_CONTENT_TYPE =
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.comments+xml'
-const VML_DRAWING_RELATIONSHIP =
-  'http://schemas.openxmlformats.org/officeDocument/2006/relationships/vmlDrawing'
-const VML_DRAWING_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.vmlDrawing'
 const TABLE_RELATIONSHIP =
   'http://schemas.openxmlformats.org/officeDocument/2006/relationships/table'
 const TABLE_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.table+xml'
@@ -2132,90 +2124,14 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       changes.set(path, encoder.encode(sheetXml))
     }
 
-    // Comments go in two parts, wired to the sheet and declared in the content
-    // types. The comments part holds the text; a legacy VML drawing holds the box
-    // Excel draws for each note, without which the note is stored but never shown.
-    // A sheet with no comments yet opens fresh parts, their numbers skipping any
-    // the package or this run already uses; a sheet that already has some has the
-    // new notes and their shapes spliced into its parts, so the rich text already
-    // there survives untouched. A cell that already carries a comment is refused
-    // at the call, not here. The rels are read from what a hyperlink write may
-    // have just changed.
-    const commentParts: string[] = []
-    const vmlDrawingParts: string[] = []
-    for (const [path, notes] of sheetComments) {
-      if (removed.has(path) || notes.size === 0) continue
-
-      const relationshipsPath = relationshipsPathFor(path)
-      const currentRels = draft.text(relationshipsPath)
-      let relsXml = currentRels
-
-      const existingComments = draft.relationshipTarget(path, COMMENTS_RELATIONSHIP)
-      if (existingComments === undefined) {
-        const commentsPath = `xl/comments${draft.freeNumber((n) => `xl/comments${n}.xml`)}.xml`
-        draft.setBytes(commentsPath, encoder.encode(buildCommentsPart(notes)))
-        commentParts.push(commentsPath)
-        relsXml = withRelationship(
-          relsXml,
-          COMMENTS_RELATIONSHIP,
-          `../${commentsPath.slice('xl/'.length)}`,
-        ).xml
-      } else {
-        const existing = draft.original(existingComments) ?? ''
-        draft.setBytes(existingComments, encoder.encode(appendCommentsPart(existing, notes)))
-      }
-
-      // A sheet's legacy drawing may hold shapes other than notes (form controls),
-      // so an existing one is appended to rather than replaced; only a sheet with
-      // none needs a drawing authored and pointed at by a fresh <legacyDrawing>.
-      const existingVml = draft.relationshipTarget(path, VML_DRAWING_RELATIONSHIP)
-      if (existingVml === undefined) {
-        const vmlDrawingPath = `xl/drawings/vmlDrawing${draft.freeNumber(
-          (n) => `xl/drawings/vmlDrawing${n}.vml`,
-        )}.vml`
-        draft.setBytes(vmlDrawingPath, encoder.encode(buildVmlDrawing([...notes.keys()])))
-        vmlDrawingParts.push(vmlDrawingPath)
-        const withVml = withRelationship(
-          relsXml,
-          VML_DRAWING_RELATIONSHIP,
-          `../${vmlDrawingPath.slice('xl/'.length)}`,
-        )
-        relsXml = withVml.xml
-        const sheetXml = draft.text(path)
-        if (sheetXml !== undefined) {
-          draft.setBytes(path, encoder.encode(withLegacyDrawing(sheetXml, withVml.id)))
-        }
-      } else {
-        const existing = draft.original(existingVml) ?? ''
-        draft.setBytes(existingVml, encoder.encode(appendVmlShapes(existing, [...notes.keys()])))
-      }
-
-      if (relsXml !== currentRels) draft.setBytes(relationshipsPath, encoder.encode(relsXml ?? ''))
-    }
-
-    // Comment removal runs after the add above, on whatever the add just wrote, so a
-    // note added then removed this session is gone. The comment leaves its part, and
-    // the note box leaves the legacy drawing; both are found through the sheet rels.
-    for (const [path, refs] of sheetRemovedComments) {
-      if (removed.has(path)) continue
-      const commentsPath = draft.relationshipTarget(path, COMMENTS_RELATIONSHIP)
-      const commentsXml = commentsPath === undefined ? undefined : draft.text(commentsPath)
-      if (commentsPath !== undefined && commentsXml !== undefined) {
-        let updated = commentsXml
-        for (const ref of refs) updated = withoutComment(updated, ref)
-        if (updated !== commentsXml) draft.setBytes(commentsPath, encoder.encode(updated))
-      }
-      const vmlPath = draft.relationshipTarget(path, VML_DRAWING_RELATIONSHIP)
-      const vmlXml = vmlPath === undefined ? undefined : draft.text(vmlPath)
-      if (vmlPath !== undefined && vmlXml !== undefined) {
-        let updated = vmlXml
-        for (const ref of refs) {
-          const { row, column } = parseReference(ref)
-          updated = withoutNoteShape(updated, row - 1, column - 1)
-        }
-        if (updated !== vmlXml) draft.setBytes(vmlPath, encoder.encode(updated))
-      }
-    }
+    // Comments live in two parts wired to the sheet; contributeComments writes the
+    // adds and removals and returns the fresh parts to declare in the content types.
+    const { commentParts, vmlDrawingParts } = contributeComments(
+      draft,
+      sheetComments,
+      sheetRemovedComments,
+      removed,
+    )
 
     // Each image is embedded as a media part, referenced from the sheet's drawing
     // through a fresh relationship, and its picture anchored over the given cells.
