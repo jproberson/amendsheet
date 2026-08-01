@@ -68,6 +68,7 @@ import {
   parseWritableReference,
 } from './reference.js'
 import { type SharedMasters, toCell } from './cell-read.js'
+import { flattenRuns, richTextOf } from './rich-text.js'
 import { readSheet } from './sheet.js'
 import { appendSharedStrings, readRichSharedStrings, readSharedStrings } from './shared-strings.js'
 import {
@@ -505,6 +506,21 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         const serial = dateToSerial(value, date1904)
         return toCell(
           { ...raw, value: { kind: 'number', value: serial } },
+          stylesNow(),
+          formatting,
+          date1904,
+        )
+      }
+      if ('runs' in value) {
+        // Written inline, so it reads back the same: the flattened text as the
+        // value, the runs alongside when they are meaningfully rich.
+        const rich = richTextOf(value.runs)
+        return toCell(
+          {
+            ...raw,
+            value: { kind: 'text', value: flattenRuns(value.runs) },
+            ...(rich === undefined ? {} : { richText: rich }),
+          },
           stylesNow(),
           formatting,
           date1904,

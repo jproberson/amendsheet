@@ -4808,3 +4808,52 @@ test('leaves richText off a plain shared string', () => {
   )
   assert.equal(workbook.sheets[0]?.cell('A1')?.richText, undefined)
 })
+
+test('writes rich text as an inline string and reads the runs back', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.set('A1', {
+    runs: [{ text: 'Bold', font: { bold: true } }, { text: ' plain' }],
+  })
+  const back = readWorkbook(workbook.toBytes()).sheets[0]?.cell('A1')
+  assert.deepEqual(back?.value, { kind: 'text', value: 'Bold plain' })
+  assert.deepEqual(back?.richText, {
+    runs: [{ text: 'Bold', font: { bold: true } }, { text: ' plain' }],
+  })
+})
+
+test('a pending rich set surfaces on cell.richText live, value flattened', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.set('A1', {
+    runs: [{ text: 'x', font: { italic: true } }, { text: 'y' }],
+  })
+  const cell = workbook.sheets[0]?.cell('A1')
+  assert.deepEqual(cell?.value, { kind: 'text', value: 'xy' })
+  assert.deepEqual(cell?.richText, {
+    runs: [{ text: 'x', font: { italic: true } }, { text: 'y' }],
+  })
+})
+
+test('refuses a rich-text run whose text xml cannot hold, located at the cell', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  assert.throws(
+    () =>
+      workbook.sheets[0]?.set('A1', {
+        runs: [{ text: 'ok' }, { text: `bad${String.fromCharCode(7)}` }],
+      }),
+    (error: unknown) =>
+      error instanceof XlsxError && error.code === 'unwritable-value' && error.reference === 'A1',
+  )
+})
+
+test('preserves a run edge whitespace and reads it back', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.set('A1', {
+    runs: [{ text: 'a ', font: { bold: true } }, { text: ' b' }],
+  })
+  const xml = decode(readContainer(workbook.toBytes()).parts.get('xl/worksheets/sheet1.xml'))
+  assert.match(xml, /<t xml:space="preserve">a <\/t>/)
+  const back = readWorkbook(workbook.toBytes()).sheets[0]?.cell('A1')
+  assert.deepEqual(back?.richText, {
+    runs: [{ text: 'a ', font: { bold: true } }, { text: ' b' }],
+  })
+})

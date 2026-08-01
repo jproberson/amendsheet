@@ -9,6 +9,7 @@ import {
   parseFileReference,
   parseReference,
 } from './reference.js'
+import { buildRichInline } from './rich-text.js'
 import { findUnwritableCharacter, readXml, readXmlBytes, withAttribute } from './xml.js'
 
 /**
@@ -312,6 +313,11 @@ export function checkWritable(
     )
   }
 
+  if (typeof value === 'object' && 'runs' in value) {
+    checkRichRuns(value.runs, reference, at)
+    return
+  }
+
   const unwritable = findUnwritableCharacter(
     typeof value === 'string' ? value : formulaOf(value, reference, at),
   )
@@ -321,6 +327,48 @@ export function checkWritable(
       `Cell ${reference} holds ${unwritable}, which cannot be written to xml`,
       { ...at, reference },
     )
+  }
+}
+
+/**
+ * The value boundary for rich text: each run must carry string text that xml can
+ * hold. A JS caller or a payload can reach here with anything, so the shape is
+ * checked before a write reads `.text` off it. Run fonts are validated where a
+ * font always is, when the run is built.
+ */
+function checkRichRuns(runs: unknown, reference: string, at: SheetLocation): void {
+  if (!Array.isArray(runs)) {
+    throw new XlsxError(
+      'unwritable-value',
+      `Cell ${reference} was given rich text whose runs are not a list`,
+      { ...at, reference },
+    )
+  }
+  const list: readonly unknown[] = runs
+  for (const run of list) {
+    if (
+      typeof run !== 'object' ||
+      run === null ||
+      !('text' in run) ||
+      typeof run.text !== 'string'
+    ) {
+      throw new XlsxError(
+        'unwritable-value',
+        `Cell ${reference} was given a run that has no text`,
+        {
+          ...at,
+          reference,
+        },
+      )
+    }
+    const unwritable = findUnwritableCharacter(run.text)
+    if (unwritable !== undefined) {
+      throw new XlsxError(
+        'unwritable-value',
+        `Cell ${reference} holds ${unwritable}, which cannot be written to xml`,
+        { ...at, reference },
+      )
+    }
   }
 }
 
@@ -582,6 +630,10 @@ function cellElement(
   if (value === null) return `<${c} r="${reference}"${attributes}/>`
 
   if (typeof value === 'object' && !(value instanceof Date)) {
+    if ('runs' in value) {
+      const is = buildRichInline(value.runs, prefix, at)
+      return `<${c} r="${reference}"${attributes} t="inlineStr">${is}</${c}>`
+    }
     // No cached result: nothing here computes one, and a stale one is worse.
     const f = `${prefix}f`
     return `<${c} r="${reference}"${attributes}><${f}>${escapeXml(value.formula)}</${f}></${c}>`

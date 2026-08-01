@@ -28,4 +28,4 @@ export interface RichText {
   readonly runs: readonly RichTextRun[]
 }
 
-export type CellInput = number | string | boolean | Date | null | FormulaInput
+export type CellInput = number | string | boolean | Date | null | FormulaInput | RichText

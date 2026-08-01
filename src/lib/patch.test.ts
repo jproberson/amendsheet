@@ -874,6 +874,26 @@ test('refuses an object that is not a date and names no formula', () => {
   }
 })
 
+test('refuses malformed rich text at the value boundary', () => {
+  for (const value of [
+    { runs: 'not a list' },
+    { runs: [{}] },
+    { runs: [{ text: 5 }] },
+    { runs: [{ text: `a${String.fromCharCode(7)}` }] },
+  ]) {
+    assert.throws(
+      () => checkWritable('A1', value, false),
+      (error: unknown) =>
+        error instanceof XlsxError && error.code === 'unwritable-value' && error.reference === 'A1',
+      `${JSON.stringify(value)} is not writable rich text`,
+    )
+  }
+})
+
+test('accepts a well-formed rich-text run', () => {
+  checkWritable('A1', { runs: [{ text: 'fine', font: { bold: true } }] }, false)
+})
+
 test('mergeRangeReference refuses a non-string range', () => {
   const refuses = (range: unknown) =>
     assert.throws(

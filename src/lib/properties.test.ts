@@ -217,7 +217,7 @@ test('every edited cell reads back as it was written', async () => {
               ? cell.value.value
               : undefined
         assert.equal(stored, dateToSerial(value, workbook.epoch === 1904), `${file} ${reference}`)
-      } else {
+      } else if ('formula' in value) {
         // A formula carries no computed result, so only the expression is kept.
         assert.deepEqual(
           cell?.formula,

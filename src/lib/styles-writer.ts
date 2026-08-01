@@ -490,7 +490,15 @@ export function parseFont(element: string): FontFormat {
   return font
 }
 
-export function buildFontElement(font: FontFormat, location: XlsxErrorContext = {}): string {
+/**
+ * The shared inner of a `<font>` and a rich run's `<rPr>`, which differ only in
+ * the element that names the typeface: `name` in a font, `rFont` in an `rPr`.
+ */
+export function fontChildren(
+  font: FontFormat,
+  nameElement: 'name' | 'rFont',
+  location: XlsxErrorContext = {},
+): string {
   let inner = ''
   if (font.bold === true) inner += '<b/>'
   if (font.italic === true) inner += '<i/>'
@@ -508,8 +516,12 @@ export function buildFontElement(font: FontFormat, location: XlsxErrorContext = 
     inner += `<sz val="${font.size}"/>`
   }
   if (font.color !== undefined) inner += `<color${colorAttributes(font.color, location)}/>`
-  if (font.name !== undefined) inner += `<name val="${escapeXml(font.name)}"/>`
-  return `<font>${inner}</font>`
+  if (font.name !== undefined) inner += `<${nameElement} val="${escapeXml(font.name)}"/>`
+  return inner
+}
+
+export function buildFontElement(font: FontFormat, location: XlsxErrorContext = {}): string {
+  return `<font>${fontChildren(font, 'name', location)}</font>`
 }
 
 // readFormatting reads three of these off every xf, so the pattern per attribute
