@@ -3,7 +3,36 @@ import { dateToSerial, serialToDate } from './date.js'
 import { XlsxError } from './errors.js'
 import type { SheetLocation } from './cell-input.js'
 import type { DataValidationSpec } from './patch.js'
-import type { DataValidation } from './public-types.js'
+import type { DataValidation, ValidationMessage } from './public-types.js'
+
+// The prompt and error boxes, flattened onto the spec's attribute fields and read
+// back off them, so a rule keeps its messages through a round-trip.
+const messageFields = (rule: DataValidation) => ({
+  promptTitle: rule.prompt?.title,
+  prompt: rule.prompt?.message,
+  errorTitle: rule.error?.title,
+  error: rule.error?.message,
+})
+
+function messagesOf(spec: DataValidationSpec): {
+  prompt?: ValidationMessage
+  error?: ValidationMessage
+} {
+  const result: { prompt?: ValidationMessage; error?: ValidationMessage } = {}
+  if (spec.promptTitle !== undefined || spec.prompt !== undefined) {
+    result.prompt = {
+      ...(spec.promptTitle === undefined ? {} : { title: spec.promptTitle }),
+      ...(spec.prompt === undefined ? {} : { message: spec.prompt }),
+    }
+  }
+  if (spec.errorTitle !== undefined || spec.error !== undefined) {
+    result.error = {
+      ...(spec.errorTitle === undefined ? {} : { title: spec.errorTitle }),
+      ...(spec.error === undefined ? {} : { message: spec.error }),
+    }
+  }
+  return result
+}
 
 function buildValidationSpec(
   rule: DataValidation,
@@ -12,6 +41,7 @@ function buildValidationSpec(
   date1904: boolean,
 ): DataValidationSpec {
   const allowBlank = rule.allowBlank ?? true
+  const messages = messageFields(rule)
   if ('list' in rule) {
     if (rule.list.length === 0) {
       throw new XlsxError('unwritable-value', 'A list validation needs at least one value', {
@@ -28,13 +58,13 @@ function buildValidationSpec(
         )
       }
     }
-    return { type: 'list', sqref, allowBlank, formula1: `"${rule.list.join(',')}"` }
+    return { type: 'list', sqref, allowBlank, formula1: `"${rule.list.join(',')}"`, ...messages }
   }
   if ('listRange' in rule) {
-    return { type: 'list', sqref, allowBlank, formula1: rule.listRange }
+    return { type: 'list', sqref, allowBlank, formula1: rule.listRange, ...messages }
   }
   if ('custom' in rule) {
-    return { type: 'custom', sqref, allowBlank, formula1: rule.custom }
+    return { type: 'custom', sqref, allowBlank, formula1: rule.custom, ...messages }
   }
 
   // A date rule compares against serials, so its Date bounds become the same
@@ -75,6 +105,7 @@ function buildValidationSpec(
     operator: comparison.operator,
     formula1: String(comparison.formula1),
     formula2: comparison.formula2 === undefined ? undefined : String(comparison.formula2),
+    ...messages,
   }
 }
 
@@ -92,25 +123,21 @@ function validationFromSpec(
   spec: DataValidationSpec,
   date1904: boolean,
 ): DataValidation | undefined {
+  const base = { allowBlank: spec.allowBlank, ...messagesOf(spec) }
   if (spec.type === 'list') {
     const list = listFromFormula(spec.formula1)
-    return list === undefined
-      ? { allowBlank: spec.allowBlank, listRange: spec.formula1 }
-      : { allowBlank: spec.allowBlank, list }
+    return list === undefined ? { ...base, listRange: spec.formula1 } : { ...base, list }
   }
   if (spec.type === 'custom') {
-    return { allowBlank: spec.allowBlank, custom: spec.formula1 }
+    return { ...base, custom: spec.formula1 }
   }
   const constraint = comparisonToConstraint(spec.operator, spec.formula1, spec.formula2)
   if (constraint === undefined) return undefined
-  if (spec.type === 'whole') return { allowBlank: spec.allowBlank, whole: constraint }
-  if (spec.type === 'decimal') return { allowBlank: spec.allowBlank, decimal: constraint }
-  if (spec.type === 'textLength') return { allowBlank: spec.allowBlank, textLength: constraint }
+  if (spec.type === 'whole') return { ...base, whole: constraint }
+  if (spec.type === 'decimal') return { ...base, decimal: constraint }
+  if (spec.type === 'textLength') return { ...base, textLength: constraint }
   if (spec.type === 'date') {
-    return {
-      allowBlank: spec.allowBlank,
-      date: mapConstraint(constraint, (serial) => serialToDate(serial, date1904)),
-    }
+    return { ...base, date: mapConstraint(constraint, (serial) => serialToDate(serial, date1904)) }
   }
   return undefined
 }

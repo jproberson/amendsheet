@@ -1012,6 +1012,10 @@ test('readDataValidations reads type, sqref, allowBlank and formulas, skipping t
     operator: undefined,
     formula1: '"a,b,c"',
     formula2: undefined,
+    promptTitle: undefined,
+    prompt: undefined,
+    errorTitle: undefined,
+    error: undefined,
   })
   assert.deepEqual(specs[1], {
     type: 'whole',
@@ -1020,8 +1024,26 @@ test('readDataValidations reads type, sqref, allowBlank and formulas, skipping t
     operator: 'between',
     formula1: '1',
     formula2: '10',
+    promptTitle: undefined,
+    prompt: undefined,
+    errorTitle: undefined,
+    error: undefined,
   })
   assert.equal(specs[2]?.sqref, 'C1') // kept even with an empty formula
+})
+
+test('readDataValidations reads the prompt and error message attributes', () => {
+  const bytes = encode(
+    '<worksheet><sheetData/><dataValidations count="1">' +
+      '<dataValidation type="whole" operator="greaterThan" allowBlank="1" sqref="A1"' +
+      ' promptTitle="T" prompt="P" errorTitle="ET" error="E"><formula1>0</formula1></dataValidation>' +
+      '</dataValidations></worksheet>',
+  )
+  const spec = readDataValidations(bytes)[0]
+  assert.equal(spec?.promptTitle, 'T')
+  assert.equal(spec?.prompt, 'P')
+  assert.equal(spec?.errorTitle, 'ET')
+  assert.equal(spec?.error, 'E')
 })
 
 test('readConditionalFormats reads colour scales, cellIs and data bars', () => {

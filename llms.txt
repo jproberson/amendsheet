@@ -230,6 +230,12 @@ sheet?.validate('D1', { decimal: { greaterThan: 0 } })
 sheet?.validate('E1', { textLength: { lessThanOrEqual: 40 } })
 sheet?.validate('F1', { date: { between: [new Date('2024-01-01'), new Date('2024-12-31')] } })
 sheet?.validate('G1', { custom: 'ISNUMBER(G1)' }, )
+// prompt shows on select, error alerts on a rejected entry; either title or message alone is fine
+sheet?.validate('H1', {
+  whole: { greaterThan: 0 },
+  prompt: { title: 'Count', message: 'A positive whole number' },
+  error: { title: 'Invalid', message: 'Must be greater than zero' },
+})
 
 sheet?.validations // readonly [{ range, rule }] — reads the file plus pending
 sheet?.clearValidations() // removes all; a validate() after still applies
@@ -238,7 +244,9 @@ sheet?.clearValidations() // removes all; a validate() after still applies
 A comparison (`whole`/`decimal`/`textLength`/`date`) is keyed by operator:
 `between`/`notBetween` (a `[min, max]` pair), or `equal`/`notEqual`/`greaterThan`/
 `lessThan`/`greaterThanOrEqual`/`lessThanOrEqual` (a single bound). `date` bounds
-are `Date`s. Add `allowBlank: false` to any rule to forbid an empty cell.
+are `Date`s. Add `allowBlank: false` to any rule to forbid an empty cell, and
+`prompt`/`error` (each `{ title?, message? }`) for the boxes Excel shows on select
+and on a rejected entry. Both read back on `validations`.
 
 ## Conditional formatting
 

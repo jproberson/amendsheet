@@ -48,6 +48,7 @@ export type {
   PrintTitles,
   RankRule,
   SetOptions,
+  ValidationMessage,
   Workbook,
   Worksheet,
 } from './lib/public-types.js'

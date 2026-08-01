@@ -241,7 +241,9 @@ workbook.sheets[0]?.validate('D2:D10', { decimal: { greaterThan: 0 } })
 A comparison is one of `between`, `notBetween`, `equal`, `notEqual`,
 `greaterThan`, `lessThan`, `greaterThanOrEqual` or `lessThanOrEqual`, each bound a
 finite number. A validation joins any the sheet already carries and lands in the
-schema's place, so a reader takes the file without offering to repair it.
+schema's place, so a reader takes the file without offering to repair it. Any rule
+can carry a `prompt` and an `error`, each `{ title?, message? }` — the hint shown
+when the cell is selected and the alert on a rejected entry.
 
 `worksheet.conditionalFormat(range, rule)` adds a conditional format. A
 `colorScale` grades cells between two colours, or three with a `mid`; a `cellIs`

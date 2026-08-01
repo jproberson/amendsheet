@@ -1098,7 +1098,21 @@ export interface DataValidationSpec {
   readonly formula1: string
   /** The upper bound of a two-sided comparison like `between`. */
   readonly formula2?: string
+  /** The input-prompt box shown when the cell is selected. */
+  readonly promptTitle?: string
+  readonly prompt?: string
+  /** The alert shown when an entry is rejected. */
+  readonly errorTitle?: string
+  readonly error?: string
 }
+
+// Prompt and error text are arbitrary and land in attributes, so quotes and the
+// newlines a multi-line message carries are escaped too.
+const escapeAttribute = (text: string): string =>
+  escapeXml(text).replace(/"/g, '&quot;').replace(/\n/g, '&#10;')
+
+const messageAttribute = (name: string, value: string | undefined): string =>
+  value === undefined ? '' : ` ${name}="${escapeAttribute(value)}"`
 
 /** Removes every top-level element of the given name from a sheet, children and
  * all — the whole `dataValidations` or each `conditionalFormatting`. */
@@ -1144,10 +1158,25 @@ export function readDataValidations(bytes: Uint8Array): DataValidationSpec[] {
   let operator: string | undefined
   let formula1 = ''
   let formula2: string | undefined
+  let promptTitle: string | undefined
+  let prompt: string | undefined
+  let errorTitle: string | undefined
+  let error: string | undefined
   let capture: 'formula1' | 'formula2' | undefined
   const flush = () => {
     if (type !== undefined && sqref !== undefined) {
-      specs.push({ type, sqref, allowBlank, operator, formula1, formula2 })
+      specs.push({
+        type,
+        sqref,
+        allowBlank,
+        operator,
+        formula1,
+        formula2,
+        promptTitle,
+        prompt,
+        errorTitle,
+        error,
+      })
     }
     type = undefined
   }
@@ -1157,6 +1186,10 @@ export function readDataValidations(bytes: Uint8Array): DataValidationSpec[] {
       sqref = event.attributes.get('sqref')
       allowBlank = event.attributes.get('allowBlank') === '1'
       operator = event.attributes.get('operator')
+      promptTitle = event.attributes.get('promptTitle')
+      prompt = event.attributes.get('prompt')
+      errorTitle = event.attributes.get('errorTitle')
+      error = event.attributes.get('error')
       formula1 = ''
       formula2 = undefined
       // A rule with no formula children closes in its open tag; flush it now.
@@ -1186,10 +1219,15 @@ function dataValidationElement(spec: DataValidationSpec, prefix: string): string
     spec.formula2 === undefined
       ? ''
       : `<${prefix}formula2>${escapeXml(spec.formula2)}</${prefix}formula2>`
+  const messages =
+    messageAttribute('promptTitle', spec.promptTitle) +
+    messageAttribute('prompt', spec.prompt) +
+    messageAttribute('errorTitle', spec.errorTitle) +
+    messageAttribute('error', spec.error)
   return (
     `<${prefix}dataValidation type="${spec.type}"${operator}` +
     ` allowBlank="${spec.allowBlank ? '1' : '0'}"` +
-    ` showInputMessage="1" showErrorMessage="1" sqref="${spec.sqref}">` +
+    ` showInputMessage="1" showErrorMessage="1"${messages} sqref="${spec.sqref}">` +
     `<${prefix}formula1>${escapeXml(spec.formula1)}</${prefix}formula1>${formula2}` +
     `</${prefix}dataValidation>`
   )

@@ -5090,3 +5090,40 @@ test('setPrintOptions merges onto an existing printOptions element, keeping othe
   // The existing element is edited in place, not doubled.
   assert.equal((xml.match(/<printOptions/g) ?? []).length, 1)
 })
+
+test('a data validation carries prompt and error messages, round-tripped', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.validate('A1:A5', {
+    whole: { greaterThan: 0 },
+    prompt: { title: 'Enter a count', message: 'A positive whole number' },
+    error: { title: 'Invalid', message: 'Must be greater than zero' },
+  })
+  const xml = decode(readContainer(workbook.toBytes()).parts.get('xl/worksheets/sheet1.xml'))
+  assert.match(xml, /promptTitle="Enter a count"/)
+  assert.match(xml, /prompt="A positive whole number"/)
+  assert.match(xml, /errorTitle="Invalid"/)
+  assert.match(xml, /error="Must be greater than zero"/)
+  const back = readWorkbook(workbook.toBytes()).sheets[0]?.validations[0]
+  assert.deepEqual(back?.rule.prompt, {
+    title: 'Enter a count',
+    message: 'A positive whole number',
+  })
+  assert.deepEqual(back?.rule.error, { title: 'Invalid', message: 'Must be greater than zero' })
+})
+
+test('a validation prompt with only a message, no title, round-trips', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.validate('A1', { list: ['a', 'b'], prompt: { message: 'Pick one' } })
+  const back = readWorkbook(workbook.toBytes()).sheets[0]?.validations[0]
+  assert.deepEqual(back?.rule.prompt, { message: 'Pick one' })
+  assert.equal(back?.rule.error, undefined)
+})
+
+test('a validation message with a quote and newline is attribute-escaped and read back', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.validate('A1', { list: ['a'], error: { message: 'say "hi"\nagain' } })
+  const xml = decode(readContainer(workbook.toBytes()).parts.get('xl/worksheets/sheet1.xml'))
+  assert.match(xml, /error="say &quot;hi&quot;&#10;again"/)
+  const back = readWorkbook(workbook.toBytes()).sheets[0]?.validations[0]
+  assert.deepEqual(back?.rule.error, { message: 'say "hi"\nagain' })
+})

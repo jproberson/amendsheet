@@ -507,11 +507,25 @@ export type NumberConstraint = Constraint<number>
 /** A comparison for a `date` rule. Each bound is a `Date`. */
 export type DateConstraint = Constraint<Date>
 
+/** A message a validation can carry: the box Excel shows when the cell is
+ * selected (`prompt`) or when an entry is rejected (`error`). Either field alone
+ * is enough. */
+export interface ValidationMessage {
+  readonly title?: string
+  readonly message?: string
+}
+
 /**
  * A data-validation rule, keyed by kind: a `list` dropdown, or a `whole` or
  * `decimal` numeric comparison. The union is open to more kinds without a break.
+ * `prompt` shows a hint when the cell is selected, `error` an alert on a rejected
+ * entry.
  */
-export type DataValidation = { readonly allowBlank?: boolean } & (
+export type DataValidation = {
+  readonly allowBlank?: boolean
+  readonly prompt?: ValidationMessage
+  readonly error?: ValidationMessage
+} & (
   | {
       /** The values a cell may take, as a dropdown. At least one, none with a
        * comma — the inline list separates values with commas. */
