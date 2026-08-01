@@ -10,12 +10,8 @@ import {
   withSheetsAdded,
 } from './add-sheet.js'
 import { blankWorkbookBytes } from './blank.js'
-import {
-  createContainerDraft,
-  withContentTypeDefault,
-  withContentTypeOverride,
-  withRelationship,
-} from './container-draft.js'
+import { createContainerDraft, withRelationship } from './container-draft.js'
+import { withContentTypeDefault, withContentTypeOverride } from './content-types.js'
 import { applyLineShifts } from './apply-line-shifts.js'
 import { createConditionalFormatStore } from './conditional-format.js'
 import { numberComparison } from './constraint.js'

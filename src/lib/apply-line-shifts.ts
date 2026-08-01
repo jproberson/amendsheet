@@ -20,6 +20,19 @@ export interface LineOp {
   readonly spec: ShiftSpec
 }
 
+/** What `applyLineShifts` needs about the workbook to shift its references: the
+ * sheets and any added this session, which are removed, the line ops in call
+ * order, the file's and this session's defined names, and the date epoch. */
+export interface ShiftInputs {
+  readonly sheets: readonly { readonly path: string; readonly name: string }[]
+  readonly addedSheetPaths: Iterable<string>
+  readonly removed: ReadonlySet<string>
+  readonly lineOps: readonly LineOp[]
+  readonly fileNames: ReadonlyMap<string, string>
+  readonly pendingNames: ReadonlyMap<string, string>
+  readonly date1904: boolean
+}
+
 /**
  * Inserting or deleting a line moves references across the whole workbook. The
  * per-sheet patch has already landed this session's edits in the old grid, so each
@@ -32,17 +45,9 @@ export function applyLineShifts(
   draft: ContainerDraft,
   container: Container,
   changes: Map<string, Uint8Array | null>,
-  workbook: {
-    readonly sheets: readonly { readonly path: string; readonly name: string }[]
-    readonly addedSheetPaths: Iterable<string>
-    readonly removed: ReadonlySet<string>
-    readonly lineOps: readonly LineOp[]
-    readonly fileNames: ReadonlyMap<string, string>
-    readonly pendingNames: ReadonlyMap<string, string>
-    readonly date1904: boolean
-  },
+  input: ShiftInputs,
 ): ReadonlyMap<string, string> {
-  const { sheets, addedSheetPaths, removed, lineOps, fileNames, pendingNames, date1904 } = workbook
+  const { sheets, addedSheetPaths, removed, lineOps, fileNames, pendingNames, date1904 } = input
   if (lineOps.length === 0) return pendingNames
 
   const encoder = new TextEncoder()
