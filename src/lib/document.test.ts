@@ -4886,3 +4886,55 @@ test('leaves the print-area built-in off worksheet.definedNames', () => {
   )
   assert.equal(workbook.sheets[0]?.definedNames.size, 0)
 })
+
+test('defineName on a sheet writes a scoped name, read back live and after a round-trip', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  const sheet = workbook.sheets[0]
+  sheet?.defineName('MyRange', 'Data!$A$1:$A$5')
+  assert.deepEqual([...(sheet?.definedNames ?? [])], [['MyRange', 'Data!$A$1:$A$5']])
+  const back = readWorkbook(workbook.toBytes())
+  assert.deepEqual([...(back.sheets[0]?.definedNames ?? [])], [['MyRange', 'Data!$A$1:$A$5']])
+  assert.deepEqual([...back.definedNames], []) // not a global name
+})
+
+test('a scoped name is written with the sheet localSheetId', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  workbook.sheets[0]?.defineName('R', 'Data!$A$1')
+  const xml = decode(readContainer(workbook.toBytes()).parts.get('xl/workbook.xml'))
+  assert.match(xml, /<definedName name="R" localSheetId="0">Data!\$A\$1<\/definedName>/)
+})
+
+test('removeDefinedName drops a sheet-scoped name', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      extra: {
+        'xl/workbook.xml':
+          '<workbook><sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets>' +
+          '<definedNames><definedName name="R" localSheetId="0">Data!$A$1</definedName>' +
+          '<definedName name="Keep" localSheetId="0">Data!$B$1</definedName></definedNames></workbook>',
+      },
+    }),
+  )
+  workbook.sheets[0]?.removeDefinedName('R')
+  assert.deepEqual([...(workbook.sheets[0]?.definedNames ?? [])], [['Keep', 'Data!$B$1']])
+  const back = readWorkbook(workbook.toBytes())
+  assert.deepEqual([...(back.sheets[0]?.definedNames ?? [])], [['Keep', 'Data!$B$1']])
+})
+
+test('defineName on a sheet refuses a built-in name', () => {
+  const workbook = readWorkbook(build('<row r="1"><c r="A1"><v>1</v></c></row>'))
+  assert.throws(
+    () => workbook.sheets[0]?.defineName('_xlnm.Print_Area', 'Data!$A$1'),
+    (error: unknown) => error instanceof XlsxError && error.code === 'unwritable-value',
+  )
+})
+
+test('two sheets can hold a scoped name of the same spelling', () => {
+  const workbook = createWorkbook('First')
+  const second = workbook.addSheet('Second')
+  workbook.sheets[0]?.defineName('Range', 'First!$A$1')
+  second.defineName('Range', 'Second!$B$2')
+  const xml = decode(readContainer(workbook.toBytes()).parts.get('xl/workbook.xml'))
+  assert.match(xml, /name="Range" localSheetId="0">First!\$A\$1</)
+  assert.match(xml, /name="Range" localSheetId="1">Second!\$B\$2</)
+})

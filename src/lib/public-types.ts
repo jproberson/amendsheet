@@ -114,6 +114,14 @@ export interface Worksheet {
    */
   readonly definedNames: ReadonlyMap<string, string>
   /**
+   * Defines a name scoped to this sheet, replacing one of the same spelling on it.
+   * The name follows Excel's rules, like the workbook-level `defineName`; a
+   * built-in `_xlnm.*` name is refused, since those carry their own accessors.
+   */
+  defineName(name: string, refersTo: string): void
+  /** Removes a name scoped to this sheet. A name it does not have is ignored. */
+  removeDefinedName(name: string): void
+  /**
    * The worksheet protection in force, in the shape `protect()` takes, or
    * undefined when the sheet is not protected. Reflects a pending `protect()` or
    * `unprotect()` as well as what the file was read with.

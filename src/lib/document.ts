@@ -19,6 +19,7 @@ import { createValidationStore } from './data-validation.js'
 import { type PendingImage, contributeImages, imageType } from './images.js'
 import { COMMENTS_RELATIONSHIP, contributeComments, readComments } from './comments.js'
 import {
+  type SheetScopedName,
   checkDefinedName,
   isBuiltInName,
   readDefinedNames,
@@ -839,6 +840,26 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         }
         for (const name of sheetRemovedNames.get(reference.path) ?? []) result.delete(name)
         return result
+      },
+      defineName(name: string, refersTo: string): void {
+        checkDefinedName(name, refersTo)
+        if (isBuiltInName(name)) {
+          throw new XlsxError(
+            'unwritable-value',
+            `"${name}" is a built-in name Excel reserves; set the print area with its own method`,
+            { ...at },
+          )
+        }
+        sheetRemovedNames.get(reference.path)?.delete(name)
+        const pending = sheetPendingNames.get(reference.path) ?? new Map<string, string>()
+        pending.set(name, refersTo)
+        sheetPendingNames.set(reference.path, pending)
+      },
+      removeDefinedName(name: string): void {
+        sheetPendingNames.get(reference.path)?.delete(name)
+        const removedSet = sheetRemovedNames.get(reference.path) ?? new Set<string>()
+        removedSet.add(name)
+        sheetRemovedNames.set(reference.path, removedSet)
       },
       get protection(): SheetProtection | undefined {
         const pending = sheetProtections.get(reference.path)
@@ -1816,6 +1837,8 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       () => removed.size > 0,
       () => pendingNames.size > 0,
       () => removedNames.size > 0,
+      () => sheetPendingNames.size > 0,
+      () => sheetRemovedNames.size > 0,
       () => lineOps.length > 0,
       () => Object.keys(pendingProperties).length > 0,
       () => sheetStates.size > 0,
@@ -1989,6 +2012,28 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         name: renames.get(added.reference.path) ?? added.reference.name,
       },
     }))
+
+    // A scoped name carries the sheet's index in the final <sheets> order, which
+    // is the file's own minus removals then the added ones appended — how
+    // withSheetRemoved and withSheetsAdded reorder the element.
+    const finalSheetPaths = [
+      ...part.sheets.filter((sheet) => !removed.has(sheet.path)).map((sheet) => sheet.path),
+      ...renamedAdded.map((added) => added.reference.path),
+    ]
+    const scopedNameWrites: SheetScopedName[] = []
+    for (const [path, pending] of sheetPendingNames) {
+      const localSheetId = finalSheetPaths.indexOf(path)
+      if (localSheetId < 0) continue
+      for (const [name, refersTo] of pending) {
+        scopedNameWrites.push({ name, localSheetId, refersTo })
+      }
+    }
+    const scopedNameRemovals: { name: string; localSheetId: number }[] = []
+    for (const [path, removals] of sheetRemovedNames) {
+      const localSheetId = finalSheetPaths.indexOf(path)
+      if (localSheetId < 0) continue
+      for (const name of removals) scopedNameRemovals.push({ name, localSheetId })
+    }
     rewritePart(part.path, (workbookXml) => {
       let updated = wroteFormula ? withRecalculation(workbookXml) : workbookXml
       for (const [path, name] of renames) {
@@ -2012,7 +2057,10 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         const original = originalName(path)
         if (original !== undefined) updated = withSheetRemoved(updated, original)
       }
-      return withDefinedNames(updated, namesToWrite, removedNames)
+      return withDefinedNames(updated, namesToWrite, removedNames, {
+        write: scopedNameWrites,
+        remove: scopedNameRemovals,
+      })
     })
 
     rewritePart(part.relationshipsPath, (relationshipsXml) => {

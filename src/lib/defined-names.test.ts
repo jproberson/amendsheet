@@ -81,6 +81,34 @@ test('withDefinedNames opens a self closing container and does nothing for no na
   )
 })
 
+test('withDefinedNames writes a scoped name and replaces one matched by its pair', () => {
+  const into =
+    '<workbook><sheets/><definedNames>' +
+    '<definedName name="R" localSheetId="0">old</definedName>' +
+    '<definedName name="R" localSheetId="1">other sheet, kept</definedName>' +
+    '</definedNames></workbook>'
+  const out = withDefinedNames(into, new Map(), new Set(), {
+    write: [{ name: 'R', localSheetId: 0, refersTo: 'new' }],
+  })
+  // Only the localSheetId=0 R is replaced; the localSheetId=1 R is untouched.
+  assert.match(out, /<definedName name="R" localSheetId="1">other sheet, kept<\/definedName>/)
+  assert.match(out, /<definedName name="R" localSheetId="0">new<\/definedName>/)
+  assert.equal((out.match(/name="R" localSheetId="0"/g) ?? []).length, 1)
+})
+
+test('withDefinedNames removes a scoped name by its pair', () => {
+  const into =
+    '<workbook><sheets/><definedNames>' +
+    '<definedName name="R" localSheetId="0">gone</definedName>' +
+    '<definedName name="Keep" localSheetId="0">stays</definedName>' +
+    '</definedNames></workbook>'
+  const out = withDefinedNames(into, new Map(), new Set(), {
+    remove: [{ name: 'R', localSheetId: 0 }],
+  })
+  assert.doesNotMatch(out, /name="R"/)
+  assert.match(out, /<definedName name="Keep" localSheetId="0">stays<\/definedName>/)
+})
+
 test('checkDefinedName accepts a valid name and refuses the rest', () => {
   checkDefinedName('Good_Name.1', 'Sheet1!$A$1')
   const refuses = (name: unknown, refersTo: unknown = 'x') =>
