@@ -4857,3 +4857,32 @@ test('preserves a run edge whitespace and reads it back', () => {
     runs: [{ text: 'a ', font: { bold: true } }, { text: ' b' }],
   })
 })
+
+test('reads a sheet-scoped defined name on worksheet.definedNames', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      extra: {
+        'xl/workbook.xml':
+          '<workbook><sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets>' +
+          '<definedNames><definedName name="Local" localSheetId="0">Data!$A$1</definedName>' +
+          '<definedName name="Global">Data!$B$1</definedName></definedNames></workbook>',
+      },
+    }),
+  )
+  assert.deepEqual([...(workbook.sheets[0]?.definedNames ?? [])], [['Local', 'Data!$A$1']])
+  // The global one stays on the workbook, not the sheet.
+  assert.deepEqual([...workbook.definedNames], [['Global', 'Data!$B$1']])
+})
+
+test('leaves the print-area built-in off worksheet.definedNames', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1"><v>1</v></c></row>', {
+      extra: {
+        'xl/workbook.xml':
+          '<workbook><sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets>' +
+          '<definedNames><definedName name="_xlnm.Print_Area" localSheetId="0">Data!$A$1:$B$2</definedName></definedNames></workbook>',
+      },
+    }),
+  )
+  assert.equal(workbook.sheets[0]?.definedNames.size, 0)
+})

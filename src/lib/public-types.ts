@@ -107,6 +107,13 @@ export interface Worksheet {
    */
   readonly sheetId: string
   /**
+   * The names scoped to this sheet, each mapped to what it refers to. Two sheets
+   * can each hold a scoped name of the same spelling, which is why these live on
+   * the sheet rather than the workbook. Reflects a pending `defineName`. The
+   * built-in `_xlnm.*` names are left out; the print area has its own accessor.
+   */
+  readonly definedNames: ReadonlyMap<string, string>
+  /**
    * The worksheet protection in force, in the shape `protect()` takes, or
    * undefined when the sheet is not protected. Reflects a pending `protect()` or
    * `unprotect()` as well as what the file was read with.

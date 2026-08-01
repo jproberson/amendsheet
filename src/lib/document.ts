@@ -18,7 +18,13 @@ import { formatCsv, parseCsv } from './csv.js'
 import { createValidationStore } from './data-validation.js'
 import { type PendingImage, contributeImages, imageType } from './images.js'
 import { COMMENTS_RELATIONSHIP, contributeComments, readComments } from './comments.js'
-import { checkDefinedName, readDefinedNames, withDefinedNames } from './defined-names.js'
+import {
+  checkDefinedName,
+  isBuiltInName,
+  readDefinedNames,
+  readSheetScopedNames,
+  withDefinedNames,
+} from './defined-names.js'
 import {
   type DocumentProperties,
   readCoreProperties,
@@ -287,6 +293,12 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   const fileNames = readDefinedNames(partText(container, part.path) ?? '')
   const pendingNames = new Map<string, string>()
   const removedNames = new Set<string>()
+  // Sheet-scoped names, keyed by the sheet's package path (stable across a rename
+  // or a reorder). The file's own are read once; toBytes maps a path to its final
+  // localSheetId. A built-in `_xlnm.*` name is reserved for its own accessor.
+  const fileScopedNames = readSheetScopedNames(partText(container, part.path) ?? '')
+  const sheetPendingNames = new Map<string, Map<string, string>>()
+  const sheetRemovedNames = new Map<string, Set<string>>()
   let pendingProperties: DocumentProperties = {}
   const sheetHyperlinks = new Map<string, Map<string, Hyperlink>>()
   const sheetUnlinks = new Map<string, Set<string>>()
@@ -331,6 +343,9 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
   const makeWorksheet = (reference: SheetRef): Worksheet => {
     const sheetBytes = container.parts.get(reference.path) ?? addedSheets.get(reference.path)
     const at: SheetLocation = { sheet: reference.name, part: reference.path }
+    // Where the sheet sits in the file's order, which is the localSheetId its
+    // file-scoped names carry. -1 for a sheet added this session, which has none.
+    const fileSheetIndex = part.sheets.findIndex((sheet) => sheet.path === reference.path)
 
     // The sheet points at its comments part through a relationship. Found once, it
     // gives what each cell reports and which cells are already taken, so a second
@@ -810,6 +825,21 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         sheetStates.set(reference.path, state)
       },
       sheetId: reference.sheetId,
+      get definedNames(): ReadonlyMap<string, string> {
+        const result = new Map<string, string>()
+        if (fileSheetIndex >= 0) {
+          for (const entry of fileScopedNames) {
+            if (entry.localSheetId === fileSheetIndex && !isBuiltInName(entry.name)) {
+              result.set(entry.name, entry.refersTo)
+            }
+          }
+        }
+        for (const [name, refersTo] of sheetPendingNames.get(reference.path) ?? []) {
+          if (!isBuiltInName(name)) result.set(name, refersTo)
+        }
+        for (const name of sheetRemovedNames.get(reference.path) ?? []) result.delete(name)
+        return result
+      },
       get protection(): SheetProtection | undefined {
         const pending = sheetProtections.get(reference.path)
         if (pending === 'remove') return undefined

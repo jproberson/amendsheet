@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { checkDefinedName, readDefinedNames, withDefinedNames } from './defined-names.js'
+import {
+  checkDefinedName,
+  readDefinedNames,
+  readSheetScopedNames,
+  withDefinedNames,
+} from './defined-names.js'
 import { XlsxError } from './errors.js'
 
 const isUnwritable = (error: unknown) =>
@@ -11,6 +16,18 @@ test('readDefinedNames reads global names, skipping sheet-scoped ones', () => {
     '<workbook><definedNames><definedName name="Tax">Sheet1!$B$1</definedName>' +
     '<definedName name="Local" localSheetId="0">Sheet1!$A$1</definedName></definedNames></workbook>'
   assert.deepEqual([...readDefinedNames(xml)], [['Tax', 'Sheet1!$B$1']])
+})
+
+test('readSheetScopedNames reads names carrying a localSheetId, skipping global ones', () => {
+  const xml =
+    '<workbook><definedNames><definedName name="Tax">Sheet1!$B$1</definedName>' +
+    '<definedName name="Local" localSheetId="2">Sheet3!$A$1</definedName>' +
+    '<definedName name="_xlnm.Print_Area" localSheetId="0">Sheet1!$A$1:$B$2</definedName>' +
+    '</definedNames></workbook>'
+  assert.deepEqual(readSheetScopedNames(xml), [
+    { name: 'Local', localSheetId: 2, refersTo: 'Sheet3!$A$1' },
+    { name: '_xlnm.Print_Area', localSheetId: 0, refersTo: 'Sheet1!$A$1:$B$2' },
+  ])
 })
 
 test('withDefinedNames opens a container after sheets when there is none', () => {

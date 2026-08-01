@@ -31,6 +31,49 @@ const globalName = (attributes: ReadonlyMap<string, string>): string | undefined
   return name !== undefined && attributes.get('localSheetId') === undefined ? name : undefined
 }
 
+/** The reserved prefix Excel gives built-in names — print area, print titles,
+ * filter database — which carry their own accessors, not `defineName`. */
+export const isBuiltInName = (name: string): boolean => name.startsWith('_xlnm.')
+
+export interface SheetScopedName {
+  readonly name: string
+  /** The 0-based index into the workbook's sheet order the name is scoped to. */
+  readonly localSheetId: number
+  readonly refersTo: string
+}
+
+/**
+ * Every defined name carrying a `localSheetId`, in file order, the built-in
+ * `_xlnm.*` names (print area, print titles) included — a caller filters. The
+ * global names, which `readDefinedNames` returns, are skipped here.
+ */
+export function readSheetScopedNames(workbookXml: string): SheetScopedName[] {
+  const names: SheetScopedName[] = []
+  let current: string | undefined
+  let localSheetId = -1
+  let refersTo = ''
+  for (const event of readXml(workbookXml)) {
+    if (event.kind === 'open' && event.localName === 'definedName') {
+      const name = event.attributes.get('name')
+      const scoped = event.attributes.get('localSheetId')
+      const id = scoped === undefined ? Number.NaN : Number(scoped)
+      current = name !== undefined && Number.isInteger(id) && id >= 0 ? name : undefined
+      localSheetId = id
+      refersTo = ''
+      continue
+    }
+    if (event.kind === 'text' && current !== undefined) {
+      refersTo += event.text
+      continue
+    }
+    if (event.kind === 'close' && event.localName === 'definedName' && current !== undefined) {
+      names.push({ name: current, localSheetId, refersTo })
+      current = undefined
+    }
+  }
+  return names
+}
+
 export function readDefinedNames(workbookXml: string): Map<string, string> {
   const names = new Map<string, string>()
   let current: string | undefined
