@@ -1,3 +1,7 @@
+import { EMPTY_RELATIONSHIPS, type ContainerDraft, withRelationship } from './container-draft.js'
+import { withDrawing } from './drawings.js'
+import { relationshipsPathFor } from './workbook-parts.js'
+
 /** The picture formats this library embeds, keyed by the file extension Excel
  * expects. Each is recognised from the first bytes of the image, so a caller need
  * not name the type. */
@@ -69,4 +73,102 @@ export function appendAnchors(drawingXml: string, anchors: readonly string[]): s
   const close = drawingXml.lastIndexOf('</xdr:wsDr>')
   if (close === -1) return drawingXml
   return drawingXml.slice(0, close) + anchors.join('') + drawingXml.slice(close)
+}
+
+/** A picture pending embedding: its media bytes and the cell corners it spans. */
+export interface PendingImage {
+  readonly bytes: Uint8Array
+  readonly type: ImageType
+  readonly from: { readonly column: number; readonly row: number }
+  readonly to: { readonly column: number; readonly row: number }
+}
+
+const DRAWING_RELATIONSHIP =
+  'http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing'
+const IMAGE_RELATIONSHIP =
+  'http://schemas.openxmlformats.org/officeDocument/2006/relationships/image'
+export const DRAWING_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.drawing+xml'
+
+/**
+ * Embeds this session's images into the draft. Each becomes a media part
+ * referenced from the sheet's drawing through a fresh relationship, its picture
+ * anchored over the given cells; a sheet with no drawing gets one wired by a
+ * `<drawing>`, one that already has a drawing (its own or from another image this
+ * session) has the picture appended. Returns the fresh drawing parts and the
+ * media extensions, for the caller to declare in the content types.
+ */
+export function contributeImages(
+  draft: ContainerDraft,
+  images: ReadonlyMap<string, readonly PendingImage[]>,
+  removedSheets: ReadonlySet<string>,
+): { drawingParts: string[]; imageExtensions: Set<ImageType> } {
+  const encoder = new TextEncoder()
+  const drawingParts: string[] = []
+  const imageExtensions = new Set<ImageType>()
+  let drawingNumber = 0
+  let mediaNumber = 0
+
+  for (const [path, imageList] of images) {
+    if (removedSheets.has(path) || imageList.length === 0) continue
+
+    const relationshipsPath = relationshipsPathFor(path)
+    const existingDrawing = draft.relationshipTarget(path, DRAWING_RELATIONSHIP)
+
+    let drawingPath = existingDrawing
+    if (drawingPath === undefined) {
+      do {
+        drawingNumber += 1
+      } while (draft.has(`xl/drawings/drawing${drawingNumber}.xml`))
+      drawingPath = `xl/drawings/drawing${drawingNumber}.xml`
+    }
+    const drawingRelsPath = relationshipsPathFor(drawingPath)
+    let drawingRels = draft.text(drawingRelsPath) ?? EMPTY_RELATIONSHIPS
+    const existingDrawingXml = draft.text(drawingPath)
+    let shapeId = 1
+    for (const match of (existingDrawingXml ?? '').matchAll(/<xdr:cNvPr id="(\d+)"/g)) {
+      shapeId = Math.max(shapeId, Number(match[1]))
+    }
+
+    const anchors: string[] = []
+    for (const image of imageList) {
+      do {
+        mediaNumber += 1
+      } while (draft.has(`xl/media/image${mediaNumber}.${image.type}`))
+      const mediaPath = `xl/media/image${mediaNumber}.${image.type}`
+      draft.setBytes(mediaPath, image.bytes)
+      imageExtensions.add(image.type)
+      const rel = withRelationship(
+        drawingRels,
+        IMAGE_RELATIONSHIP,
+        `../${mediaPath.slice('xl/'.length)}`,
+      )
+      drawingRels = rel.xml
+      anchors.push(pictureAnchor(image.from, image.to, ++shapeId, rel.id))
+    }
+
+    draft.setBytes(
+      drawingPath,
+      encoder.encode(
+        existingDrawingXml === undefined
+          ? buildDrawing(anchors)
+          : appendAnchors(existingDrawingXml, anchors),
+      ),
+    )
+    draft.setBytes(drawingRelsPath, encoder.encode(drawingRels))
+
+    if (existingDrawing === undefined) {
+      drawingParts.push(drawingPath)
+      const wired = withRelationship(
+        draft.text(relationshipsPath),
+        DRAWING_RELATIONSHIP,
+        `../${drawingPath.slice('xl/'.length)}`,
+      )
+      draft.setBytes(relationshipsPath, encoder.encode(wired.xml))
+      const sheetXml = draft.text(path)
+      if (sheetXml !== undefined)
+        draft.setBytes(path, encoder.encode(withDrawing(sheetXml, wired.id)))
+    }
+  }
+
+  return { drawingParts, imageExtensions }
 }
