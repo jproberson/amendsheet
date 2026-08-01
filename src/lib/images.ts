@@ -94,17 +94,15 @@ export const DRAWING_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocume
  * referenced from the sheet's drawing through a fresh relationship, its picture
  * anchored over the given cells; a sheet with no drawing gets one wired by a
  * `<drawing>`, one that already has a drawing (its own or from another image this
- * session) has the picture appended. Returns the fresh drawing parts and the
- * media extensions, for the caller to declare in the content types.
+ * session) has the picture appended. Each fresh drawing part and media extension
+ * declares its content type on the draft.
  */
 export function contributeImages(
   draft: ContainerDraft,
   images: ReadonlyMap<string, readonly PendingImage[]>,
   removedSheets: ReadonlySet<string>,
-): { drawingParts: string[]; imageExtensions: Set<ImageType> } {
+): void {
   const encoder = new TextEncoder()
-  const drawingParts: string[] = []
-  const imageExtensions = new Set<ImageType>()
   // A media path embeds the image type, so numbers are shared across types —
   // image1.png then image2.jpeg, never two image1s. A per-path freeNumber would
   // hand out image1.jpeg beside image1.png, so this one stays a shared counter.
@@ -134,7 +132,7 @@ export function contributeImages(
       } while (draft.has(`xl/media/image${mediaNumber}.${image.type}`))
       const mediaPath = `xl/media/image${mediaNumber}.${image.type}`
       draft.setBytes(mediaPath, image.bytes)
-      imageExtensions.add(image.type)
+      draft.declareDefault(image.type, imageContentType(image.type))
       const rel = withRelationship(
         drawingRels,
         IMAGE_RELATIONSHIP,
@@ -155,7 +153,7 @@ export function contributeImages(
     draft.setBytes(drawingRelsPath, encoder.encode(drawingRels))
 
     if (existingDrawing === undefined) {
-      drawingParts.push(drawingPath)
+      draft.declareOverride(drawingPath, DRAWING_CONTENT_TYPE)
       const wired = withRelationship(
         draft.text(relationshipsPath),
         DRAWING_RELATIONSHIP,
@@ -167,6 +165,4 @@ export function contributeImages(
         draft.setBytes(path, encoder.encode(withDrawing(sheetXml, wired.id)))
     }
   }
-
-  return { drawingParts, imageExtensions }
 }

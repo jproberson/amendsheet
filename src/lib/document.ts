@@ -11,19 +11,13 @@ import {
 } from './add-sheet.js'
 import { blankWorkbookBytes } from './blank.js'
 import { createContainerDraft, withRelationship } from './container-draft.js'
-import { withContentTypeDefault, withContentTypeOverride } from './content-types.js'
+import { withContentTypeOverride } from './content-types.js'
 import { applyLineShifts } from './apply-line-shifts.js'
 import { createConditionalFormatStore } from './conditional-format.js'
 import { numberComparison } from './constraint.js'
 import { formatCsv, parseCsv } from './csv.js'
 import { createValidationStore } from './data-validation.js'
-import {
-  DRAWING_CONTENT_TYPE,
-  type PendingImage,
-  contributeImages,
-  imageContentType,
-  imageType,
-} from './images.js'
+import { type PendingImage, contributeImages, imageType } from './images.js'
 import { COMMENTS_RELATIONSHIP, contributeComments, readComments } from './comments.js'
 import { checkDefinedName, readDefinedNames, withDefinedNames } from './defined-names.js'
 import {
@@ -2064,9 +2058,9 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     // adds and removals, declaring each fresh part's content type on the draft.
     contributeComments(draft, sheetComments, sheetRemovedComments, removed)
 
-    // contributeImages embeds this session pictures and returns the fresh drawing
-    // parts and media extensions to declare in the content types.
-    const { drawingParts, imageExtensions } = contributeImages(draft, sheetImages, removed)
+    // contributeImages embeds this session's pictures, declaring each fresh drawing
+    // part and media extension's content type on the draft.
+    contributeImages(draft, sheetImages, removed)
 
     // contributeTables writes this session's added tables, declaring each table
     // part's content type on the draft.
@@ -2172,12 +2166,6 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
       for (const path of removedExisting) updated = withoutOverride(updated, path)
       for (const override of addedOverrides) {
         updated = withContentTypeOverride(updated, override.path, override.contentType)
-      }
-      for (const drawingPath of drawingParts) {
-        updated = withContentTypeOverride(updated, drawingPath, DRAWING_CONTENT_TYPE)
-      }
-      for (const extension of imageExtensions) {
-        updated = withContentTypeDefault(updated, extension, imageContentType(extension))
       }
       if (createdCoreProperties) {
         updated = withContentTypeOverride(

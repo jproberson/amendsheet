@@ -38,7 +38,7 @@ test('contributeComments opens a comments part and a VML drawing wired to the sh
 
 test('contributeImages writes a media part and a drawing, returning the extension', () => {
   const { draft } = freshSheet()
-  const result = contributeImages(
+  contributeImages(
     draft,
     new Map([
       [
@@ -55,11 +55,12 @@ test('contributeImages writes a media part and a drawing, returning the extensio
     ]),
     new Set(),
   )
-  assert.deepEqual(result.drawingParts, ['xl/drawings/drawing1.xml'])
-  assert.deepEqual([...result.imageExtensions], ['png'])
   assert.ok(draft.has('xl/media/image1.png'))
   assert.ok(draft.text('xl/drawings/drawing1.xml')?.includes('twoCellAnchor'))
   assert.ok(draft.text(PATH)?.includes('<drawing '))
+  const types = draft.applyContentTypes(CONTENT_TYPES)
+  assert.ok(types.includes('PartName="/xl/drawings/drawing1.xml"'))
+  assert.ok(types.includes('Extension="png"'))
 })
 
 test('contributeTables writes a table part, lists it on the sheet and declares its type', () => {
