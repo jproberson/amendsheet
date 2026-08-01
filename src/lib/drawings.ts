@@ -1,3 +1,4 @@
+import { XlsxError } from './errors.js'
 import type { ShiftSpec } from './shift.js'
 import { readXml } from './xml.js'
 
@@ -88,4 +89,57 @@ export function shiftDrawing(drawingXml: string, spec: ShiftSpec): string {
     xml = xml.slice(0, splice.start) + splice.text + xml.slice(splice.end)
   }
   return xml
+}
+
+// A worksheet's <legacyDrawing> must sit after the drawing elements and before
+// these, which the schema orders after it. Inserting before the earliest present
+// keeps the order valid; a worksheet-level <extLst> is always the last child, so
+// it is handled separately from any <extLst> nested in an earlier element.
+const LEGACY_DRAWING_SUCCESSORS = [
+  '<legacyDrawingHF',
+  '<drawingHF',
+  '<picture',
+  '<oleObjects',
+  '<controls',
+  '<webPublishItems',
+  '<tableParts',
+]
+
+/** Wires a legacy drawing into a sheet, placed in worksheet schema order. */
+export function withLegacyDrawing(sheetXml: string, relationshipId: string): string {
+  const end = sheetXml.indexOf('</worksheet>')
+  if (end === -1) {
+    throw new XlsxError('invalid-content', 'A worksheet part is malformed', {})
+  }
+  let at = end
+  for (const successor of LEGACY_DRAWING_SUCCESSORS) {
+    const found = sheetXml.indexOf(successor)
+    if (found !== -1 && found < at) at = found
+  }
+  if (/<\/extLst>\s*<\/worksheet>\s*$/.test(sheetXml)) {
+    const worksheetExtLst = sheetXml.lastIndexOf('<extLst')
+    if (worksheetExtLst !== -1 && worksheetExtLst < at) at = worksheetExtLst
+  }
+  return `${sheetXml.slice(0, at)}<legacyDrawing r:id="${relationshipId}"/>${sheetXml.slice(at)}`
+}
+
+// A worksheet's <drawing> sits before the legacy drawing and the elements after it.
+const DRAWING_SUCCESSORS = ['<legacyDrawing', ...LEGACY_DRAWING_SUCCESSORS]
+
+/** Wires a DrawingML drawing into a sheet, placed in worksheet schema order. */
+export function withDrawing(sheetXml: string, relationshipId: string): string {
+  const end = sheetXml.indexOf('</worksheet>')
+  if (end === -1) {
+    throw new XlsxError('invalid-content', 'A worksheet part is malformed', {})
+  }
+  let at = end
+  for (const successor of DRAWING_SUCCESSORS) {
+    const found = sheetXml.indexOf(successor)
+    if (found !== -1 && found < at) at = found
+  }
+  if (/<\/extLst>\s*<\/worksheet>\s*$/.test(sheetXml)) {
+    const worksheetExtLst = sheetXml.lastIndexOf('<extLst')
+    if (worksheetExtLst !== -1 && worksheetExtLst < at) at = worksheetExtLst
+  }
+  return `${sheetXml.slice(0, at)}<drawing r:id="${relationshipId}"/>${sheetXml.slice(at)}`
 }

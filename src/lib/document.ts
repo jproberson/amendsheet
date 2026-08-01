@@ -10,12 +10,18 @@ import {
   withSheetsAdded,
 } from './add-sheet.js'
 import { blankWorkbookBytes } from './blank.js'
-import { EMPTY_RELATIONSHIPS, createContainerDraft, withRelationship } from './container-draft.js'
+import {
+  EMPTY_RELATIONSHIPS,
+  createContainerDraft,
+  withContentTypeDefault,
+  withContentTypeOverride,
+  withRelationship,
+} from './container-draft.js'
 import { createConditionalFormatStore } from './conditional-format.js'
 import { numberComparison } from './constraint.js'
 import { formatCsv, parseCsv } from './csv.js'
 import { createValidationStore } from './data-validation.js'
-import { shiftDrawing } from './drawings.js'
+import { shiftDrawing, withDrawing, withLegacyDrawing } from './drawings.js'
 import {
   type ImageType,
   appendAnchors,
@@ -209,84 +215,6 @@ function sqrefOf(range: string, at: SheetLocation): string {
 // these, which the schema orders after it. Inserting before the earliest present
 // keeps the order valid; a worksheet-level <extLst> is always the last child, so
 // it is handled separately from any <extLst> nested in an earlier element.
-const LEGACY_DRAWING_SUCCESSORS = [
-  '<legacyDrawingHF',
-  '<drawingHF',
-  '<picture',
-  '<oleObjects',
-  '<controls',
-  '<webPublishItems',
-  '<tableParts',
-]
-
-/** Wires a legacy drawing into a sheet, placed in worksheet schema order. */
-function withLegacyDrawing(sheetXml: string, relationshipId: string): string {
-  const end = sheetXml.indexOf('</worksheet>')
-  if (end === -1) {
-    throw new XlsxError('invalid-content', 'A worksheet part is malformed', {})
-  }
-  let at = end
-  for (const successor of LEGACY_DRAWING_SUCCESSORS) {
-    const found = sheetXml.indexOf(successor)
-    if (found !== -1 && found < at) at = found
-  }
-  if (/<\/extLst>\s*<\/worksheet>\s*$/.test(sheetXml)) {
-    const worksheetExtLst = sheetXml.lastIndexOf('<extLst')
-    if (worksheetExtLst !== -1 && worksheetExtLst < at) at = worksheetExtLst
-  }
-  return `${sheetXml.slice(0, at)}<legacyDrawing r:id="${relationshipId}"/>${sheetXml.slice(at)}`
-}
-
-// A worksheet's <drawing> sits before the legacy drawing and the elements after it.
-const DRAWING_SUCCESSORS = ['<legacyDrawing', ...LEGACY_DRAWING_SUCCESSORS]
-
-/** Wires a DrawingML drawing into a sheet, placed in worksheet schema order. */
-function withDrawing(sheetXml: string, relationshipId: string): string {
-  const end = sheetXml.indexOf('</worksheet>')
-  if (end === -1) {
-    throw new XlsxError('invalid-content', 'A worksheet part is malformed', {})
-  }
-  let at = end
-  for (const successor of DRAWING_SUCCESSORS) {
-    const found = sheetXml.indexOf(successor)
-    if (found !== -1 && found < at) at = found
-  }
-  if (/<\/extLst>\s*<\/worksheet>\s*$/.test(sheetXml)) {
-    const worksheetExtLst = sheetXml.lastIndexOf('<extLst')
-    if (worksheetExtLst !== -1 && worksheetExtLst < at) at = worksheetExtLst
-  }
-  return `${sheetXml.slice(0, at)}<drawing r:id="${relationshipId}"/>${sheetXml.slice(at)}`
-}
-
-/** Declares a part in the content types with an Override, once. */
-function withContentTypeOverride(xml: string, partName: string, contentType: string): string {
-  if (xml.includes(`PartName="/${partName}"`)) return xml
-  const override = `<Override PartName="/${partName}" ContentType="${contentType}"/>`
-  const close = xml.indexOf('</Types>')
-  if (close === -1) {
-    throw new XlsxError('invalid-content', 'Content types part is malformed', {
-      part: '[Content_Types].xml',
-    })
-  }
-  return xml.slice(0, close) + override + xml.slice(close)
-}
-
-/** Declares a file extension in the content types with a Default, once. */
-function withContentTypeDefault(xml: string, extension: string, contentType: string): string {
-  if (new RegExp(`<Default Extension="${extension}"`).test(xml)) return xml
-  const close = xml.indexOf('>')
-  if (close === -1 || !xml.startsWith('<')) {
-    throw new XlsxError('invalid-content', 'Content types part is malformed', {
-      part: '[Content_Types].xml',
-    })
-  }
-  // A Default sits among the other Defaults at the top of the Types element.
-  const typesOpen = xml.indexOf('<Types')
-  const after = xml.indexOf('>', typesOpen) + 1
-  const element = `<Default Extension="${extension}" ContentType="${contentType}"/>`
-  return xml.slice(0, after) + element + xml.slice(after)
-}
-
 function checkOutlineLevel(level: number, at: SheetLocation): void {
   if (!Number.isInteger(level) || level < 1 || level > 7) {
     throw new XlsxError('unwritable-value', `Outline level ${level} is not between 1 and 7`, {
