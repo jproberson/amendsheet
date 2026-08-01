@@ -477,7 +477,10 @@ export function parseFont(element: string): FontFormat {
         if (color !== undefined) font.color = color
         break
       }
-      case 'name': {
+      // `name` in a styles font, `rFont` in a rich-text run's rPr; the same
+      // typeface either way, so one parser reads both.
+      case 'name':
+      case 'rFont': {
         const name = event.attributes.get('val')
         if (name !== undefined) font.name = name
         break

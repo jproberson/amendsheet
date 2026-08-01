@@ -3,7 +3,7 @@ import { readFile, readdir } from 'node:fs/promises'
 import { test } from 'node:test'
 import { assertWellFormed } from '../testing/invariants.js'
 import { readContainer } from './container.js'
-import { appendSharedStrings, readSharedStrings } from './shared-strings.js'
+import { appendSharedStrings, readRichSharedStrings, readSharedStrings } from './shared-strings.js'
 
 const sst = (body: string) =>
   `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${body}</sst>`
@@ -78,6 +78,44 @@ test('reads the shared strings of every fixtures file that has them', async () =
 
   assert.ok(tables > 10, `expected many shared string tables, got ${tables}`)
   assert.ok(entries > 100, `expected many strings, got ${entries}`)
+})
+
+test('reads the runs of a rich string, keyed by table index', () => {
+  const rich = readRichSharedStrings(
+    sst('<si><t>plain</t></si><si><r><rPr><b/></rPr><t>bold</t></r><r><t> and plain</t></r></si>'),
+  )
+
+  assert.equal(rich[0], undefined)
+  assert.deepEqual(rich[1], {
+    runs: [{ text: 'bold', font: { bold: true } }, { text: ' and plain' }],
+  })
+})
+
+test('reads a run font off its rPr, rFont naming the typeface', () => {
+  const rich = readRichSharedStrings(
+    sst(
+      '<si><r><rPr><i/><sz val="14"/><color rgb="FFFF0000"/><rFont val="Arial"/></rPr><t>x</t></r><r><t>y</t></r></si>',
+    ),
+  )
+
+  assert.deepEqual(rich[0], {
+    runs: [
+      { text: 'x', font: { italic: true, size: 14, color: 'FFFF0000', name: 'Arial' } },
+      { text: 'y' },
+    ],
+  })
+})
+
+test('a single unformatted run is not rich', () => {
+  const rich = readRichSharedStrings(sst('<si><r><t>lonely</t></r></si>'))
+
+  assert.equal(rich[0], undefined)
+})
+
+test('a single run carrying a font is rich', () => {
+  const rich = readRichSharedStrings(sst('<si><r><rPr><b/></rPr><t>solo bold</t></r></si>'))
+
+  assert.deepEqual(rich[0], { runs: [{ text: 'solo bold', font: { bold: true } }] })
 })
 
 const sstOf = (result: { xml: string }) => result.xml

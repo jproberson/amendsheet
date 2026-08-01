@@ -57,6 +57,7 @@ export function toCell(
     // cross-references this against set() or formatReference needs one answer.
     reference: canonicalReference(raw.address) ?? raw.reference,
     value,
+    ...(raw.richText === undefined ? {} : { richText: raw.richText }),
     ...(formula === undefined ? {} : { formula }),
     ...(numberFormat === undefined ? {} : { numberFormat }),
     ...formatting,

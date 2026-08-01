@@ -69,7 +69,7 @@ import {
 } from './reference.js'
 import { type SharedMasters, toCell } from './cell-read.js'
 import { readSheet } from './sheet.js'
-import { appendSharedStrings, readSharedStrings } from './shared-strings.js'
+import { appendSharedStrings, readRichSharedStrings, readSharedStrings } from './shared-strings.js'
 import {
   type TableSpec,
   contributeTables,
@@ -220,6 +220,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
 
   const stringsXml = partText(container, 'xl/sharedStrings.xml')
   const sharedStrings = stringsXml === undefined ? [] : readSharedStrings(stringsXml)
+  const richStrings = stringsXml === undefined ? [] : readRichSharedStrings(stringsXml)
 
   const themeXml = partText(container, 'xl/theme/theme1.xml')
   const themePalette = themeXml === undefined ? [] : paletteByIndex(readThemeColors(themeXml))
@@ -433,7 +434,7 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         commentsRead.size + links.size > 0
           ? new Set<string>([...commentsRead.keys(), ...links.keys()])
           : undefined
-      for (const raw of readSheet(bytes, sharedStrings, at)) {
+      for (const raw of readSheet(bytes, sharedStrings, at, richStrings)) {
         if (raw.ownsSharedRange === true && raw.sharedIndex !== undefined) {
           masters.set(raw.sharedIndex, canonicalReference(raw.address) ?? raw.reference)
         }

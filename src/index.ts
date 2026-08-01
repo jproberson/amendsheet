@@ -1,5 +1,5 @@
 export { createWorkbook, createWorkbookFromCsv, readWorkbook } from './lib/document.js'
-export type { CellInput, FormulaInput } from './lib/cell-input.js'
+export type { CellInput, FormulaInput, RichText, RichTextRun } from './lib/cell-input.js'
 export type { SheetProtection } from './lib/patch.js'
 export type {
   Alignment,

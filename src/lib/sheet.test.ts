@@ -253,3 +253,20 @@ test('reads a sheet whose elements carry a namespace prefix', () => {
   )
   assert.deepEqual(found[1]?.value, { kind: 'text', value: 'hi' })
 })
+
+test('reads inline string runs as rich text', () => {
+  const [cell] = cells(
+    '<row r="1"><c r="A1" t="inlineStr"><is><r><rPr><b/></rPr><t>Bold</t></r><r><t> plain</t></r></is></c></row>',
+  )
+
+  assert.deepEqual(cell?.value, { kind: 'text', value: 'Bold plain' })
+  assert.deepEqual(cell?.richText, {
+    runs: [{ text: 'Bold', font: { bold: true } }, { text: ' plain' }],
+  })
+})
+
+test('a plain inline string carries no runs', () => {
+  const [cell] = cells('<row r="1"><c r="A1" t="inlineStr"><is><t>plain</t></is></c></row>')
+
+  assert.equal(cell?.richText, undefined)
+})

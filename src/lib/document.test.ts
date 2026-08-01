@@ -4783,3 +4783,28 @@ test('link appends its relationship after ones the sheet already has', () => {
   assert.match(rels, /Id="rId2" Type="[^"]*hyperlink" Target="https:\/\/example.com"/)
   assert.match(decode(parts.get('xl/worksheets/sheet1.xml')), /<hyperlink ref="A1" r:id="rId2"\/>/)
 })
+
+test('surfaces a rich shared string on cell.richText, value flattened', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1" t="s"><v>0</v></c></row>', {
+      extra: {
+        'xl/sharedStrings.xml':
+          '<sst><si><r><rPr><b/></rPr><t>Bold</t></r><r><t> plain</t></r></si></sst>',
+      },
+    }),
+  )
+  const cell = workbook.sheets[0]?.cell('A1')
+  assert.deepEqual(cell?.value, { kind: 'text', value: 'Bold plain' })
+  assert.deepEqual(cell?.richText, {
+    runs: [{ text: 'Bold', font: { bold: true } }, { text: ' plain' }],
+  })
+})
+
+test('leaves richText off a plain shared string', () => {
+  const workbook = readWorkbook(
+    build('<row r="1"><c r="A1" t="s"><v>0</v></c></row>', {
+      extra: { 'xl/sharedStrings.xml': '<sst><si><t>plain</t></si></sst>' },
+    }),
+  )
+  assert.equal(workbook.sheets[0]?.cell('A1')?.richText, undefined)
+})

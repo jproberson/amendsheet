@@ -1,6 +1,10 @@
+import type { RichText, RichTextRun } from './cell-input.js'
 import { type XlsxErrorContext, XlsxError } from './errors.js'
 import { type CellAddress, formatReference, parseFileReference } from './reference.js'
+import { richTextOf, runFont } from './rich-text.js'
 import { readXmlBytes } from './xml.js'
+
+const utf8 = new TextDecoder()
 
 export type RawCellValue =
   | { readonly kind: 'number'; readonly value: number }
@@ -23,6 +27,8 @@ export interface RawCell {
   readonly ownsSharedRange?: boolean
   /** Resolving this to a format needs styles.xml. */
   readonly styleIndex?: number
+  /** The string's formatted runs, when it is a rich shared string. */
+  readonly richText?: RichText
 }
 
 /** No dates: a date is a number with a date format, which needs the style table. */
@@ -30,6 +36,7 @@ export function* readSheet(
   bytes: Uint8Array,
   sharedStrings: readonly string[],
   at: XlsxErrorContext = {},
+  richStrings: readonly (RichText | undefined)[] = [],
 ): Generator<RawCell> {
   let row = 0
   let column = 0
@@ -44,6 +51,12 @@ export function* readSheet(
   let ownsSharedRange = false
   let inlineText: string[] | null = null
 
+  let inlineRuns: RichTextRun[] = []
+  let inInlineRun = false
+  let inlineRunText: string[] = []
+  let inlineRPrStart = -1
+  let inlineRPrElement: string | undefined
+
   let inValue = false
   let inFormula = false
   let inInlineText = false
@@ -54,6 +67,13 @@ export function* readSheet(
     const written = reference ?? formatReference(address)
     column = address.column
 
+    const richText =
+      type === 's' && rawValue !== null
+        ? richStrings[Number(rawValue.join(''))]
+        : type === 'inlineStr'
+          ? richTextOf(inlineRuns)
+          : undefined
+
     return {
       address,
       reference: written,
@@ -61,6 +81,7 @@ export function* readSheet(
       ...(formula === null ? {} : { formula: formula.join('') }),
       ...(sharedIndex === undefined ? {} : { sharedIndex, ownsSharedRange }),
       ...(styleIndex === undefined ? {} : { styleIndex }),
+      ...(richText === undefined ? {} : { richText }),
     }
   }
 
@@ -93,6 +114,9 @@ export function* readSheet(
           sharedIndex = undefined
           ownsSharedRange = false
           inlineText = null
+          inlineRuns = []
+          inInlineRun = false
+          inlineRPrElement = undefined
           inPhonetic = false
           column++
           // A self closing cell gets no close event.
@@ -116,6 +140,14 @@ export function* readSheet(
         case 'rPh':
           inPhonetic = true
           break
+        case 'r':
+          inInlineRun = true
+          inlineRunText = []
+          inlineRPrElement = undefined
+          break
+        case 'rPr':
+          if (!event.selfClosing) inlineRPrStart = event.start
+          break
         case 't':
           inlineText ??= []
           inInlineText = !event.selfClosing && !inPhonetic
@@ -127,7 +159,10 @@ export function* readSheet(
     if (event.kind === 'text') {
       if (inValue && rawValue !== null) rawValue.push(event.text)
       else if (inFormula && formula !== null) formula.push(event.text)
-      else if (inInlineText && inlineText !== null) inlineText.push(event.text)
+      else if (inInlineText && inlineText !== null) {
+        inlineText.push(event.text)
+        if (inInlineRun) inlineRunText.push(event.text)
+      }
       continue
     }
 
@@ -140,6 +175,20 @@ export function* readSheet(
         break
       case 't':
         inInlineText = false
+        break
+      case 'rPr':
+        if (inlineRPrStart !== -1) {
+          inlineRPrElement = utf8.decode(bytes.subarray(inlineRPrStart, event.end))
+          inlineRPrStart = -1
+        }
+        break
+      case 'r':
+        if (inInlineRun) {
+          const font = inlineRPrElement === undefined ? undefined : runFont(inlineRPrElement)
+          const text = inlineRunText.join('')
+          inlineRuns.push(font === undefined ? { text } : { text, font })
+          inInlineRun = false
+        }
         break
       case 'rPh':
         inPhonetic = false

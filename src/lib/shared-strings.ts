@@ -1,4 +1,6 @@
+import type { RichText, RichTextRun } from './cell-input.js'
 import { XlsxError } from './errors.js'
+import { richTextOf, runFont } from './rich-text.js'
 import { bumpAttribute, findUnwritableCharacter, readXml } from './xml.js'
 
 /**
@@ -13,6 +15,8 @@ interface SharedString {
    * must not be pointed at one.
    */
   readonly plain: boolean
+  /** The formatted runs, when the entry is meaningfully rich. */
+  readonly rich: RichText | undefined
 }
 
 function readEntries(xml: string): readonly SharedString[] {
@@ -23,28 +27,48 @@ function readEntries(xml: string): readonly SharedString[] {
   let inPhonetic = false
   let inText = false
 
+  let runs: RichTextRun[] = []
+  let inRun = false
+  let runText: string[] = []
+  let rPrStart = -1
+  let rPrElement: string | undefined
+
   for (const event of readXml(xml)) {
     if (event.kind === 'open') {
       if (event.localName === 'si') {
         current = []
         plain = true
+        runs = []
       } else if (event.localName === 'rPh') {
         inPhonetic = true
         plain = false
-      } else if (event.localName === 'r') plain = false
+      } else if (event.localName === 'r') {
+        plain = false
+        inRun = true
+        runText = []
+        rPrElement = undefined
+      } else if (event.localName === 'rPr' && !event.selfClosing) rPrStart = event.start
       else if (event.localName === 't' && !event.selfClosing) inText = !inPhonetic
       continue
     }
 
     if (event.kind === 'text') {
       if (inText && current !== null) current.push(event.text)
+      if (inText && inRun) runText.push(event.text)
       continue
     }
 
     if (event.localName === 't') inText = false
     else if (event.localName === 'rPh') inPhonetic = false
-    else if (event.localName === 'si' && current !== null) {
-      entries.push({ text: current.join(''), plain })
+    else if (event.localName === 'rPr' && rPrStart !== -1) {
+      rPrElement = xml.slice(rPrStart, event.end)
+      rPrStart = -1
+    } else if (event.localName === 'r' && inRun) {
+      const font = rPrElement === undefined ? undefined : runFont(rPrElement)
+      runs.push(font === undefined ? { text: runText.join('') } : { text: runText.join(''), font })
+      inRun = false
+    } else if (event.localName === 'si' && current !== null) {
+      entries.push({ text: current.join(''), plain, rich: richTextOf(runs) })
       current = null
     }
   }
@@ -54,6 +78,13 @@ function readEntries(xml: string): readonly SharedString[] {
 
 export function readSharedStrings(xml: string): readonly string[] {
   return readEntries(xml).map((entry) => entry.text)
+}
+
+/** The rich runs of every entry, aligned with `readSharedStrings` by index, so a
+ * cell's `t="s"` value resolves to its formatting; undefined where an entry is
+ * plain text. */
+export function readRichSharedStrings(xml: string): readonly (RichText | undefined)[] {
+  return readEntries(xml).map((entry) => entry.rich)
 }
 
 export interface AppendedStrings {

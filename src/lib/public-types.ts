@@ -8,7 +8,7 @@ import type {
   FontFormat,
   ReadFill,
 } from './styles-writer.js'
-import type { CellInput } from './cell-input.js'
+import type { CellInput, RichText, RichTextRun } from './cell-input.js'
 import type { SheetProtection } from './patch.js'
 import type { SheetState } from './workbook.js'
 import type { Hyperlink } from './hyperlinks.js'
@@ -22,6 +22,7 @@ import type {
 } from './page.js'
 
 export type { Hyperlink }
+export type { RichText, RichTextRun }
 export type { DocumentProperties }
 export type { PageSetup, PageMargins, HeaderFooter, HeaderFooterSection, PageBreaks }
 
@@ -59,6 +60,12 @@ export interface Cell {
    */
   readonly reference: string
   readonly value: CellValue
+  /**
+   * The cell's string as formatted runs, present only when it carries more than
+   * one run or a run with formatting of its own. `value` still holds the whole
+   * string flattened, so a caller that only wants the text can ignore this.
+   */
+  readonly richText?: RichText
   readonly formula?: CellFormula
   readonly numberFormat?: string
   /** Absent when the cell uses the default font, so carries none of its own. */
