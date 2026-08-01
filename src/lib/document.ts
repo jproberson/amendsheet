@@ -2062,6 +2062,12 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
     // part and media extension's content type on the draft.
     contributeImages(draft, sheetImages, removed)
 
+    // A copySheet duplicated dependent parts whose bytes are already staged; their
+    // content types declare through the same draft as the contributors above.
+    for (const override of addedOverrides) {
+      draft.declareOverride(override.path, override.contentType)
+    }
+
     // contributeTables writes this session's added tables, declaring each table
     // part's content type on the draft.
     contributeTables(draft, sheetTables, removed)
@@ -2164,9 +2170,6 @@ export function readWorkbook(bytes: Uint8Array): Workbook {
         addedRefs,
       )
       for (const path of removedExisting) updated = withoutOverride(updated, path)
-      for (const override of addedOverrides) {
-        updated = withContentTypeOverride(updated, override.path, override.contentType)
-      }
       if (createdCoreProperties) {
         updated = withContentTypeOverride(
           updated,
