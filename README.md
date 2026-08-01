@@ -84,13 +84,30 @@ const out = workbook.toBytes() // synchronous
 await writeFile('out.xlsx', out)
 ```
 
-`set` takes a number, string, boolean, `Date`, `{ formula }`, or `null` to clear
-a cell. Pass `{ numberFormat }` to choose a format code; without one the cell
-keeps whatever formatting it had. If the
+`set` takes a number, string, boolean, `Date`, `{ formula }`, `{ runs }` for rich
+text, or `null` to clear a cell. Pass `{ numberFormat }` to choose a format code;
+without one the cell keeps whatever formatting it had. If the
 cell or its row isn't there yet, both get created, and the declared dimension
 grows to cover them. The style of a replaced cell is kept, so its formatting
 survives the edit. Writing a `Date` into a cell with no date format applies one,
 reusing a format the file already has where possible.
+
+Rich text lets one cell mix fonts. Pass `{ runs }`, each run a stretch of text
+with an optional `font` that inherits the cell's where absent; it is written as an
+inline string. Reading gives the whole string back as `cell.value` and the runs as
+`cell.richText`, so code that only wants the text can ignore the formatting.
+
+```ts
+const workbook = readWorkbook(bytes)
+const sheet = workbook.sheet('Summary') ?? workbook.sheets[0]
+
+sheet.set('A1', {
+  runs: [{ text: 'Total: ' }, { text: '42', font: { bold: true, color: 'FF0000' } }],
+})
+const cell = sheet.cell('A1')
+cell?.value // { kind: 'text', value: 'Total: 42' }
+cell?.richText?.runs // the two runs, the second bold and red
+```
 
 Formatting goes through the same options, and composes into one cell format:
 

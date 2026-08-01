@@ -71,7 +71,8 @@ const sheet = readWorkbook(bytes).sheets[0]
 
 for (const cell of sheet?.cells() ?? []) {
   // cell.reference ('B2'), cell.value, cell.formula, cell.numberFormat,
-  // cell.font, cell.fill, cell.border, cell.alignment, cell.comment, cell.hyperlink
+  // cell.font, cell.fill, cell.border, cell.alignment, cell.comment, cell.hyperlink,
+  // cell.richText (present only when the string carries formatted runs)
   if (cell.value.kind === 'number') cell.value.value
   if (cell.value.kind === 'text') cell.value.value
   if (cell.value.kind === 'date') cell.value.value // a Date
@@ -83,6 +84,19 @@ const one = sheet?.cell('B2') // undefined if the sheet stores nothing there
 `cell.value` is a discriminated union on `kind`: `'number'`, `'text'`, `'date'`,
 `'boolean'`, `'error'`, `'empty'`. A cell that holds only formatting, or that a
 comment sits on with no value of its own, still appears, as `kind: 'empty'`.
+
+A string whose parts carry their own formatting reads its whole text as
+`cell.value` and its runs as `cell.richText`, so code that only wants the text
+ignores the runs:
+
+```ts
+const cell = readWorkbook(bytes).sheets[0]?.cell('A1')
+cell?.value // { kind: 'text', value: 'Total: 42' } — always the flattened text
+for (const run of cell?.richText?.runs ?? []) {
+  run.text // one stretch of the string
+  run.font // its font, when the stretch has one: { bold, italic, size, color, name, ... }
+}
+```
 
 ## Writing cells
 
@@ -97,6 +111,15 @@ sheet?.set('A5', { formula: 'SUM(A1:A4)' })
 sheet?.set('A6', null) // clears the value, keeps the formatting
 sheet?.set('A7', 1234.5, { numberFormat: '"$"#,##0.00' })
 
+// Rich text: one cell mixing fonts. Each run's font is optional and inherits the
+// cell's where absent. Written as an inline string; reads back on cell.richText.
+sheet?.set('A8', {
+  runs: [
+    { text: 'Total: ' },
+    { text: '42', font: { bold: true, color: 'FF0000' } },
+  ],
+})
+
 // A block of values from a top-left cell; options style every cell written.
 sheet?.setValues('A1', [
   ['name', 'qty'],
@@ -106,8 +129,8 @@ const block = sheet?.getValues('A1:B2') // CellValue[][]; a gap is { kind: 'empt
 ```
 
 `set(reference, value, options?)` takes a `number | string | boolean | Date |
-{ formula } | null`. A missing cell, its row, and the sheet dimension are all
-created to cover it. A replaced cell keeps its style. `set` throws
+{ formula } | { runs } | null`. A missing cell, its row, and the sheet dimension
+are all created to cover it. A replaced cell keeps its style. `set` throws
 `unwritable-value` for a value a chosen format cannot hold, and records nothing
 when it does, so the rest of a batch still writes.
 
