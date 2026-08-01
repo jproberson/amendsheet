@@ -713,7 +713,6 @@ export function contributeTables(
 ): { tableParts: string[] } {
   const encoder = new TextEncoder()
   const tableParts: string[] = []
-  let tableNumber = 0
 
   for (const [path, specs] of tables) {
     if (removedSheets.has(path)) continue
@@ -722,9 +721,8 @@ export function contributeTables(
     const relationshipsPath = relationshipsPathFor(path)
     let relsXml = draft.text(relationshipsPath)
     for (const spec of specs) {
-      do {
-        tableNumber += 1
-      } while (draft.has(`xl/tables/table${tableNumber}.xml`))
+      // The number is the table's id as well as its part name.
+      const tableNumber = draft.freeNumber((n) => `xl/tables/table${n}.xml`)
       const tablePath = `xl/tables/table${tableNumber}.xml`
       draft.setBytes(tablePath, encoder.encode(buildTablePart(tableNumber, spec)))
       tableParts.push(tablePath)

@@ -105,7 +105,9 @@ export function contributeImages(
   const encoder = new TextEncoder()
   const drawingParts: string[] = []
   const imageExtensions = new Set<ImageType>()
-  let drawingNumber = 0
+  // A media path embeds the image type, so numbers are shared across types —
+  // image1.png then image2.jpeg, never two image1s. A per-path freeNumber would
+  // hand out image1.jpeg beside image1.png, so this one stays a shared counter.
   let mediaNumber = 0
 
   for (const [path, imageList] of images) {
@@ -114,13 +116,9 @@ export function contributeImages(
     const relationshipsPath = relationshipsPathFor(path)
     const existingDrawing = draft.relationshipTarget(path, DRAWING_RELATIONSHIP)
 
-    let drawingPath = existingDrawing
-    if (drawingPath === undefined) {
-      do {
-        drawingNumber += 1
-      } while (draft.has(`xl/drawings/drawing${drawingNumber}.xml`))
-      drawingPath = `xl/drawings/drawing${drawingNumber}.xml`
-    }
+    const drawingPath =
+      existingDrawing ??
+      `xl/drawings/drawing${draft.freeNumber((n) => `xl/drawings/drawing${n}.xml`)}.xml`
     const drawingRelsPath = relationshipsPathFor(drawingPath)
     let drawingRels = draft.text(drawingRelsPath) ?? EMPTY_RELATIONSHIPS
     const existingDrawingXml = draft.text(drawingPath)
