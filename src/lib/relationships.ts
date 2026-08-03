@@ -17,8 +17,11 @@ export function readRelationships(xml: string, part: string): ReadonlyMap<string
     if (event.kind !== 'open' || event.localName !== 'Relationship') continue
 
     const id = event.attributes.get('Id')
-    if (id === undefined)
-      throw new XlsxError('malformed-xml', 'Relationship is missing Id', { part })
+    // Nothing can reference a relationship that carries no Id — an r:id lookup
+    // would never find it — so a dead one like this is skipped rather than made
+    // to reject a file the spreadsheet application opens without complaint. Seen
+    // in a pivot-cache rels in the wild (POI 64450).
+    if (id === undefined) continue
 
     const target = event.attributes.get('Target')
     if (target === undefined)
