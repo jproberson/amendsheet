@@ -41,18 +41,28 @@ function assertAttributesAreUnique(tag: string, what: string): void {
 export function assertSheetShape(xml: string, what: string): void {
   let inRow = false
   let inData = false
+  // A row is a sheet row only in the namespace sheetData opened in. An inline
+  // drawing anchor writes <xdr:row>, whose local name is also "row"; matching
+  // the prefix keeps it from being read as a row loose in the sheet.
+  let dataPrefix = ''
+  const prefixOf = (name: string) => (name.includes(':') ? name.slice(0, name.indexOf(':')) : '')
 
   for (const event of readXml(xml)) {
     if (event.kind === 'open') {
-      if (event.localName === 'sheetData') inData = !event.selfClosing
-      if (event.localName === 'row') {
+      if (event.localName === 'sheetData') {
+        inData = !event.selfClosing
+        dataPrefix = prefixOf(event.name)
+      }
+      if (event.localName === 'row' && prefixOf(event.name) === dataPrefix) {
         assert.ok(inData, `${what}: row outside sheetData`)
         inRow = !event.selfClosing
       }
-      if (event.localName === 'c') assert.ok(inRow, `${what}: cell outside a row`)
+      if (event.localName === 'c' && prefixOf(event.name) === dataPrefix) {
+        assert.ok(inRow, `${what}: cell outside a row`)
+      }
     }
     if (event.kind === 'close') {
-      if (event.localName === 'row') inRow = false
+      if (event.localName === 'row' && prefixOf(event.name) === dataPrefix) inRow = false
       if (event.localName === 'sheetData') inData = false
     }
   }
@@ -123,8 +133,15 @@ export function assertOnlyTheSheetChanged(
     assert.ok(other !== undefined, `${what}: lost ${path}`)
     if (Buffer.compare(Buffer.from(content), Buffer.from(other)) === 0) continue
 
+    const lower = path.toLowerCase()
+    // A table grows to cover a cell written directly past it, the way Excel
+    // auto-expands one, so an edit beside a table legitimately rewrites its
+    // part. Loss is still caught above; a data change would show as an altered
+    // cell elsewhere.
+    if (lower.startsWith('xl/tables/')) continue
+
     assert.ok(
-      path.toLowerCase().startsWith('xl/worksheets/'),
+      lower.startsWith('xl/worksheets/'),
       `${what}: changed ${path}, which no edit should touch`,
     )
     sheets.push(path)

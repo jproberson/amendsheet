@@ -62,16 +62,19 @@ test('reads the shared strings of every fixtures file that has them', async () =
     const part = container.parts.get('xl/sharedStrings.xml')
     if (part === undefined) continue
 
-    const strings = readSharedStrings(new TextDecoder().decode(part))
-    const declared = /uniqueCount="(\d+)"/.exec(new TextDecoder().decode(part))?.[1]
+    const text = new TextDecoder().decode(part)
+    const strings = readSharedStrings(text)
 
-    if (declared !== undefined) {
-      assert.equal(
-        strings.length,
-        Number(declared),
-        `${file}: read ${strings.length} strings but the table declares ${declared}`,
-      )
-    }
+    // Against the actual <si> count, not the table's uniqueCount attribute: a
+    // real file can declare a count it does not hold — InlineString.xlsx says
+    // uniqueCount="1" over an empty table, its one string living inline in the
+    // sheet — and the reader's job is to read every entry that is there.
+    const present = (text.match(/<(?:\w+:)?si[\s>/]/g) ?? []).length
+    assert.equal(
+      strings.length,
+      present,
+      `${file}: read ${strings.length} strings but the table holds ${present}`,
+    )
     tables++
     entries += strings.length
   }

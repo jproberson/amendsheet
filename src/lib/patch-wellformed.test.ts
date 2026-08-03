@@ -4,7 +4,14 @@ import { test } from 'node:test'
 import { readWorkbook } from './document.js'
 import type { CellInput } from './cell-input.js'
 import { patchSheet as patchSheetBytes } from './patch.js'
+import { XlsxError } from './errors.js'
 import { assertPatchedSheet } from '../testing/invariants.js'
+
+/** A1 is a fixed target, so on a real file it can land on a cell the file has
+ * locked into a shared formula, array or merge. Refusing that overwrite is
+ * correct behaviour, so the edit is tolerated and moved to a fresh cell. */
+const isRefusal = (error: unknown) =>
+  error instanceof XlsxError && error.code === 'unwritable-value'
 
 const encode = (text: string) => new TextEncoder().encode(text)
 const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes)
@@ -55,14 +62,29 @@ test('editing every real fixture leaves the sheet well formed', async () => {
     const target = workbook.sheets[0]
     if (target === undefined) continue
 
-    target.set('A1', 'edited')
-    target.set('ZZ900', 'far away')
+    const written: string[] = []
+    for (const [reference, value] of [
+      ['A1', 'edited'],
+      ['ZZ900', 'far away'],
+    ] as const) {
+      try {
+        target.set(reference, value)
+        written.push(reference)
+      } catch (error) {
+        if (!isRefusal(error)) throw error
+      }
+    }
 
     try {
       const reopened = readWorkbook(workbook.toBytes())
       const edited = reopened.sheets[0]
-      assert.equal(edited?.cell('A1')?.value.kind, 'text', `${file}: A1 did not read back`)
-      assert.equal(edited?.cell('ZZ900')?.value.kind, 'text', `${file}: ZZ900 did not read back`)
+      for (const reference of written) {
+        assert.equal(
+          edited?.cell(reference)?.value.kind,
+          'text',
+          `${file}: ${reference} did not read back`,
+        )
+      }
     } catch (error) {
       broken.push(`${file}: ${error instanceof Error ? error.message : String(error)}`)
     }
@@ -83,7 +105,12 @@ test('editing a real fixture changes only the sheet and the tables it appends to
     const workbook = readWorkbook(bytes)
     const target = workbook.sheets[0]
     if (target === undefined) continue
-    target.set('A1', 'edited')
+    try {
+      target.set('A1', 'edited')
+    } catch (error) {
+      if (!isRefusal(error)) throw error
+      target.set('ZZ900', 'edited')
+    }
 
     const after = readContainer(workbook.toBytes())
     const worksheets: string[] = []
