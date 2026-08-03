@@ -400,6 +400,15 @@ What a minor release is allowed to do, so you know which branches are safe:
   there would never show.
 - A digital signature survives as a part but any edit invalidates it, since the
   package is rebuilt and the bytes it signed change.
+- A workbook saved as Strict Open XML (ISO 29500 Strict, Excel's _Strict Open XML
+  Spreadsheet_ option) is not read yet. Its parts are related through a different
+  namespace than the transitional one every other file uses, so the reader cannot
+  find the workbook and rejects the file. Reading one is the next format on the
+  list.
+- A password-protected workbook is an encrypted OLE2 container rather than a zip,
+  and is refused with a message saying to decrypt it first. A file that declares
+  no `styles.xml` reads and round-trips, but a number format cannot be added to it
+  until the table is created on demand.
 - Nothing evaluates formulas, so a written one has no value until a spreadsheet
   application opens the file.
 - A part the edit does not touch is copied through still compressed, so a large
